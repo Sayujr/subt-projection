@@ -72,10 +72,16 @@
       <label>SubT floor (cap projections)</label>
       <input class="pace-input" type="text" id="floor-pace" value="3:20" data-pace="1">
     </div>
-    <div style="margin-top:6px;">
-      <button class="secondary" style="font-size:11px;" onclick="setAnchorToday()">Set anchor to today</button>
-      <button class="secondary" style="font-size:11px;" onclick="setAnchorToData()">Reset to latest data</button>
+    <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorToday()">Today</button>
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorToData()">Latest data</button>
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorOffset(1)">1 mo ago</button>
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorOffset(3)">3 mo ago</button>
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorOffset(6)">6 mo ago</button>
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorOffset(12)">1 yr ago</button>
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorToPeak()">Peak (Aug '25)</button>
     </div>
+    <div class="helper">Past-date buttons set BOTH anchor + current SubT to that date's actual value — so you can see "what projection would I have made then?" vs how things actually went.</div>
 
     <h2>Phase rates (s/km/mo, drag to override)</h2>
     <div class="helper">Phase boundaries: REBUILD until peak, PRE-SUB-4 (peak → 4:00), POST-SUB-4 (4:00 → 3:30), ELITE (3:30 → floor).</div>
@@ -398,13 +404,48 @@ function applyState(s) {
   }
 }
 
+// Helper: find the monthly data point closest to a target date.
+// Returns {date: 'YYYY-MM-DD', pace: number} or null.
+function nearestMonthlyPoint(targetDateStr) {
+  if (!pastData || !pastData.monthly || !pastData.monthly.length) return null;
+  const target = new Date(targetDateStr).getTime();
+  const valid = pastData.monthly.filter(p => !p.is_outlier);
+  let best = null, bestDist = Infinity;
+  for (const p of valid) {
+    const d = Math.abs(new Date(p.date).getTime() - target);
+    if (d < bestDist) { bestDist = d; best = p; }
+  }
+  return best;
+}
+
 function setAnchorToday() {
-  const today = new Date();
-  document.getElementById('anchor-date').value = today.toISOString().slice(0,10);
+  // Today + blank pace override = use latest data pace
+  document.getElementById('anchor-date').value = todayISO();
+  document.getElementById('cur-pace').value = '';
   render();
 }
 function setAnchorToData() {
-  document.getElementById('anchor-date').value = pastData.monthly[pastData.monthly.length-1].date;
+  document.getElementById('anchor-date').value = '';
+  document.getElementById('cur-pace').value = '';
+  render();
+}
+function setAnchorOffset(monthsBack) {
+  // Anchor = today minus N months. Current SubT = monthly median nearest that date.
+  const d = new Date();
+  d.setMonth(d.getMonth() - monthsBack);
+  const dateStr = d.toISOString().slice(0,10);
+  const point = nearestMonthlyPoint(dateStr);
+  document.getElementById('anchor-date').value = dateStr;
+  document.getElementById('cur-pace').value = point ? fmtPace(point.pace) : '';
+  render();
+}
+function setAnchorToPeak() {
+  // Anchor to the all-time-fastest monthly point
+  if (!pastData || !pastData.monthly) return;
+  const valid = pastData.monthly.filter(p => !p.is_outlier);
+  const peak = valid.reduce((a, b) => (a.pace <= b.pace ? a : b));
+  document.getElementById('anchor-date').value = peak.date;
+  document.getElementById('cur-pace').value = fmtPace(peak.pace);
   render();
 }
 
