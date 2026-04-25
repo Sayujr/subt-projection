@@ -1,0 +1,41 @@
+name: Refresh data from intervals.icu
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # daily at 01:00 UTC (≈ 06:30 IST)
+  workflow_dispatch:     # manual trigger button in GitHub UI
+
+permissions:
+  contents: write   # allow committing back to the repo
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install httpx
+        run: pip install httpx
+
+      - name: Refresh data.json
+        env:
+          INTERVALS_ICU_API_KEY: ${{ secrets.INTERVALS_ICU_API_KEY }}
+          INTERVALS_ICU_ATHLETE_ID: ${{ secrets.INTERVALS_ICU_ATHLETE_ID }}
+        run: python refresh_data.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data.json)" ]; then
+            git add data.json
+            git commit -m "Auto-refresh data.json [skip ci]"
+            git push
+            echo "Pushed updated data.json"
+          else
+            echo "No changes to data.json"
+          fi
