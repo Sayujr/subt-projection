@@ -65,7 +65,7 @@
     </div>
     <div class="row">
       <label>Projection horizon (months)</label>
-      <input type="range" id="horizon" min="12" max="60" step="3" value="36">
+      <input type="range" id="horizon" min="3" max="60" step="1" value="36">
       <span class="num" id="horizon-num">36</span>
     </div>
     <div class="row">
@@ -149,6 +149,14 @@
   <div>
     <div class="panel">
       <div id="chart"></div>
+    </div>
+    <div class="panel" id="compare-panel" style="margin-top:14px; display:none;">
+      <h2 style="margin-top:0">Compare two points</h2>
+      <div id="compare-content"></div>
+      <button class="secondary" style="font-size:11px; margin-top:8px;" onclick="clearSelection()">Clear selection</button>
+    </div>
+    <div class="panel" style="margin-top:14px; background:#f1f5f9;">
+      <span style="font-size:12px; color:#475569;">💡 <b>Tip:</b> Click any point on any line in the chart to select it. Click a second point to see the comparison (delta SubT, race-time gain, rate of change).</span>
     </div>
     <div class="panel" style="margin-top:14px;">
       <h2>Milestones — when each 5K race goal arrives</h2>
@@ -420,6 +428,92 @@ function saveTodaySnapshot(pace) {
 let lastVisitMarker = null;  // {date, pace} or null — set on init
 
 // ============================================================
+// Click-to-compare two points
+// ============================================================
+let selectedPoints = [];  // array of up to 2: {date: Date, pace: number, source: string}
+
+function onChartClick(ev) {
+  if (!ev || !ev.points || !ev.points.length) return;
+  const p = ev.points[0];
+  // Some traces (annotations etc) may not have meaningful data — guard
+  if (p.x == null || p.y == null) return;
+  const point = { date: new Date(p.x), pace: p.y, source: p.data.name || 'unknown' };
+  // If clicking the same point twice (within 1 day + 0.05 min/km), deselect it
+  const idx = selectedPoints.findIndex(s =>
+    Math.abs(s.date.getTime() - point.date.getTime()) < 86400000 &&
+    Math.abs(s.pace - point.pace) < 0.05);
+  if (idx >= 0) {
+    selectedPoints.splice(idx, 1);
+  } else {
+    if (selectedPoints.length >= 2) selectedPoints.shift();   // keep newest 2
+    selectedPoints.push(point);
+  }
+  render();
+}
+
+function clearSelection() { selectedPoints = []; render(); }
+
+function renderComparison() {
+  const panel = document.getElementById('compare-panel');
+  const content = document.getElementById('compare-content');
+  if (selectedPoints.length === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+
+  if (selectedPoints.length === 1) {
+    const p = selectedPoints[0];
+    content.innerHTML = `
+      <div style="font-size:13px;">
+        <b>1 point selected:</b> ${p.date.toLocaleDateString()} · SubT ${fmtPace(p.pace)} · 5K ${fmtTime(project5K(p.pace))} · HM ${fmtTime(projectHM(p.pace))} · FM ${fmtTime(projectFM(p.pace))}
+        <br><span style="color:#64748b;">Click another point to compare.</span>
+      </div>`;
+    return;
+  }
+
+  // Two points — order chronologically (a = earlier, b = later)
+  const sorted = [...selectedPoints].sort((x, y) => x.date - y.date);
+  const a = sorted[0], b = sorted[1];
+  const days = (b.date - a.date) / 86400000;
+  const months = days / 30.4;
+  const dPace = b.pace - a.pace;             // min/km
+  const dPaceSec = dPace * 60;                 // s/km
+  const dPacePerMo = dPaceSec / months;        // s/km/mo
+  const better = dPace < 0;
+  const a5k = project5K(a.pace), b5k = project5K(b.pace);
+  const aHM = projectHM(a.pace), bHM = projectHM(b.pace);
+  const aFM = projectFM(a.pace), bFM = projectFM(b.pace);
+  const direction = better ? 'IMPROVED' : 'REGRESSED';
+  const dirColor = better ? '#16a34a' : '#dc2626';
+
+  content.innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; font-size:12px;">
+      <div style="border-right:1px solid #e2e8f0; padding-right:14px;">
+        <div style="color:#64748b; font-size:10px; text-transform:uppercase;">Earlier point (A)</div>
+        <div style="font-size:14px; font-weight:600;">${a.date.toLocaleDateString()}</div>
+        <div>SubT: <b>${fmtPace(a.pace)}</b>/km</div>
+        <div>5K: ${fmtTime(a5k)}  ·  HM: ${fmtTime(aHM)}  ·  FM: ${fmtTime(aFM)}</div>
+        <div style="color:#94a3b8; font-size:10px;">${a.source}</div>
+      </div>
+      <div style="border-right:1px solid #e2e8f0; padding-right:14px;">
+        <div style="color:#64748b; font-size:10px; text-transform:uppercase;">Later point (B)</div>
+        <div style="font-size:14px; font-weight:600;">${b.date.toLocaleDateString()}</div>
+        <div>SubT: <b>${fmtPace(b.pace)}</b>/km</div>
+        <div>5K: ${fmtTime(b5k)}  ·  HM: ${fmtTime(bHM)}  ·  FM: ${fmtTime(bFM)}</div>
+        <div style="color:#94a3b8; font-size:10px;">${b.source}</div>
+      </div>
+      <div>
+        <div style="color:${dirColor}; font-size:11px; font-weight:700; text-transform:uppercase;">${direction} over ${days.toFixed(0)} days (${months.toFixed(1)} mo)</div>
+        <div>SubT: <b style="color:${dirColor}">${dPaceSec >= 0 ? '+' : ''}${dPaceSec.toFixed(1)}</b> s/km</div>
+        <div>5K: <b style="color:${dirColor}">${(b5k-a5k) >= 0 ? '+' : ''}${(b5k-a5k).toFixed(0)}</b> s</div>
+        <div>HM: <b style="color:${dirColor}">${(bHM-aHM) >= 0 ? '+' : ''}${(bHM-aHM).toFixed(0)}</b> s</div>
+        <div>FM: <b style="color:${dirColor}">${(bFM-aFM) >= 0 ? '+' : ''}${(bFM-aFM).toFixed(0)}</b> s</div>
+        <div style="margin-top:6px; padding-top:6px; border-top:1px solid #e2e8f0;">
+          Rate: <b style="color:${dirColor}">${dPacePerMo >= 0 ? '+' : ''}${dPacePerMo.toFixed(2)}</b> s/km per month
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
 // Main render
 // ============================================================
 let pastData = null;
@@ -652,7 +746,42 @@ function render() {
     showlegend: true,
   };
 
-  Plotly.react('chart', traces, layout, { displayModeBar: false, responsive: true });
+  // Add highlights for any selected comparison points
+  if (selectedPoints.length > 0) {
+    traces.push({
+      x: selectedPoints.map(p => p.date),
+      y: selectedPoints.map(p => p.pace),
+      mode: 'markers', type: 'scatter',
+      marker: {
+        color: 'rgba(0,0,0,0)',
+        size: 22,
+        line: { color: '#facc15', width: 4 },
+      },
+      name: 'selection',
+      hoverinfo: 'skip',
+      showlegend: false,
+    });
+    selectedPoints.forEach((p, i) => {
+      annotations.push({
+        x: p.date, y: p.pace,
+        text: i === 0 ? '<b>A</b>' : '<b>B</b>',
+        font: { color: '#a16207', size: 14 },
+        bgcolor: '#fef3c7', bordercolor: '#facc15', borderwidth: 1.5, borderpad: 3,
+        showarrow: false, xanchor: 'center', yanchor: 'middle',
+      });
+    });
+  }
+
+  Plotly.react('chart', traces, layout, { displayModeBar: false, responsive: true })
+    .then(() => {
+      const div = document.getElementById('chart');
+      // Bind once
+      if (!div._clickBound) {
+        div.on('plotly_click', onChartClick);
+        div._clickBound = true;
+      }
+    });
+  renderComparison();
 
   // Milestone table
   const tbody = document.getElementById('mile-tbody');
