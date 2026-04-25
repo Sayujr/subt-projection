@@ -118,8 +118,30 @@ async def main():
         })
 
     out = {"all_repeats": all_repeats, "monthly": monthly}
-
     out_path = os.path.join(os.path.dirname(__file__), "data.json")
+
+    # SAFETY GUARD: if new data is worse than existing, refuse to overwrite.
+    # Protects against ICU API hiccups, auth failures returning partial data, etc.
+    if os.path.exists(out_path):
+        with open(out_path) as f:
+            existing = json.load(f)
+        existing_repeats = len(existing.get("all_repeats", []))
+        existing_months = len(existing.get("monthly", []))
+        if len(all_repeats) < existing_repeats:
+            print(f"REFUSING to overwrite: new has {len(all_repeats)} repeats vs existing {existing_repeats} (-{existing_repeats - len(all_repeats)})")
+            print("This usually means an ICU API hiccup. Existing data preserved.")
+            sys.exit(1)
+        if len(monthly) < existing_months:
+            print(f"REFUSING to overwrite: new has {len(monthly)} monthly points vs existing {existing_months} (-{existing_months - len(monthly)})")
+            sys.exit(1)
+        # Per-month sanity: each existing month should still have ≥80% of its previous count
+        existing_by_month = {m['date']: m['n'] for m in existing.get("monthly", [])}
+        for m in monthly:
+            old_n = existing_by_month.get(m['date'])
+            if old_n is not None and m['n'] < old_n * 0.8:
+                print(f"REFUSING to overwrite: month {m['date']} has {m['n']} laps vs existing {old_n} (>20% drop)")
+                sys.exit(1)
+
     with open(out_path, "w") as f:
         json.dump(out, f, indent=1)
     print(f"Wrote {len(all_repeats)} repeats and {len(monthly)} monthly points to {out_path}")
