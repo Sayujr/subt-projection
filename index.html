@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SubT pace projection — interactive</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f8fafc; color: #1f2937; }
+  .wrap { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 14px; min-height: 100vh; }
+  @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } }
+  .panel { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 14px; }
+  h1 { font-size: 18px; margin: 0 0 4px 0; }
+  h2 { font-size: 13px; margin: 14px 0 6px 0; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; }
+  .sub { font-size: 12px; color: #64748b; margin-bottom: 10px; }
+  label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+  .row { display: grid; grid-template-columns: 1fr 65px; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .row .num { text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: #1e293b; font-weight: 600; }
+  input[type=range] { width: 100%; }
+  .scenario-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+  .scenario-grid > div { padding: 4px 6px; border-radius: 4px; font-size: 11px; }
+  .sc-fast        { background: #dcfce7; color: #166534; }
+  .sc-realistic   { background: #dbeafe; color: #1e40af; }
+  .sc-conservative{ background: #fee2e2; color: #991b1b; }
+  .scenario-grid label { font-size: 10px; }
+  .mini-input { font-size: 11px; padding: 1px 3px; width: 50px; text-align: right; border: 1px solid #cbd5e1; border-radius: 3px; font-variant-numeric: tabular-nums; }
+  button { background: #1f2937; color: white; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #374151; }
+  button.secondary { background: #94a3b8; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 4px 6px; text-align: left; border-bottom: 1px solid #f1f5f9; }
+  th { background: #f8fafc; font-weight: 600; color: #475569; font-size: 11px; }
+  .mile-row td { padding: 6px; }
+  .pill { display: inline-block; padding: 1px 6px; border-radius: 9px; font-size: 10px; font-weight: 600; color: white; }
+  #chart { height: 600px; }
+  .helper { font-size: 11px; color: #64748b; font-style: italic; margin-top: 4px; }
+  .pace-input-row { display: grid; grid-template-columns: 1fr 60px; gap: 6px; align-items: center; }
+  .pace-input { font-size: 13px; padding: 3px 5px; width: 100%; border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel" style="overflow-y:auto; max-height:100vh;">
+    <h1>SubT projection — interactive</h1>
+    <div class="sub">Drag sliders. Chart updates live. All rates in <b>seconds/km/month</b> (negative = improving).</div>
+
+    <h2>Anchors</h2>
+    <div class="row">
+      <label>Current SubT pace  <span style="font-weight:normal;color:#94a3b8;font-size:10px">(format M:SS)</span></label>
+      <input class="pace-input" type="text" id="cur-pace" value="5:19" data-pace="1">
+    </div>
+    <div class="row">
+      <label>Anchor date — "now" is this date</label>
+      <input class="pace-input" type="date" id="anchor-date" value="">
+    </div>
+    <div class="row">
+      <label>Past peak SubT (rebuild target)</label>
+      <input class="pace-input" type="text" id="peak-pace" value="4:32" data-pace="1">
+    </div>
+    <div class="row">
+      <label>Projection horizon (months)</label>
+      <input type="range" id="horizon" min="12" max="60" step="3" value="36">
+      <span class="num" id="horizon-num">36</span>
+    </div>
+    <div class="row">
+      <label>SubT floor (cap projections)</label>
+      <input class="pace-input" type="text" id="floor-pace" value="3:20" data-pace="1">
+    </div>
+    <div style="margin-top:6px;">
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorToday()">Set anchor to today</button>
+      <button class="secondary" style="font-size:11px;" onclick="setAnchorToData()">Reset to latest data</button>
+    </div>
+
+    <h2>Phase rates (s/km/mo, drag to override)</h2>
+    <div class="helper">Phase boundaries: REBUILD until peak, PRE-SUB-4 (peak → 4:00), POST-SUB-4 (4:00 → 3:30), ELITE (3:30 → floor).</div>
+
+    <div style="margin-top:8px;">
+      <strong style="font-size:12px;">REBUILD phase</strong>
+      <div class="scenario-grid">
+        <div class="sc-fast">Fast<br><input class="mini-input" type="number" id="r-rebuild-fast" value="-18" step="1"></div>
+        <div class="sc-realistic">Realistic<br><input class="mini-input" type="number" id="r-rebuild-real" value="-12" step="1"></div>
+        <div class="sc-conservative">Slow<br><input class="mini-input" type="number" id="r-rebuild-slow" value="-7" step="1"></div>
+      </div>
+    </div>
+    <div style="margin-top:6px;">
+      <strong style="font-size:12px;">PRE-SUB-4 phase  (peak → 4:00)</strong>
+      <div class="scenario-grid">
+        <div class="sc-fast">Fast<br><input class="mini-input" type="number" id="r-pre4-fast" value="-3" step="0.5"></div>
+        <div class="sc-realistic">Realistic<br><input class="mini-input" type="number" id="r-pre4-real" value="-2" step="0.5"></div>
+        <div class="sc-conservative">Slow<br><input class="mini-input" type="number" id="r-pre4-slow" value="-1" step="0.25"></div>
+      </div>
+    </div>
+    <div style="margin-top:6px;">
+      <strong style="font-size:12px;">POST-SUB-4 phase  (4:00 → 3:30)</strong>
+      <div class="scenario-grid">
+        <div class="sc-fast">Fast<br><input class="mini-input" type="number" id="r-post4-fast" value="-2" step="0.25"></div>
+        <div class="sc-realistic">Realistic<br><input class="mini-input" type="number" id="r-post4-real" value="-1.2" step="0.2"></div>
+        <div class="sc-conservative">Slow<br><input class="mini-input" type="number" id="r-post4-slow" value="-0.6" step="0.1"></div>
+      </div>
+    </div>
+    <div style="margin-top:6px;">
+      <strong style="font-size:12px;">ELITE phase  (3:30 → floor)</strong>
+      <div class="scenario-grid">
+        <div class="sc-fast">Fast<br><input class="mini-input" type="number" id="r-elite-fast" value="-0.8" step="0.1"></div>
+        <div class="sc-realistic">Realistic<br><input class="mini-input" type="number" id="r-elite-real" value="-0.4" step="0.1"></div>
+        <div class="sc-conservative">Slow<br><input class="mini-input" type="number" id="r-elite-slow" value="-0.15" step="0.05"></div>
+      </div>
+    </div>
+
+    <h2>What-if scenarios</h2>
+    <div class="row">
+      <label>Setbacks: months added (injuries, illness, life)</label>
+      <input type="range" id="setback-months" min="0" max="12" step="1" value="0">
+      <span class="num" id="setback-num">0</span>
+    </div>
+    <div class="helper">Adds delay to all projections — simulates how a setback shifts your timeline.</div>
+    <div class="row" style="margin-top:8px;">
+      <label>Race-readiness gap (%) — actual race time slower than Daniels by this much</label>
+      <input type="range" id="race-gap" min="0" max="20" step="1" value="11">
+      <span class="num" id="race-gap-num">11</span>
+    </div>
+    <div class="helper">Your data: SubT 4:32 → actual 5K 21:55 vs Daniels 19:30 = 11% gap. NSA-only training keeps this gap. Race-specific work (5K-pace intervals + race practice) closes it. Set to 0 if assuming fully race-sharp.</div>
+
+    <div class="row" style="margin-top:8px;">
+      <label>Apr 2025 outlier in past trajectory?</label>
+      <select id="show-outlier"><option value="hide" selected>hide</option><option value="show">show</option></select>
+      <span></span>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <label>Milestone label boxes on chart?</label>
+      <select id="show-milestone-labels"><option value="hide" selected>hide</option><option value="show">show</option></select>
+      <span></span>
+    </div>
+    <div class="helper">Off by default — keeps the chart clean. Stars + horizontal lines always show. Hover any star/line for details. The full milestone table below the chart is always visible.</div>
+
+    <div style="margin-top:14px; display:flex; gap:6px;">
+      <button onclick="resetDefaults()">Reset to defaults</button>
+      <button class="secondary" onclick="copyShareUrl()">Copy share URL</button>
+    </div>
+    <div class="helper" style="margin-top:6px;">Settings auto-save to your browser. Reload preserves them. Share URL embeds your settings.</div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <div id="chart"></div>
+    </div>
+    <div class="panel" style="margin-top:14px;">
+      <h2>Milestones — when each 5K race goal arrives</h2>
+      <table id="mile-table">
+        <thead><tr>
+          <th>Race goal</th><th>Required SubT</th>
+          <th>Fast</th><th>Realistic</th><th>Slow</th>
+          <th>Realistic 5K</th><th>HM</th><th>FM</th>
+        </tr></thead>
+        <tbody id="mile-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Daniels VDOT table — T pace (min/km) → 5K, HM, FM (seconds)
+// ============================================================
+const VDOT = [
+  [5.45, 1626, 7491, 15600],
+  [5.20, 1488, 6843, 14164],
+  [5.00, 1351, 6213, 12854],
+  [4.90, 1313, 6037, 12476],
+  [4.80, 1273, 5854, 12092],
+  [4.71, 1238, 5689, 11744],
+  [4.63, 1197, 5559, 11491],
+  [4.55, 1168, 5402, 11148],
+  [4.47, 1140, 5260, 10851],
+  [4.38, 1108, 5126, 10568],
+  [4.30, 1080, 5033, 10463],
+  [4.20, 1052, 4866, 10074],
+  [4.13, 1027, 4795,  9999],
+  [4.05, 1007, 4691,  9784],
+  [3.97,  985, 4595,  9590],
+  [3.85,  938, 4380,  9148],
+  [3.72,  908, 4241,  8862],
+  [3.60,  873, 4079,  8527],
+  [3.48,  840, 3922,  8231],
+  [3.37,  810, 3777,  7935],
+  [3.28,  781, 3639,  7658],
+];
+
+function interpVDOT(subt, idx) {
+  const sorted = [...VDOT].sort((a,b) => a[0]-b[0]);
+  if (subt <= sorted[0][0]) return sorted[0][idx];
+  if (subt >= sorted[sorted.length-1][0]) return sorted[sorted.length-1][idx];
+  for (let i = 0; i < sorted.length-1; i++) {
+    if (sorted[i][0] <= subt && subt < sorted[i+1][0]) {
+      const t = (subt - sorted[i][0]) / (sorted[i+1][0] - sorted[i][0]);
+      return sorted[i][idx] + t * (sorted[i+1][idx] - sorted[i][idx]);
+    }
+  }
+  return sorted[sorted.length-1][idx];
+}
+
+// Race-readiness gap (fraction). Set in render() from slider.
+let RACE_GAP = 0.11;
+
+function project5K(subt) { return interpVDOT(subt, 1) * (1 + RACE_GAP); }
+function projectHM(subt) { return interpVDOT(subt, 2) * (1 + RACE_GAP); }
+function projectFM(subt) { return interpVDOT(subt, 3) * (1 + RACE_GAP); }
+
+function requiredSubtFor5k(target5kSec) {
+  // Inverse: ACTUAL race time target = Daniels(subt) * (1 + gap)
+  // So Daniels-predicted time we need to look up = target / (1 + gap)
+  const danielsTarget = target5kSec / (1 + RACE_GAP);
+  const sorted = [...VDOT].sort((a,b) => a[1]-b[1]);
+  if (danielsTarget <= sorted[0][1]) return sorted[0][0];
+  if (danielsTarget >= sorted[sorted.length-1][1]) return sorted[sorted.length-1][0];
+  for (let i = 0; i < sorted.length-1; i++) {
+    if (sorted[i][1] <= danielsTarget && danielsTarget < sorted[i+1][1]) {
+      const t = (danielsTarget - sorted[i][1]) / (sorted[i+1][1] - sorted[i][1]);
+      return sorted[i][0] + t * (sorted[i+1][0] - sorted[i][0]);
+    }
+  }
+  return sorted[sorted.length-1][0];
+}
+
+// ============================================================
+// Pace formatting
+// ============================================================
+function parsePace(s) {
+  if (typeof s !== 'string') return null;
+  const m = s.trim().match(/^(\d+):(\d{1,2})$/);
+  if (!m) return null;
+  const mins = +m[1], secs = +m[2];
+  if (secs >= 60 || mins < 0 || mins > 30) return null;
+  return mins + secs/60;
+}
+function fmtPace(p) {
+  if (p == null || isNaN(p)) return '—';
+  const m = Math.floor(p); let s = Math.round((p-m)*60);
+  if (s === 60) return `${m+1}:00`;
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+function fmtTime(secs) {
+  if (secs == null || isNaN(secs)) return '—';
+  secs = Math.round(secs);
+  if (secs >= 3600) {
+    const h = Math.floor(secs/3600);
+    const m = Math.floor((secs%3600)/60);
+    const s = secs%60;
+    return `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  }
+  const m = Math.floor(secs/60); const s = secs%60;
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+
+// ============================================================
+// Build forward path with phase-specific rates
+// ============================================================
+function buildPath(startPace, peakPace, floorPace, horizonMonths, rates, setbackMonths) {
+  const pts = [{m: 0, pace: startPace}];
+  let cur = startPace;
+  for (let m = 1; m <= horizonMonths; m++) {
+    let r;
+    if (cur > peakPace + 0.02)       r = rates.rebuild;
+    else if (cur > 4.0)              r = rates.pre4;
+    else if (cur > 3.5)              r = rates.post4;
+    else                             r = rates.elite;
+    cur = cur + r / 60.0;
+    cur = Math.max(cur, floorPace);
+    pts.push({m, pace: cur});
+  }
+  // Apply setback delay: shift the curve to the right by setbackMonths
+  // (i.e., what was at month M now happens at month M + setbackMonths).
+  if (setbackMonths > 0) {
+    return pts.map(p => ({m: p.m + setbackMonths, pace: p.pace}));
+  }
+  return pts;
+}
+
+function findArrivalMonth(path, targetPace) {
+  for (const p of path) if (p.pace <= targetPace) return p.m;
+  return null;
+}
+
+// ============================================================
+// Race targets
+// ============================================================
+const RACE_TARGETS = [
+  {sec: 22*60, label: 'Sub-22 5K',                      color: '#71717a'},
+  {sec: 21*60, label: 'Sub-21 5K',                      color: '#0ea5e9'},
+  {sec: 20*60, label: 'Sub-20 — REBUILT',               color: '#06b6d4'},
+  {sec: 19*60, label: 'Sub-19 — strong amateur',        color: '#10b981'},
+  {sec: 18*60, label: 'Sub-18 — fast amateur',          color: '#f59e0b'},
+  {sec: 17*60, label: 'Sub-17 — sub-elite',             color: '#dc2626'},
+  {sec: 16*60, label: 'Sub-16 — elite amateur',         color: '#7c3aed'},
+  {sec: 15*60, label: 'Sub-15 — top elite',             color: '#9333ea'},
+];
+
+// ============================================================
+// State + persistence
+// ============================================================
+const DEFAULTS = {
+  cur: '5:19', peak: '4:32', floor: '3:20', horizon: 36, setback: 0,
+  anchorDate: '',  // empty = use latest monthly data point
+  outlier: 'hide', showMilestoneLabels: 'hide', raceGap: 11,
+  rebuild_fast: -18, rebuild_real: -12, rebuild_slow: -7,
+  pre4_fast:  -3,    pre4_real: -2,     pre4_slow: -1,
+  post4_fast: -2,    post4_real:-1.2,   post4_slow:-0.6,
+  elite_fast: -0.8,  elite_real:-0.4,   elite_slow:-0.15,
+};
+
+function loadState() {
+  try {
+    const fromUrl = new URLSearchParams(location.search).get('s');
+    if (fromUrl) return {...DEFAULTS, ...JSON.parse(atob(fromUrl))};
+    const saved = localStorage.getItem('subt-state');
+    if (saved) return {...DEFAULTS, ...JSON.parse(saved)};
+  } catch(e) {}
+  return {...DEFAULTS};
+}
+function saveState(s) { localStorage.setItem('subt-state', JSON.stringify(s)); }
+
+// Last-known-good values keep the chart valid when a user is mid-typing
+let lastGood = null;
+
+function readState() {
+  const s = {
+    cur:           document.getElementById('cur-pace').value,
+    peak:          document.getElementById('peak-pace').value,
+    floor:         document.getElementById('floor-pace').value,
+    anchorDate:    document.getElementById('anchor-date').value,
+    horizon:    +document.getElementById('horizon').value,
+    setback:    +document.getElementById('setback-months').value,
+    outlier:    document.getElementById('show-outlier').value,
+    showMilestoneLabels: document.getElementById('show-milestone-labels').value,
+    raceGap:    +document.getElementById('race-gap').value,
+    rebuild_fast: +document.getElementById('r-rebuild-fast').value,
+    rebuild_real: +document.getElementById('r-rebuild-real').value,
+    rebuild_slow: +document.getElementById('r-rebuild-slow').value,
+    pre4_fast:    +document.getElementById('r-pre4-fast').value,
+    pre4_real:    +document.getElementById('r-pre4-real').value,
+    pre4_slow:    +document.getElementById('r-pre4-slow').value,
+    post4_fast:   +document.getElementById('r-post4-fast').value,
+    post4_real:   +document.getElementById('r-post4-real').value,
+    post4_slow:   +document.getElementById('r-post4-slow').value,
+    elite_fast:   +document.getElementById('r-elite-fast').value,
+    elite_real:   +document.getElementById('r-elite-real').value,
+    elite_slow:   +document.getElementById('r-elite-slow').value,
+  };
+  // Validate pace fields; if any is bad, fall back to last good
+  if (parsePace(s.cur) == null || parsePace(s.peak) == null || parsePace(s.floor) == null) {
+    return lastGood;
+  }
+  lastGood = s;
+  return s;
+}
+
+function applyState(s) {
+  document.getElementById('cur-pace').value = s.cur;
+  document.getElementById('peak-pace').value = s.peak;
+  document.getElementById('floor-pace').value = s.floor;
+  document.getElementById('anchor-date').value = s.anchorDate || '';
+  document.getElementById('horizon').value = s.horizon;
+  document.getElementById('setback-months').value = s.setback;
+  document.getElementById('show-outlier').value = s.outlier;
+  document.getElementById('show-milestone-labels').value = s.showMilestoneLabels || 'hide';
+  document.getElementById('race-gap').value = s.raceGap != null ? s.raceGap : 11;
+  for (const k of ['rebuild_fast','rebuild_real','rebuild_slow','pre4_fast','pre4_real','pre4_slow','post4_fast','post4_real','post4_slow','elite_fast','elite_real','elite_slow']) {
+    document.getElementById('r-' + k.replace('_','-')).value = s[k];
+  }
+}
+
+function setAnchorToday() {
+  const today = new Date();
+  document.getElementById('anchor-date').value = today.toISOString().slice(0,10);
+  render();
+}
+function setAnchorToData() {
+  document.getElementById('anchor-date').value = pastData.monthly[pastData.monthly.length-1].date;
+  render();
+}
+
+// ============================================================
+// Main render
+// ============================================================
+let pastData = null;
+
+function render() {
+  const s = readState();
+  if (!s) return; // input mid-typing, keep last good chart
+  saveState(s);
+  document.getElementById('horizon-num').textContent = s.horizon;
+  document.getElementById('setback-num').textContent = s.setback;
+  document.getElementById('race-gap-num').textContent = s.raceGap + '%';
+  RACE_GAP = (s.raceGap || 0) / 100;
+
+  const startPace = parsePace(s.cur);
+  const peakPace  = parsePace(s.peak);
+  const floorPace = parsePace(s.floor);
+
+  // Build three paths
+  const ratesFor = (which) => ({
+    rebuild: s['rebuild_' + which],
+    pre4:    s['pre4_' + which],
+    post4:   s['post4_' + which],
+    elite:   s['elite_' + which],
+  });
+  const fastPath  = buildPath(startPace, peakPace, floorPace, s.horizon, ratesFor('fast'), s.setback);
+  const realPath  = buildPath(startPace, peakPace, floorPace, s.horizon, ratesFor('real'), s.setback);
+  const slowPath  = buildPath(startPace, peakPace, floorPace, s.horizon, ratesFor('slow'), s.setback);
+
+  // Date axis — "now" is anchor date if set, else latest monthly data point
+  const lastMonthly = pastData.monthly[pastData.monthly.length-1];
+  const now = s.anchorDate ? new Date(s.anchorDate + 'T00:00:00') : new Date(lastMonthly.date);
+  const monthsToDate = (months) => { const d = new Date(now); d.setMonth(d.getMonth()+months); return d; };
+
+  const fastX = fastPath.map(p => monthsToDate(p.m));
+  const fastY = fastPath.map(p => p.pace);
+  const realX = realPath.map(p => monthsToDate(p.m));
+  const realY = realPath.map(p => p.pace);
+  const slowX = slowPath.map(p => monthsToDate(p.m));
+  const slowY = slowPath.map(p => p.pace);
+
+  // Past data
+  const monthlyShown = s.outlier === 'hide'
+    ? pastData.monthly.filter(p => !p.is_outlier)
+    : pastData.monthly;
+  const monthlyOutlierOnly = pastData.monthly.filter(p => p.is_outlier);
+
+  const traces = [
+    // All repeats (faint)
+    {
+      x: pastData.all_repeats.map(r => r.date),
+      y: pastData.all_repeats.map(r => r.pace),
+      mode: 'markers', type: 'scatter',
+      marker: { color: '#7c2d12', size: 6, opacity: 0.20 },
+      name: 'all SubT repeats', hoverinfo: 'skip',
+    },
+    // Past monthly line — show projected race times even for past data
+    {
+      x: monthlyShown.map(p => p.date),
+      y: monthlyShown.map(p => p.pace),
+      mode: 'lines+markers', type: 'scatter',
+      line: { color: '#7c2d12', width: 2.5 },
+      marker: { color: '#7c2d12', size: 9, line: { color: 'white', width: 1.2 } },
+      name: 'past monthly median',
+      hovertemplate: '%{x|%b %Y}<br>SubT: %{text}<br>5K: %{customdata[0]}<br>HM: %{customdata[1]}<br>FM: %{customdata[2]}<br>n=%{customdata[3]}<extra>past</extra>',
+      text: monthlyShown.map(p => fmtPace(p.pace)),
+      customdata: monthlyShown.map(p => [
+        fmtTime(project5K(p.pace)),
+        fmtTime(projectHM(p.pace)),
+        fmtTime(projectFM(p.pace)),
+        p.n,
+      ]),
+    },
+    // Conservative (slow) path
+    {
+      x: slowX, y: slowY,
+      mode: 'lines', type: 'scatter',
+      line: { color: '#dc2626', width: 1.2, dash: 'dash' },
+      name: 'slow scenario',
+      hovertemplate: '%{x|%b %Y}<br>SubT: %{text}<br>5K: %{customdata[0]}<br>HM: %{customdata[1]}<br>FM: %{customdata[2]}<extra>slow</extra>',
+      text: slowY.map(fmtPace),
+      customdata: slowY.map(p => [fmtTime(project5K(p)), fmtTime(projectHM(p)), fmtTime(projectFM(p))]),
+    },
+    // Fast path
+    {
+      x: fastX, y: fastY,
+      mode: 'lines', type: 'scatter',
+      line: { color: '#16a34a', width: 1.2, dash: 'dash' },
+      name: 'fast scenario',
+      hovertemplate: '%{x|%b %Y}<br>SubT: %{text}<br>5K: %{customdata[0]}<br>HM: %{customdata[1]}<br>FM: %{customdata[2]}<extra>fast</extra>',
+      text: fastY.map(fmtPace),
+      customdata: fastY.map(p => [fmtTime(project5K(p)), fmtTime(projectHM(p)), fmtTime(projectFM(p))]),
+    },
+    // Realistic (heavy)
+    {
+      x: realX, y: realY,
+      mode: 'lines', type: 'scatter',
+      line: { color: '#0284c7', width: 3.0 },
+      name: 'realistic scenario',
+      hovertemplate: '%{x|%b %Y}<br>SubT: %{text}<br>5K: %{customdata[0]}<br>HM: %{customdata[1]}<br>FM: %{customdata[2]}<extra>realistic</extra>',
+      text: realY.map(fmtPace),
+      customdata: realY.map(p => [fmtTime(project5K(p)), fmtTime(projectHM(p)), fmtTime(projectFM(p))]),
+    },
+    // Outlier (if shown)
+    ...(s.outlier === 'show' && monthlyOutlierOnly.length ? [{
+      x: monthlyOutlierOnly.map(p => p.date),
+      y: monthlyOutlierOnly.map(p => p.pace),
+      mode: 'markers', type: 'scatter',
+      marker: { color: '#9ca3af', size: 12, symbol: 'x' },
+      name: 'Apr 2025 outlier',
+    }] : []),
+  ];
+
+  // Milestone shapes + annotations
+  const shapes = [];
+  const annotations = [];
+  for (let i = 0; i < RACE_TARGETS.length; i++) {
+    const rg = RACE_TARGETS[i];
+    const subtNeeded = requiredSubtFor5k(rg.sec);
+    const realM = findArrivalMonth(realPath, subtNeeded);
+    if (subtNeeded >= startPace) continue; // already past
+    if (realM == null) continue;
+
+    // Horizontal target line
+    shapes.push({
+      type: 'line',
+      x0: now, x1: monthsToDate(s.horizon + s.setback),
+      y0: subtNeeded, y1: subtNeeded,
+      line: { color: rg.color, width: 1, dash: 'dot' },
+      opacity: 0.55,
+    });
+
+    // Star marker at realistic arrival
+    annotations.push({
+      x: monthsToDate(realM),
+      y: subtNeeded,
+      text: '★',
+      font: { color: rg.color, size: 22 },
+      showarrow: false,
+      xanchor: 'center', yanchor: 'middle',
+    });
+
+    // Label box next to star — only when toggle is ON
+    if (s.showMilestoneLabels === 'show') {
+      const dateStr = monthsToDate(realM).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+      annotations.push({
+        x: monthsToDate(realM),
+        y: subtNeeded,
+        text: `<b>${rg.label}</b><br>SubT ${fmtPace(subtNeeded)} · ${realM}mo · ${dateStr}<br>5K ${fmtTime(rg.sec)} · HM ${fmtTime(projectHM(subtNeeded))}`,
+        font: { color: '#1f2937', size: 10 },
+        showarrow: true,
+        arrowhead: 0, arrowwidth: 1, arrowcolor: rg.color,
+        ax: 30,
+        ay: (i % 2 === 0 ? -28 : 28),
+        bgcolor: 'white',
+        bordercolor: rg.color,
+        borderwidth: 1.5,
+        borderpad: 4,
+        xanchor: 'left',
+      });
+    }
+  }
+
+  // Adaptive x-axis tick spacing based on horizon
+  // horizon ≤ 4mo: weekly  ·  ≤ 9: bi-weekly  ·  ≤ 18: monthly  ·  ≤ 36: 2mo  ·  >36: 3mo
+  let xDtick;
+  if (s.horizon <= 4) xDtick = 7 * 86400 * 1000;          // 1 week (ms)
+  else if (s.horizon <= 9) xDtick = 14 * 86400 * 1000;     // 2 weeks
+  else if (s.horizon <= 18) xDtick = 'M1';                 // 1 month
+  else if (s.horizon <= 36) xDtick = 'M2';                 // 2 months
+  else xDtick = 'M3';                                       // 3 months
+  const xTickFmt = s.horizon <= 9 ? '%d %b' : "%b '%y";
+
+  const layout = {
+    title: { text: 'SubT trajectory + your custom-rate projection', font: { size: 16 } },
+    xaxis: { type: 'date', title: 'Date', gridcolor: '#e5e7eb', dtick: xDtick, tickformat: xTickFmt, tickangle: -30 },
+    yaxis: {
+      title: 'SubT pace (min/km)',
+      autorange: 'reversed',
+      gridcolor: '#e5e7eb',
+      tickvals: [6, 5.5, 5, 4.5, 4.25, 4, 3.83, 3.67, 3.5, 3.33],
+      ticktext: [6, 5.5, 5, 4.5, 4.25, 4, 3.83, 3.67, 3.5, 3.33].map(fmtPace),
+      range: [6.0, Math.max(3.20, floorPace - 0.1)],
+    },
+    hovermode: 'closest',
+    legend: { orientation: 'h', y: -0.15 },
+    margin: { l: 60, r: 30, t: 50, b: 80 },
+    shapes,
+    annotations,
+    showlegend: true,
+  };
+
+  Plotly.react('chart', traces, layout, { displayModeBar: false, responsive: true });
+
+  // Milestone table
+  const tbody = document.getElementById('mile-tbody');
+  let html = '';
+  for (const rg of RACE_TARGETS) {
+    const subtNeeded = requiredSubtFor5k(rg.sec);
+    const fastM = findArrivalMonth(fastPath, subtNeeded);
+    const realM = findArrivalMonth(realPath, subtNeeded);
+    const slowM = findArrivalMonth(slowPath, subtNeeded);
+    const fmtArrival = (m) => m == null ? '—' : `${m}mo (${monthsToDate(m).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })})`;
+    const t5k = project5K(subtNeeded);
+    const tHM = projectHM(subtNeeded);
+    const tFM = projectFM(subtNeeded);
+    const past = subtNeeded >= startPace;
+    html += `<tr class="mile-row" style="${past ? 'opacity:0.4' : ''}">
+      <td><span class="pill" style="background:${rg.color}">${rg.label}</span></td>
+      <td><b>${fmtPace(subtNeeded)}</b>/km</td>
+      <td>${fmtArrival(fastM)}</td>
+      <td><b>${fmtArrival(realM)}</b></td>
+      <td>${fmtArrival(slowM)}</td>
+      <td>${fmtTime(t5k)}</td>
+      <td>${fmtTime(tHM)}</td>
+      <td>${fmtTime(tFM)}</td>
+    </tr>`;
+  }
+  tbody.innerHTML = html;
+}
+
+function resetDefaults() {
+  applyState(DEFAULTS);
+  render();
+}
+
+function copyShareUrl() {
+  const s = readState();
+  const url = `${location.origin}${location.pathname}?s=${btoa(JSON.stringify(s))}`;
+  navigator.clipboard.writeText(url);
+  alert('Share URL copied — paste it anywhere to reproduce these settings.');
+}
+
+// ============================================================
+// Init
+// ============================================================
+fetch('data.json').then(r => r.json()).then(d => {
+  pastData = d;
+  applyState(loadState());
+  // wire change listeners
+  document.querySelectorAll('input, select').forEach(el => {
+    el.addEventListener('input', render);
+    el.addEventListener('change', render);
+  });
+  render();
+});
+</script>
+</body>
+</html>
