@@ -46,12 +46,17 @@
     <div class="sub">Drag sliders. Chart updates live. All rates in <b>seconds/km/month</b> (negative = improving).</div>
 
     <h2>Anchors</h2>
-    <div class="row">
-      <label>Current SubT pace  <span style="font-weight:normal;color:#94a3b8;font-size:10px">(format M:SS)</span></label>
-      <input class="pace-input" type="text" id="cur-pace" value="5:19" data-pace="1">
+    <div class="helper" style="background:#fef3c7;padding:6px 8px;border-radius:5px;">
+      <b>NOW = today's date + latest data pace.</b> Auto. data.json refreshes every 3 days from intervals.icu.<br>
+      <b>LAST = your previous visit</b> shown as a 2nd marker so you can see your delta visit-to-visit.<br>
+      Override below if you want — leave blank to use auto values.
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <label>Override: current SubT pace  <span style="font-weight:normal;color:#94a3b8;font-size:10px">(blank = use latest data)</span></label>
+      <input class="pace-input" type="text" id="cur-pace" value="" data-pace="1" placeholder="auto">
     </div>
     <div class="row">
-      <label>Anchor date — "now" is this date</label>
+      <label>Override: anchor date  <span style="font-weight:normal;color:#94a3b8;font-size:10px">(blank = today)</span></label>
       <input class="pace-input" type="date" id="anchor-date" value="">
     </div>
     <div class="row">
@@ -323,12 +328,27 @@ function saveState(s) { localStorage.setItem('subt-state', JSON.stringify(s)); }
 // Last-known-good values keep the chart valid when a user is mid-typing
 let lastGood = null;
 
+function latestDataPace() {
+  if (!pastData || !pastData.monthly || !pastData.monthly.length) return 5.317;
+  const valid = pastData.monthly.filter(p => !p.is_outlier);
+  return (valid.length ? valid[valid.length-1] : pastData.monthly[pastData.monthly.length-1]).pace;
+}
+function todayISO() { return new Date().toISOString().slice(0,10); }
+
 function readState() {
+  // Auto-fall-through: blank cur-pace → use latest data; blank anchor-date → today
+  const curRaw = document.getElementById('cur-pace').value.trim();
+  const anchorRaw = document.getElementById('anchor-date').value.trim();
+  const curEffective = curRaw === '' ? fmtPace(latestDataPace()) : curRaw;
+  const anchorEffective = anchorRaw === '' ? todayISO() : anchorRaw;
+
   const s = {
-    cur:           document.getElementById('cur-pace').value,
+    cur:           curEffective,
     peak:          document.getElementById('peak-pace').value,
     floor:         document.getElementById('floor-pace').value,
-    anchorDate:    document.getElementById('anchor-date').value,
+    anchorDate:    anchorEffective,
+    curOverride:   curRaw,
+    anchorOverride: anchorRaw,
     horizon:    +document.getElementById('horizon').value,
     setback:    +document.getElementById('setback-months').value,
     outlier:    document.getElementById('show-outlier').value,
@@ -379,6 +399,25 @@ function setAnchorToData() {
   document.getElementById('anchor-date').value = pastData.monthly[pastData.monthly.length-1].date;
   render();
 }
+
+// LAST visit tracking — survives across days via localStorage.
+// On page load: if saved date < today, that snapshot becomes the LAST marker.
+// Today's snapshot is saved (overwriting same-day entries) so on the NEXT
+// distinct day's visit, it becomes LAST.
+function loadLastVisit() {
+  try {
+    const v = JSON.parse(localStorage.getItem('subt-last-visit'));
+    if (v && v.date && v.pace) return v;
+  } catch(e) {}
+  return null;
+}
+function saveTodaySnapshot(pace) {
+  localStorage.setItem('subt-last-visit', JSON.stringify({
+    date: todayISO(),
+    pace: pace,
+  }));
+}
+let lastVisitMarker = null;  // {date, pace} or null — set on init
 
 // ============================================================
 // Main render
@@ -472,9 +511,28 @@ function render() {
       text: [`<b>NOW ${fmtPace(startPace)}</b>`],
       textposition: 'top right',
       textfont: { color: '#dc2626', size: 12 },
-      name: `now (${now.toLocaleDateString()})`,
-      hovertemplate: `<b>ANCHOR (NOW)</b><br>${now.toLocaleDateString()}<br>SubT: ${fmtPace(startPace)}<br>5K: ${fmtTime(project5K(startPace))}<extra></extra>`,
+      name: `NOW (${now.toLocaleDateString()})`,
+      hovertemplate: `<b>NOW</b><br>${now.toLocaleDateString()}<br>SubT: ${fmtPace(startPace)}<br>5K: ${fmtTime(project5K(startPace))}<extra></extra>`,
     },
+    // LAST visit marker — your previous visit's pace
+    ...(lastVisitMarker ? [{
+      x: [new Date(lastVisitMarker.date + 'T00:00:00')],
+      y: [lastVisitMarker.pace],
+      mode: 'markers+text', type: 'scatter',
+      marker: { color: '#9333ea', size: 14, symbol: 'diamond', line: { color: 'white', width: 2 } },
+      text: [`<b>LAST ${fmtPace(lastVisitMarker.pace)}</b>`],
+      textposition: 'bottom right',
+      textfont: { color: '#9333ea', size: 11 },
+      name: `LAST (${new Date(lastVisitMarker.date + 'T00:00:00').toLocaleDateString()})`,
+      hovertemplate: (() => {
+        const dCur = new Date(now);
+        const dLast = new Date(lastVisitMarker.date + 'T00:00:00');
+        const daysDiff = Math.round((dCur - dLast) / 86400000);
+        const paceDelta = (lastVisitMarker.pace - startPace) * 60; // sec/km change
+        const dir = paceDelta > 0 ? 'faster' : 'slower';
+        return `<b>LAST visit</b><br>${dLast.toLocaleDateString()} (${daysDiff} days ago)<br>SubT was: ${fmtPace(lastVisitMarker.pace)}<br>Δ since then: ${Math.abs(paceDelta).toFixed(1)} s/km ${dir}<extra></extra>`;
+      })(),
+    }] : []),
     // Conservative (slow) path
     {
       x: slowX, y: slowY,
@@ -640,6 +698,11 @@ function copyShareUrl() {
 // ============================================================
 fetch('data.json').then(r => r.json()).then(d => {
   pastData = d;
+  // Capture LAST visit BEFORE we update today's snapshot
+  const stored = loadLastVisit();
+  if (stored && stored.date !== todayISO()) {
+    lastVisitMarker = stored;
+  }
   applyState(loadState());
   // wire change listeners
   document.querySelectorAll('input, select').forEach(el => {
@@ -647,6 +710,9 @@ fetch('data.json').then(r => r.json()).then(d => {
     el.addEventListener('change', render);
   });
   render();
+  // Save today's snapshot AFTER rendering so the saved pace reflects today's actual displayed value
+  const s = readState();
+  if (s) saveTodaySnapshot(parsePace(s.cur));
 });
 </script>
 </body>
