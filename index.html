@@ -602,30 +602,16 @@ function render() {
   const monthlyOutlierOnly = pastData.monthly.filter(p => p.is_outlier);
 
   const traces = [
-    // All repeats (faint)
+    // All repeats (faint, individually clickable)
     {
       x: pastData.all_repeats.map(r => r.date),
       y: pastData.all_repeats.map(r => r.pace),
       mode: 'markers', type: 'scatter',
-      marker: { color: '#7c2d12', size: 6, opacity: 0.20 },
-      name: 'all SubT repeats', hoverinfo: 'skip',
-    },
-    // Past monthly line — show projected race times even for past data
-    {
-      x: monthlyShown.map(p => p.date),
-      y: monthlyShown.map(p => p.pace),
-      mode: 'lines+markers', type: 'scatter',
-      line: { color: '#7c2d12', width: 2.5 },
-      marker: { color: '#7c2d12', size: 9, line: { color: 'white', width: 1.2 } },
-      name: 'past monthly median',
-      hovertemplate: '%{x|%b %Y}<br>SubT: %{text}<br>5K: %{customdata[0]}<br>HM: %{customdata[1]}<br>FM: %{customdata[2]}<br>n=%{customdata[3]}<extra>past</extra>',
-      text: monthlyShown.map(p => fmtPace(p.pace)),
-      customdata: monthlyShown.map(p => [
-        fmtTime(project5K(p.pace)),
-        fmtTime(projectHM(p.pace)),
-        fmtTime(projectFM(p.pace)),
-        p.n,
-      ]),
+      marker: { color: '#7c2d12', size: 8, opacity: 0.22 },
+      name: 'all SubT repeats',
+      hovertemplate: '%{x|%b %d, %Y}<br>SubT: %{text}<br>5K: %{customdata[0]}<extra>repeat</extra>',
+      text: pastData.all_repeats.map(r => fmtPace(r.pace)),
+      customdata: pastData.all_repeats.map(r => [fmtTime(project5K(r.pace))]),
     },
     // Bridge line: from last past data point to current/anchor point
     // Visualizes the assumed transition between observed data and "where you are now"
@@ -706,6 +692,25 @@ function render() {
       marker: { color: '#9ca3af', size: 12, symbol: 'x' },
       name: 'Apr 2025 outlier',
     }] : []),
+    // Past monthly line — drawn LAST so it sits ON TOP of projection lines.
+    // This makes Nov/Dec/Jan etc. clickable even when anchor is set to a past
+    // date and projection lines visually overlap them.
+    {
+      x: monthlyShown.map(p => p.date),
+      y: monthlyShown.map(p => p.pace),
+      mode: 'lines+markers', type: 'scatter',
+      line: { color: '#7c2d12', width: 2.5 },
+      marker: { color: '#7c2d12', size: 13, line: { color: 'white', width: 1.5 } },
+      name: 'past monthly median',
+      hovertemplate: '%{x|%b %Y}<br>SubT: %{text}<br>5K: %{customdata[0]}<br>HM: %{customdata[1]}<br>FM: %{customdata[2]}<br>n=%{customdata[3]}<extra>past</extra>',
+      text: monthlyShown.map(p => fmtPace(p.pace)),
+      customdata: monthlyShown.map(p => [
+        fmtTime(project5K(p.pace)),
+        fmtTime(projectHM(p.pace)),
+        fmtTime(projectFM(p.pace)),
+        p.n,
+      ]),
+    },
   ];
 
   // Milestone shapes + annotations
