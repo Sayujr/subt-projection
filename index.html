@@ -453,6 +453,28 @@ function render() {
         p.n,
       ]),
     },
+    // Bridge line: from last past data point to current/anchor point
+    // Visualizes the assumed transition between observed data and "where you are now"
+    ...(monthlyShown.length ? [{
+      x: [new Date(monthlyShown[monthlyShown.length-1].date), now],
+      y: [monthlyShown[monthlyShown.length-1].pace, startPace],
+      mode: 'lines', type: 'scatter',
+      line: { color: '#7c2d12', width: 1.5, dash: 'dot' },
+      name: 'bridge to anchor',
+      hoverinfo: 'skip',
+      showlegend: false,
+    }] : []),
+    // ANCHOR marker — big visible "you are here NOW"
+    {
+      x: [now], y: [startPace],
+      mode: 'markers+text', type: 'scatter',
+      marker: { color: '#dc2626', size: 16, symbol: 'circle', line: { color: 'white', width: 2 } },
+      text: [`<b>NOW ${fmtPace(startPace)}</b>`],
+      textposition: 'top right',
+      textfont: { color: '#dc2626', size: 12 },
+      name: `now (${now.toLocaleDateString()})`,
+      hovertemplate: `<b>ANCHOR (NOW)</b><br>${now.toLocaleDateString()}<br>SubT: ${fmtPace(startPace)}<br>5K: ${fmtTime(project5K(startPace))}<extra></extra>`,
+    },
     // Conservative (slow) path
     {
       x: slowX, y: slowY,
