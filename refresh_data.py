@@ -117,34 +117,51 @@ async def main():
             "is_outlier": month == "2025-04",
         })
 
-    out = {"all_repeats": all_repeats, "monthly": monthly}
+    # APPEND-ONLY MERGE: never lose laps that were once in our archive,
+    # even if ICU later removes/edits them. Existing laps always preserved.
     out_path = os.path.join(os.path.dirname(__file__), "data.json")
-
-    # SAFETY GUARD: if new data is worse than existing, refuse to overwrite.
-    # Protects against ICU API hiccups, auth failures returning partial data, etc.
+    existing_repeats = []
     if os.path.exists(out_path):
         with open(out_path) as f:
             existing = json.load(f)
-        existing_repeats = len(existing.get("all_repeats", []))
-        existing_months = len(existing.get("monthly", []))
-        if len(all_repeats) < existing_repeats:
-            print(f"REFUSING to overwrite: new has {len(all_repeats)} repeats vs existing {existing_repeats} (-{existing_repeats - len(all_repeats)})")
-            print("This usually means an ICU API hiccup. Existing data preserved.")
-            sys.exit(1)
-        if len(monthly) < existing_months:
-            print(f"REFUSING to overwrite: new has {len(monthly)} monthly points vs existing {existing_months} (-{existing_months - len(monthly)})")
-            sys.exit(1)
-        # Per-month sanity: each existing month should still have ≥80% of its previous count
-        existing_by_month = {m['date']: m['n'] for m in existing.get("monthly", [])}
-        for m in monthly:
-            old_n = existing_by_month.get(m['date'])
-            if old_n is not None and m['n'] < old_n * 0.8:
-                print(f"REFUSING to overwrite: month {m['date']} has {m['n']} laps vs existing {old_n} (>20% drop)")
-                sys.exit(1)
+        existing_repeats = existing.get("all_repeats", []) or []
+    print(f"Existing archive: {len(existing_repeats)} laps")
 
+    # Dedup key: (date, rounded_pace, rounded_duration, rounded_hr). Stable
+    # enough that re-pulling the same lap matches; loose enough that minor
+    # float drift won't create duplicates.
+    def lap_key(r):
+        return (r["date"], round(r["pace"], 4), round(r["duration"], 2), round(r["hr"], 1))
+
+    existing_keys = {lap_key(r) for r in existing_repeats}
+    new_only = [r for r in all_repeats if lap_key(r) not in existing_keys]
+    print(f"Pulled this run: {len(all_repeats)} laps  ·  net new: {len(new_only)}")
+
+    merged = existing_repeats + new_only
+    # Sort by date for cleaner storage
+    merged.sort(key=lambda r: (r["date"], r["pace"]))
+    print(f"Merged archive: {len(merged)} laps  (kept all {len(existing_repeats)} existing, added {len(new_only)})")
+
+    # Recompute monthly medians from the MERGED set
+    from collections import defaultdict
+    by_month_merged = defaultdict(list)
+    for r in merged:
+        by_month_merged[r["date"][:7]].append(r["pace"])
+    monthly = []
+    for month in sorted(by_month_merged.keys()):
+        paces = sorted(by_month_merged[month])
+        med = paces[len(paces)//2] if len(paces) % 2 else (paces[len(paces)//2-1] + paces[len(paces)//2]) / 2
+        monthly.append({
+            "date": f"{month}-01",
+            "n": len(paces),
+            "pace": round(med, 4),
+            "is_outlier": month == "2025-04",
+        })
+
+    out = {"all_repeats": merged, "monthly": monthly}
     with open(out_path, "w") as f:
         json.dump(out, f, indent=1)
-    print(f"Wrote {len(all_repeats)} repeats and {len(monthly)} monthly points to {out_path}")
+    print(f"Wrote {len(merged)} repeats and {len(monthly)} monthly points to {out_path}")
     print(f"Latest month: {monthly[-1] if monthly else 'none'}")
 
 
