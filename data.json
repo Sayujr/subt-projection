@@ -329,6 +329,12 @@
    "pace": 4.9528,
    "duration": 3.0,
    "hr": 161
+  },
+  {
+   "date": "2026-07-11",
+   "pace": 5.2249,
+   "duration": 10.02,
+   "hr": 163
   }
  ],
  "monthly": [
@@ -420,6 +426,12 @@
    "date": "2026-06-01",
    "n": 3,
    "pace": 4.9775,
+   "is_outlier": false
+  },
+  {
+   "date": "2026-07-01",
+   "n": 1,
+   "pace": 5.2249,
    "is_outlier": false
   }
  ]
