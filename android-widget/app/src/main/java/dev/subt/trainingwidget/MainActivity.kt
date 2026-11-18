@@ -202,13 +202,14 @@ class MainActivity : Activity() {
             Tab.HOME, Tab.RECOVERY -> {
                 controls.visibility = View.VISIBLE
                 val current = Prefs.period(this, WidgetRenderer.APP_ID)
+                if (tab == Tab.HOME) chips.addView(chip("This week", current == Periods.THIS_WEEK) { setAppPeriod(Periods.THIS_WEEK) })
                 for (days in Periods.ALL) {
                     chips.addView(chip(Periods.label(days), days == current) { setAppPeriod(days) })
                 }
-                val custom = current !in Periods.ALL
+                val custom = current > 0 && current !in Periods.ALL
                 val label = if (custom) "From ${LocalDate.now().minusDays(current - 1L).format(DateTimeFormatter.ofPattern("d MMM yy", Locale.getDefault()))}" else "Custom…"
                 chips.addView(chip(label, custom) {
-                    pickDate(LocalDate.now().minusDays(current - 1L), max = LocalDate.now().minusDays(6)) { start ->
+                    pickDate(LocalDate.now().minusDays(maxOf(current, 14) - 1L), max = LocalDate.now().minusDays(6)) { start ->
                         setAppPeriod((ChronoUnit.DAYS.between(start, LocalDate.now()) + 1).toInt().coerceIn(7, 1100))
                     }
                 })
@@ -521,9 +522,8 @@ class MainActivity : Activity() {
         val iv = root.findViewById<android.widget.ImageView>(R.id.trend_chart) ?: return
         val period = Prefs.period(this, WidgetRenderer.APP_ID)
         val snap = Prefs.snapshot(this) ?: return
-        val days = snap.days.takeLast(period)
+        val (days, future) = WidgetRenderer.chartSeries(snap, period, snap.today == LocalDate.now().toString())
         if (days.size < 2) return
-        val future = if (snap.today == LocalDate.now().toString()) snap.proj.take(14).filter { it.date > days.last().date } else emptyList()
         val all = days + future
         val d = resources.displayMetrics.density
         val ctlV = root.findViewById<TextView>(R.id.ctl_value); val ctlD = root.findViewById<TextView>(R.id.ctl_delta)
@@ -608,7 +608,7 @@ class MainActivity : Activity() {
                     }, full)
                     else content.addView(AppScreens(this, wDp).race(raceIndex), full)
                 }
-                Tab.RECOVERY -> content.addView(AppScreens(this, wDp).recovery(Prefs.period(this, WidgetRenderer.APP_ID)), full)
+                Tab.RECOVERY -> content.addView(AppScreens(this, wDp).recovery(Prefs.period(this, WidgetRenderer.APP_ID).let { if (it < 14) 14 else it }), full)
                 Tab.SUBT -> if (subtPage != null) content.addView(subtPage, full) else {
                     // SubT: the widget card at a comfortable height, then the goal projection below
                     val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false }

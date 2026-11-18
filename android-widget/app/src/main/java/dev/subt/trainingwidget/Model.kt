@@ -389,9 +389,12 @@ enum class GraphStyle { AUTO, THREE, TWO, ONE }
 /** Selectable graph time periods (days). 42 is the default. */
 object Periods {
     const val DEFAULT = 42
+    /** Special period: this week so far (from Monday) plus the rest of this week and next week projected. */
+    const val THIS_WEEK = -7
     val ALL = listOf(14, 28, 42, 90, 180, 365)
 
     fun label(days: Int): String = when (days) {
+        THIS_WEEK -> "This week"
         14 -> "2 weeks"
         28 -> "4 weeks"
         42 -> "6 weeks"

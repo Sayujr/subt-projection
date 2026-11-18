@@ -242,7 +242,7 @@ object WidgetRenderer {
         if (all.isEmpty()) return rv
         setNumbers(rv, all, period)
 
-        val days = all.takeLast(period)
+        val (days, futureDays) = chartSeries(s.snap!!, period, s.isToday)
         val d = ctx.resources.displayMetrics.density
         fun px(dp: Int) = (dp.coerceAtLeast(20) * d).roundToInt()
 
@@ -270,8 +270,7 @@ object WidgetRenderer {
                     OneVariant.SLIM -> Triple(wDp, hDp - 38, WIDGET_BG)
                 }
                 // Two weeks of the plan ahead, dashed
-                val future = if (s.isToday) s.snap?.proj.orEmpty().take(14) else emptyList()
-                rv.setImageViewBitmap(R.id.trend_chart, Charts.combined(days, px(cw), px(ch), d, bg, labels = ch >= 110, future = future))
+                rv.setImageViewBitmap(R.id.trend_chart, Charts.combined(days, px(cw), px(ch), d, bg, labels = ch >= 110, future = futureDays))
             }
         }
         return rv
@@ -295,8 +294,27 @@ object WidgetRenderer {
         v?.let { views.setTextColor(R.id.verdict, it.call.color) }
     }
 
+    /**
+     * History and planned future for a chart period. THIS_WEEK = Monday so far (plus last Sunday as the
+     * starting point) and the plan through next Sunday; other periods = the last N days + 2 weeks of plan.
+     */
+    fun chartSeries(snap: Snapshot, period: Int, fresh: Boolean): Pair<List<Day>, List<Day>> {
+        val all = snap.days
+        if (period == Periods.THIS_WEEK) {
+            val monday = LocalDate.now().with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+            val hist = all.filter { it.date >= monday.minusDays(1).toString() }.ifEmpty { all.takeLast(2) }
+            val until = monday.plusDays(13).toString()
+            val fut = if (fresh) snap.proj.filter { it.date > (hist.lastOrNull()?.date ?: "") && it.date <= until } else emptyList()
+            return hist to fut
+        }
+        val hist = all.takeLast(period)
+        val fut = if (fresh) snap.proj.filter { it.date > (hist.lastOrNull()?.date ?: "") }.take(14) else emptyList()
+        return hist to fut
+    }
+
     /** Short label for a period: 2w, 6w, 3mo, 1y, or Nd for a custom one. */
     internal fun periodShort(days: Int) = when (days) {
+        Periods.THIS_WEEK -> "wk"
         14 -> "2w"; 28 -> "4w"; 42 -> "6w"; 90 -> "3mo"; 180 -> "6mo"; 365 -> "1y"
         else -> if (days % 7 == 0) "${days / 7}w" else "${days}d"
     }
@@ -304,8 +322,10 @@ object WidgetRenderer {
     private fun setNumbers(views: RemoteViews, days: List<Day>, period: Int) {
         // Change over the period the chart shows (first day of the window → today)
         val last = days.last()
-        val ref = days.getOrNull(days.size - period) ?: days.first()
-        val lbl = periodShort(minOf(period, days.size))
+        val monday = LocalDate.now().with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).toString()
+        val ref = if (period == Periods.THIS_WEEK) days.lastOrNull { it.date < monday } ?: days.first()
+            else days.getOrNull(days.size - period) ?: days.first()
+        val lbl = if (period == Periods.THIS_WEEK) "wk" else periodShort(minOf(period, days.size))
         views.setTextViewText(R.id.ctl_value, last.ctl.roundToInt().toString())
         setDelta(views, R.id.ctl_delta, last.ctl - ref.ctl, upColor = UP, downColor = DOWN, label = lbl)
         views.setTextViewText(R.id.atl_value, last.atl.roundToInt().toString())
