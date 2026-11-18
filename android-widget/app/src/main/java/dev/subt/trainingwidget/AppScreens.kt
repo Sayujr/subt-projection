@@ -1603,7 +1603,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val c = card(col)
         label(c, "Power dashboard")
         stats3(c, listOf(
-            Triple("CP", "${p.cp.roundToInt()}" to FormColors.FITNESS, delta(p.cp, p.cp6wAgo).takeIf { it.isNotEmpty() }?.let { "W · $it in 6 wk" } ?: "W"),
+            Triple("CP (FTP)", "${p.cp.roundToInt()}" to FormColors.FITNESS, p.eftp?.let { "eFTP ${it.roundToInt()}" + (delta(it, p.cp6wAgo).takeIf { d -> d.isNotEmpty() }?.let { d -> " · $d in 6 wk" } ?: "") } ?: "W"),
             Triple("W/kg", (p.wkg?.let { String.format(loc, "%.2f", it) } ?: "–") to TEXT, p.kg?.let { "${fmt1(it)} kg" } ?: "add weight"),
             Triple("RE", (p.re?.let { String.format(loc, "%.3f", it) } ?: "–") to GOOD, "speed per W/kg"),
         ))
@@ -1622,8 +1622,9 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val n = card(col)
         label(n, "What it says")
         p.slopePerMonth?.let { sl ->
-            bullet(n, if (sl > 0.5) GOOD else if (sl < -0.5) WARN else DIM, "CP ${if (sl >= 0) "rising" else "falling"} ${fmt1(abs1(sl))} W/month over the last 90 days" +
-                (p.cp3moAgo?.let { " (${delta(p.cp, it)} vs 3 months ago)" } ?: "") + ".")
+            bullet(n, if (sl > 0.5) GOOD else if (sl < -0.5) WARN else DIM, "eFTP ${if (sl >= 0) "rising" else "falling"} ${fmt1(abs1(sl))} W/month over the last 90 days" +
+                (p.eftp?.let { e -> p.cp3moAgo?.let { " (${delta(e, it)} vs 3 months ago)" } } ?: "") + ".")
+            p.eftp?.let { e -> if (abs1(e - p.cp) >= 8) bullet(n, WARN, "eFTP ${e.roundToInt()} W is ${abs1(e - p.cp).roundToInt()} W ${if (e > p.cp) "above" else "below"} your set FTP ${p.cp.roundToInt()} W. Consider ${if (e > p.cp) "a CP test before raising" else "whether"} FTP in intervals.icu needs updating. I won't change it.") }
         }
         p.re?.let { re ->
             val reRuns = s.runs.mapNotNull { it.re(p.kg) }

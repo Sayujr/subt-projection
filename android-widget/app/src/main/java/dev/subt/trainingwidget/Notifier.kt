@@ -79,9 +79,10 @@ object Notifier {
         }
         // New CP high
         PowerModel.now(ctx)?.let { p ->
+            val e = p.eftp ?: return@let
             val prevMax = s.runs.dropLast(1).mapNotNull { it.cp }.maxOrNull()
-            if (prevMax != null && p.cp >= prevMax + 2) once(ctx, "cp", p.cp.roundToInt().toString()) {
-                post(ctx, ALERTS, 3, "New CP: ${p.cp.roundToInt()} W", "Up from ${prevMax.roundToInt()} W" + (p.wkg?.let { " · ${"%.2f".format(it)} W/kg" } ?: ""), "POWER")
+            if (prevMax != null && e >= prevMax + 2) once(ctx, "cp", e.roundToInt().toString()) {
+                post(ctx, ALERTS, 3, "New eFTP high: ${e.roundToInt()} W", "Up from ${prevMax.roundToInt()} W (your set FTP is ${p.cp.roundToInt()} W)", "POWER")
             }
         }
         // Taper drifting off target (race within 7 days)

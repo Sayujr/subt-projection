@@ -12,6 +12,8 @@ object PowerModel {
     data class Now(
         val cp: Double, val cpSource: String, val kg: Double?, val re: Double?, val powerHr: Double?,
         val cp6wAgo: Double?, val cp3moAgo: Double?, val slopePerMonth: Double?,
+        /** intervals.icu's rolling eFTP estimate (latest), shown alongside the set FTP. */
+        val eftp: Double? = null,
     ) {
         val wkg: Double? get() = kg?.let { cp / it }
     }
@@ -22,12 +24,12 @@ object PowerModel {
         val s = Prefs.snapshot(ctx) ?: return null
         val kg = Prefs.weightOverride(ctx) ?: s.weight
         val withCp = s.runs.filter { it.cp != null }
-        val latestCp = withCp.lastOrNull()?.cp
+        val eftp = withCp.lastOrNull()?.cp
+        // Your set FTP is CP; eFTP is the estimate beside it; the 3/12-min curve only if neither exists
         val (cp, src) = when {
-            s.curveCp != null && latestCp != null -> maxOf(s.curveCp, latestCp) to "intervals.icu eFTP / 90-day power curve"
-            latestCp != null -> latestCp to "intervals.icu eFTP"
-            s.curveCp != null -> s.curveCp to "90-day power curve (3 & 12 min)"
-            s.runFtp != null -> s.runFtp to "FTP set in intervals.icu"
+            s.runFtp != null -> s.runFtp to "your FTP set in intervals.icu"
+            eftp != null -> eftp to "intervals.icu eFTP (no FTP set)"
+            s.curveCp != null -> s.curveCp to "90-day power curve estimate (no FTP set)"
             else -> return null
         }
         val today = LocalDate.now()
@@ -41,7 +43,7 @@ object PowerModel {
         val recent = s.runs.takeLast(10)
         val re = recent.mapNotNull { it.re(kg) }.takeIf { it.size >= 3 }?.average()
         val phr = recent.mapNotNull { r -> r.watts?.let { w -> r.avgHr?.let { h -> w / h } } }.takeIf { it.size >= 3 }?.average()
-        return Now(cp, src, kg, re, phr, cpAround(42), cpAround(90), slope)
+        return Now(cp, src, kg, re, phr, cpAround(42), cpAround(90), slope, eftp)
     }
 
     /** Race time (s) for a distance at a share of CP, given RE and weight. */

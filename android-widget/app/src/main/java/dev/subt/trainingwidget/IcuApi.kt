@@ -99,7 +99,8 @@ class IcuApi(private val creds: Credentials) {
             RunMetric(
                 watts = (it.optNum("icu_average_watts") ?: it.optNum("average_watts"))?.takeIf { v -> v > 0 },
                 distanceM = it.optNum("distance")?.takeIf { v -> v > 0 },
-                cp = listOf("icu_pm_cp", "icu_rolling_cp", "icu_pm_ftp_watts", "icu_rolling_ftp", "icu_ftp")
+                // Rolling eFTP first (what intervals.icu shows as eFTP); per-activity model values only as fallback
+                cp = listOf("icu_rolling_ftp", "icu_rolling_cp", "icu_pm_ftp_watts", "icu_pm_cp")
                     .firstNotNullOfOrNull { k -> it.optNum(k)?.takeIf { v -> v > 50 } },
                 zoneSecs = zones,
                 date = date(it),
