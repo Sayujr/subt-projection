@@ -65,7 +65,10 @@ class IcuApi(private val creds: Credentials) {
         // ---- Calendar: this week, plus planned workouts up to the next race (≤ 12 weeks) for projections
         val nextRaceDate = raceEvents.firstOrNull()?.optString("start_date_local")?.take(10)
             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-        val projectTo = listOfNotNull(sunday, nextRaceDate?.takeIf { ChronoUnit.DAYS.between(today, it) <= 84 }).max()
+        // Project far enough to cover every race in the next 12 weeks
+        val raceDates = raceEvents.mapNotNull { runCatching { LocalDate.parse(date(it)) }.getOrNull() }
+            .filter { ChronoUnit.DAYS.between(today, it) <= 84 }
+        val projectTo = (raceDates + sunday + listOfNotNull(nextRaceDate?.takeIf { ChronoUnit.DAYS.between(today, it) <= 84 })).max()
         val events = getArray(
             "/athlete/$ath/events",
             mapOf("oldest" to monday.toString(), "newest" to projectTo.plusDays(1).toString()),
@@ -76,11 +79,24 @@ class IcuApi(private val creds: Credentials) {
 
         val activities = getArray(
             "/athlete/$ath/activities",
-            mapOf("oldest" to lastMonday.toString(), "newest" to today.plusDays(1).toString()),
+            mapOf("oldest" to minOf(lastMonday, today.minusDays(89)).toString(), "newest" to today.plusDays(1).toString()),
         ).objects().sortedBy { it.optString("start_date_local") }
 
+        // Run aerobic metrics (HR drift, efficiency) over ~90 days
+        val runs = activities.filter { it.optString("type").contains("Run", ignoreCase = true) }.map {
+            RunMetric(
+                date = date(it),
+                name = it.optString("name"),
+                seconds = (it.optNum("moving_time") ?: 0.0).toInt(),
+                avgHr = it.optNum("average_heartrate")?.takeIf { v -> v > 0 },
+                decoupling = it.optNum("decoupling"),
+                ef = it.optNum("icu_efficiency_factor")?.takeIf { v -> v > 0 },
+                powerHr = it.optNum("icu_power_hr")?.takeIf { v -> v > 0 },
+            )
+        }
+
         val lastWeekLoad = activities
-            .filter { date(it) < monday.toString() }
+            .filter { date(it) >= lastMonday.toString() && date(it) < monday.toString() }
             .sumOf { (it.optNum("icu_training_load") ?: 0.0).toInt() }
 
         val weekEvents = events.filter { date(it) in monday.toString()..sunday.toString() }
@@ -110,7 +126,9 @@ class IcuApi(private val creds: Credentials) {
             )
         }
 
-        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races)
+        val proj = projections.entries.filter { it.key > todayStr }.sortedBy { it.key }
+            .map { Day(it.key, it.value.first, it.value.second) }
+        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs)
     }
 
     /** Planned workouts, races and completed activities between [start] and [end] (inclusive), for the app's Week screen. */
@@ -246,9 +264,13 @@ object SubtApi {
         val monthly = o.getJSONArray("monthly").objects().map {
             SubtMonth(
                 it.getString("date").take(7), it.getDouble("pace"), it.optInt("n"), it.optBoolean("is_outlier"),
+                hrByMonth[it.getString("date").take(7)],
             )
         }.sortedBy { it.month }
         val laps = o.optJSONArray("all_repeats")?.objects().orEmpty()
+        val hrByMonth = laps.groupBy { it.optString("date").take(7) }
+            .mapValues { (_, l) -> l.mapNotNull { x -> x.optDouble("hr").takeIf { !it.isNaN() && it > 0 } }.sorted() }
+            .mapValues { (_, v) -> if (v.isEmpty()) null else if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2 }
         val cutoff = today.minusDays(30).toString()
         return SubtData(
             fetchedAt = System.currentTimeMillis(),

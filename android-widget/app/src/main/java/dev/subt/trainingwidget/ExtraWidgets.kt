@@ -101,13 +101,13 @@ object ExtraWidgets {
         val today = s.today
         val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
         val sunday = monday.plusDays(6)
-        val range = if (monday.month == sunday.month) {
+        val span = if (monday.month == sunday.month) {
             "${monday.dayOfMonth}–${sunday.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))}"
         } else {
             "${monday.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))} – " +
                 sunday.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
         }
-        header(ctx, v, s, "THIS WEEK · ${range.uppercase(Locale.getDefault())}", WeekWidgetProvider::class.java, R0.CALENDAR_URL, "WEEK", inApp)
+        header(ctx, v, s, "THIS WEEK · ${span.uppercase(Locale.getDefault())}", WeekWidgetProvider::class.java, R0.CALENDAR_URL, "WEEK", inApp)
 
         if (range != null) return buildRange(ctx, v, s, range, wDp, hDp)
 

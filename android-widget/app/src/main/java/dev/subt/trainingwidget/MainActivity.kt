@@ -57,6 +57,7 @@ class MainActivity : Activity() {
     private val rangeCache = mutableMapOf<String, List<Workout>>()
     private val loading = mutableSetOf<String>()
     private var rangeError: String? = null
+    private var raceIndex = 0
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "snapshot") rangeCache.clear()
@@ -203,6 +204,20 @@ class MainActivity : Activity() {
                 }
                 chips.addView(chip("›", false) { offset += 1; show() })
                 if (offset != 0) chips.addView(chip("Now", false) { offset = 0; show() })
+            }
+            Tab.RACE -> {
+                val races = Prefs.snapshot(this)?.races.orEmpty().filter { it.date >= LocalDate.now().toString() }
+                val drop = Prefs.taperDrop(this)
+                controls.visibility = View.VISIBLE
+                if (races.size > 1) {
+                    races.forEachIndexed { i, r ->
+                        val name = if (r.name.length > 22) r.name.take(20) + "…" else r.name
+                        chips.addView(chip(name, i == raceIndex) { raceIndex = i; show() })
+                    }
+                }
+                for ((lo, hi) in listOf(3 to 7, 5 to 10, 8 to 12, 10 to 15)) {
+                    chips.addView(chip("Taper drop $lo–$hi%", drop == lo to hi) { Prefs.setTaperDrop(this, lo, hi); show() })
+                }
             }
             else -> controls.visibility = View.GONE
         }
@@ -385,13 +400,28 @@ class MainActivity : Activity() {
         if (tab == Tab.WEEK) {
             drawWeek(wDp, hDp); return
         }
-        val rv: RemoteViews = when (tab) {
-            Tab.HOME -> WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true)
-            Tab.RACE -> ExtraWidgets.buildRace(this, wDp, hDp, inApp = true)
-            Tab.RECOVERY -> ExtraWidgets.buildRecovery(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true)
-            else -> ExtraWidgets.buildSubt(this, wDp, hDp, inApp = true)
-        }
+        val full = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         content.removeAllViews()
-        applyInto(content, rv, ViewGroup.LayoutParams.MATCH_PARENT)
+        try {
+            when (tab) {
+                Tab.HOME -> applyInto(content, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true), ViewGroup.LayoutParams.MATCH_PARENT)
+                Tab.RACE -> content.addView(AppScreens(this, wDp).race(raceIndex), full)
+                Tab.RECOVERY -> content.addView(AppScreens(this, wDp).recovery(Prefs.period(this, WidgetRenderer.APP_ID)), full)
+                else -> {
+                    // SubT: the widget card at a comfortable height, then the goal projection below
+                    val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+                    val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                    sv.addView(col)
+                    val cardH = minOf(hDp, 340)
+                    applyInto(col, ExtraWidgets.buildSubt(this, wDp, cardH, inApp = true), dp(cardH))
+                    col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
+                    AppScreens(this, wDp).subtExtras(col)
+                    content.addView(sv, full)
+                }
+            }
+        } catch (e: Exception) {
+            content.removeAllViews()
+            content.addView(note("Couldn't draw this screen: ${e.message}"))
+        }
     }
 }

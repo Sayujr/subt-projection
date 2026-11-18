@@ -40,6 +40,20 @@ data class Race(
     val projForm: Double? get() = if (projCtl != null && projAtl != null) projCtl - projAtl else null
 }
 
+/** Per-run aerobic metrics from intervals.icu (each may be missing). */
+data class RunMetric(
+    val date: String,
+    val name: String,
+    val seconds: Int,
+    val avgHr: Double?,
+    /** Aerobic decoupling / HR drift, percent. */
+    val decoupling: Double?,
+    /** Efficiency factor (output per heartbeat). */
+    val ef: Double?,
+    /** Power : HR ratio. */
+    val powerHr: Double?,
+)
+
 data class Snapshot(
     val fetchedAt: Long,
     /** Local date (yyyy-MM-dd) the data belongs to. */
@@ -52,6 +66,10 @@ data class Snapshot(
     /** Total load completed last week (Mon–Sun). */
     val lastWeekLoad: Int = 0,
     val races: List<Race> = emptyList(),
+    /** Projected end-of-day Fitness / Fatigue from tomorrow, using planned workouts. */
+    val proj: List<Day> = emptyList(),
+    /** Runs over the last ~90 days with HR drift / efficiency. */
+    val runs: List<RunMetric> = emptyList(),
 ) {
     fun toJson(): String = JSONObject().apply {
         put("fetchedAt", fetchedAt)
@@ -67,6 +85,15 @@ data class Snapshot(
         put("workouts", workoutsJson(workouts))
         put("week", workoutsJson(week))
         put("lastWeekLoad", lastWeekLoad)
+        put("proj", JSONArray().apply { proj.forEach { put(JSONObject().put("d", it.date).put("c", it.ctl).put("a", it.atl)) } })
+        put("runs", JSONArray().apply {
+            runs.forEach {
+                put(
+                    JSONObject().put("d", it.date).put("n", it.name).put("s", it.seconds)
+                        .putOpt("hr", it.avgHr).putOpt("dc", it.decoupling).putOpt("ef", it.ef).putOpt("ph", it.powerHr)
+                )
+            }
+        })
         put("races", JSONArray().apply {
             races.forEach {
                 put(
@@ -104,6 +131,8 @@ data class Snapshot(
             val o = JSONObject(s)
             val d = o.getJSONArray("days")
             val r = o.optJSONArray("races")
+            val pj = o.optJSONArray("proj")
+            val rn = o.optJSONArray("runs")
             Snapshot(
                 fetchedAt = o.getLong("fetchedAt"),
                 today = o.getString("today"),
@@ -117,6 +146,17 @@ data class Snapshot(
                 workouts = parseWorkouts(o.getJSONArray("workouts")),
                 week = parseWorkouts(o.optJSONArray("week")),
                 lastWeekLoad = o.optInt("lastWeekLoad"),
+                proj = if (pj == null) emptyList() else (0 until pj.length()).map {
+                    val x = pj.getJSONObject(it)
+                    Day(x.getString("d"), x.getDouble("c"), x.getDouble("a"))
+                },
+                runs = if (rn == null) emptyList() else (0 until rn.length()).map {
+                    val x = rn.getJSONObject(it)
+                    RunMetric(
+                        x.getString("d"), x.optString("n"), x.optInt("s"), x.optNullableDouble("hr"),
+                        x.optNullableDouble("dc"), x.optNullableDouble("ef"), x.optNullableDouble("ph"),
+                    )
+                },
                 races = if (r == null) emptyList() else (0 until r.length()).map {
                     val x = r.getJSONObject(it)
                     Race(
@@ -132,7 +172,10 @@ data class Snapshot(
 }
 
 /** Monthly SubT lap medians from the projection page's data.json. */
-data class SubtMonth(val month: String, val pace: Double, val laps: Int, val outlier: Boolean)
+data class SubtMonth(val month: String, val pace: Double, val laps: Int, val outlier: Boolean, val hr: Double? = null) {
+    /** Metres per minute per heartbeat: higher = more speed for the same HR. */
+    val efficiency: Double? get() = hr?.let { (1000.0 / pace) / it }
+}
 
 data class SubtData(val fetchedAt: Long, val months: List<SubtMonth>, val lapsLast30d: Int, val lastLapDate: String) {
     fun toJson(): String = JSONObject().apply {
@@ -140,7 +183,7 @@ data class SubtData(val fetchedAt: Long, val months: List<SubtMonth>, val lapsLa
         put("lapsLast30d", lapsLast30d)
         put("lastLapDate", lastLapDate)
         put("months", JSONArray().apply {
-            months.forEach { put(JSONObject().put("m", it.month).put("p", it.pace).put("n", it.laps).put("o", it.outlier)) }
+            months.forEach { put(JSONObject().put("m", it.month).put("p", it.pace).put("n", it.laps).put("o", it.outlier).putOpt("h", it.hr)) }
         })
     }.toString()
 
@@ -152,7 +195,10 @@ data class SubtData(val fetchedAt: Long, val months: List<SubtMonth>, val lapsLa
                 o.getLong("fetchedAt"),
                 (0 until m.length()).map {
                     val x = m.getJSONObject(it)
-                    SubtMonth(x.getString("m"), x.getDouble("p"), x.getInt("n"), x.getBoolean("o"))
+                    SubtMonth(
+                        x.getString("m"), x.getDouble("p"), x.getInt("n"), x.getBoolean("o"),
+                        if (x.has("h") && !x.isNull("h")) x.getDouble("h") else null,
+                    )
                 },
                 o.getInt("lapsLast30d"),
                 o.getString("lastLapDate"),

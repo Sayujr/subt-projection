@@ -354,8 +354,12 @@ object Charts {
 
         if (labels) {
             val text = labelPaint(density)
-            c.drawText(paceText(-f.hi), 0f, r.top + 9f * density, text)
-            c.drawText(paceText(-f.lo), 0f, r.bottom - 2f * density, text)
+            val grid = Paint().apply { this.color = GRID; strokeWidth = 1f }
+            for (k in 1..3) {
+                val v = f.lo + (f.hi - f.lo) * k / 4
+                c.drawLine(r.left, f.y(v), r.right, f.y(v), grid)
+                c.drawText(paceText(-v), 0f, f.y(v) + 3.5f * density, text)
+            }
             var last = -1f
             months.forEachIndexed { i, m ->
                 val lbl = runCatching {
@@ -412,6 +416,251 @@ object Charts {
         val den = xs.sumOf { (it - mx) * (it - mx) }
         if (den == 0.0) return null
         return xs.indices.sumOf { (xs[it] - mx) * (ys[it] - my) } / den
+    }
+
+    // ---------------------------------------------------------------- labelled time charts (app screens)
+
+    /**
+     * General time chart with value gridlines + labels, date labels, an optional shaded "normal"
+     * band and threshold line. [scatter] draws dots plus a 5-point rolling average (for per-run
+     * metrics); otherwise a line. [invert] plots smaller values higher (pace).
+     */
+    fun timeChart(
+        points: List<Pair<LocalDate, Double>>, start: LocalDate, end: LocalDate, lineColor: Int,
+        w: Int, h: Int, density: Float, bg: Int,
+        band: Pair<Double, Double>? = null, bandColor: Int = lineColor, threshold: Double? = null,
+        scatter: Boolean = false, invert: Boolean = false, fmt: (Double) -> String = { it.roundToInt().toString() },
+    ): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        if (points.isEmpty()) return bmp
+        val c = Canvas(bmp)
+        val text = labelPaint(density).apply { textSize = 10f * density }
+        val leftPad = 34f * density
+        val axisH = 15f * density
+        val r = RectF(leftPad, 4f * density, w - 4f * density, h - axisH)
+        val span = java.time.temporal.ChronoUnit.DAYS.between(start, end).toDouble().coerceAtLeast(1.0)
+        fun x(d: LocalDate) = (r.left + java.time.temporal.ChronoUnit.DAYS.between(start, d) / span * r.width()).toFloat()
+        val sign = if (invert) -1.0 else 1.0
+        val vals = points.map { it.second * sign }
+        var lo = vals.min(); var hi = vals.max()
+        band?.let { lo = min(lo, min(it.first, it.second) * sign); hi = max(hi, max(it.first, it.second) * sign) }
+        threshold?.let { lo = min(lo, it * sign); hi = max(hi, it * sign) }
+        if (hi - lo < 1e-6) { lo -= 1; hi += 1 }
+        val m = (hi - lo) * 0.1; lo -= m; hi += m
+        fun y(v: Double) = (r.top + (1 - (v * sign - lo) / (hi - lo)) * r.height()).toFloat()
+
+        // Horizontal gridlines with value labels
+        val grid = Paint().apply { this.color = GRID; strokeWidth = 1f }
+        for (k in 0..3) {
+            val vv = (lo + (hi - lo) * k / 3) * sign
+            val yy = y(vv)
+            c.drawLine(r.left, yy, r.right, yy, grid)
+            c.drawText(fmt(vv), 0f, yy + 3.5f * density, text)
+        }
+        // Normal band
+        band?.let {
+            val p = Paint().apply { this.color = withAlpha(bandColor, 0x22) }
+            c.drawRect(r.left, min(y(it.first), y(it.second)), r.right, max(y(it.first), y(it.second)), p)
+        }
+        threshold?.let {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE; strokeWidth = 1.2f * density; this.color = 0x99FFC53D.toInt()
+                pathEffect = DashPathEffect(floatArrayOf(4f * density, 3f * density), 0f)
+            }
+            c.drawLine(r.left, y(it), r.right, y(it), p)
+        }
+        // Date labels
+        val days = span.toInt()
+        val stepDays = when { days <= 21 -> 7; days <= 70 -> 14; days <= 200 -> 30; else -> 60 }
+        val fmtD = DateTimeFormatter.ofPattern(if (stepDays >= 30) "MMM" else "d MMM", Locale.getDefault())
+        var d = end
+        var lastLeft = Float.MAX_VALUE
+        while (!d.isBefore(start)) {
+            val lbl = d.format(fmtD)
+            val tw = text.measureText(lbl)
+            val xx = x(d)
+            if (xx - tw / 2 >= r.left - 2f && xx + tw / 2 + 4f * density < lastLeft) {
+                c.drawText(lbl, (xx - tw / 2).coerceAtMost(w - tw), h - 2f * density, text)
+                c.drawLine(xx, r.top, xx, r.bottom, grid)
+                lastLeft = xx - tw / 2
+            }
+            d = if (stepDays >= 30) d.minusMonths((stepDays / 30).toLong()) else d.minusDays(stepDays.toLong())
+        }
+
+        val sorted = points.sortedBy { it.first }
+        if (scatter) {
+            val dotP = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = withAlpha(lineColor, 0xAA) }
+            sorted.forEach { (dd, v) -> c.drawCircle(x(dd), y(v), 2.6f * density, dotP) }
+            if (sorted.size >= 3) {
+                val path = Path()
+                sorted.indices.forEach { i ->
+                    val win = sorted.subList(maxOf(0, i - 4), i + 1).map { it.second }
+                    val yy = y(win.average())
+                    if (i == 0) path.moveTo(x(sorted[i].first), yy) else path.lineTo(x(sorted[i].first), yy)
+                }
+                c.drawPath(path, stroke(lineColor, density, 2f))
+            }
+        } else {
+            val path = Path()
+            sorted.forEachIndexed { i, (dd, v) -> if (i == 0) path.moveTo(x(dd), y(v)) else path.lineTo(x(dd), y(v)) }
+            c.drawPath(path, stroke(lineColor, density, 1.8f))
+        }
+        val last = sorted.last()
+        dot(c, x(last.first), y(last.second), lineColor, density, bg)
+        return bmp
+    }
+
+    /**
+     * Race build-up: Fitness (blue; solid = history, dashed = projected) and Fatigue (purple, faint)
+     * from ~90 days before the race, the taper target band, checkpoint markers and the peak.
+     * Form (zone coloured) runs underneath.
+     */
+    fun raceBuild(
+        days: List<Day>, todayIndex: Int, marks: List<Pair<Int, String>>, peakIndex: Int,
+        target: Pair<Double, Double>?, w: Int, h: Int, density: Float, bg: Int,
+    ): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        if (days.size < 2) return bmp
+        val c = Canvas(bmp)
+        val text = labelPaint(density).apply { textSize = 10f * density }
+        val leftPad = 28f * density
+        val axisH = 15f * density
+        val gap = 8f * density
+        val chartH = h - axisH
+        val topR = RectF(leftPad, 14f * density, w.toFloat() - 6f * density, (chartH - gap) * 0.68f)
+        val botR = RectF(leftPad, topR.bottom + gap, w.toFloat() - 6f * density, chartH)
+        val ctl = days.map { it.ctl }
+        val atl = days.map { it.atl }
+        var lo = min(ctl.min(), atl.min()); var hi = max(ctl.max(), atl.max())
+        target?.let { lo = min(lo, it.first) }
+        val f = Frame(topR, days.size, 3f * density, lo, hi)
+        val grid = Paint().apply { color = GRID; strokeWidth = 1f }
+        for (k in 0..2) {
+            val v = f.lo + (f.hi - f.lo) * (k + 0.5) / 3
+            c.drawLine(topR.left, f.y(v), topR.right, f.y(v), grid)
+            c.drawText(v.roundToInt().toString(), 0f, f.y(v) + 3.5f * density, text)
+        }
+        // Taper target band on the last ~3 weeks
+        target?.let { (a, b) ->
+            val p = Paint().apply { color = 0x223DD68C }
+            val x0 = f.x(maxOf(0, days.size - 22))
+            c.drawRect(x0, f.y(b), topR.right, f.y(a), p)
+            val lbl = Paint(text).apply { color = 0xFF3DD68C.toInt() }
+            c.drawText("target", x0 + 2f * density, f.y(b) - 3f * density, lbl)
+        }
+        // Checkpoint markers
+        val markP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1f * density; color = 0x669AA3B2
+            pathEffect = DashPathEffect(floatArrayOf(3f * density, 3f * density), 0f)
+        }
+        for ((i, label) in marks) {
+            val xx = f.x(i)
+            c.drawLine(xx, topR.top - 2f * density, xx, chartH, markP)
+            val tw = text.measureText(label)
+            c.drawText(label, (xx - tw / 2).coerceIn(leftPad, w - tw), h - 2f * density, text)
+        }
+        // Today marker
+        if (todayIndex in days.indices) {
+            val xx = f.x(todayIndex)
+            val p = Paint().apply { color = 0x55FFFFFF; strokeWidth = 1.5f * density }
+            c.drawLine(xx, topR.top - 10f * density, xx, chartH, p)
+            val lbl = Paint(text).apply { color = 0xFFF2F4F8.toInt() }
+            c.drawText("today", (xx - lbl.measureText("today") / 2).coerceIn(leftPad, w - 30f * density), 10f * density, lbl)
+        }
+        // Fatigue (faint), Fitness history solid + projection dashed
+        c.drawPath(pathOf(f, atl), stroke(withAlpha(FormColors.FATIGUE, 0x88), density, 1.3f))
+        val hist = Path(); val proj = Path()
+        ctl.forEachIndexed { i, v ->
+            if (i <= todayIndex) { if (i == 0) hist.moveTo(f.x(i), f.y(v)) else hist.lineTo(f.x(i), f.y(v)) }
+            if (i >= todayIndex) { if (i == todayIndex || (todayIndex < 0 && i == 0)) proj.moveTo(f.x(i), f.y(v)) else proj.lineTo(f.x(i), f.y(v)) }
+        }
+        c.drawPath(hist, stroke(FormColors.FITNESS, density, 2.2f))
+        c.drawPath(proj, stroke(FormColors.FITNESS, density, 2.2f).apply {
+            pathEffect = DashPathEffect(floatArrayOf(5f * density, 4f * density), 0f)
+        })
+        // Peak
+        if (peakIndex in days.indices) {
+            dot(c, f.x(peakIndex), f.y(ctl[peakIndex]), FormColors.FITNESS, density, bg)
+            val lbl = Paint(text).apply { color = FormColors.FITNESS }
+            val s = "peak ${ctl[peakIndex].roundToInt()}"
+            c.drawText(s, (f.x(peakIndex) - lbl.measureText(s) / 2).coerceIn(leftPad, w - lbl.measureText(s)), f.y(ctl[peakIndex]) - 6f * density, lbl)
+        }
+        dot(c, f.x(days.lastIndex), f.y(ctl.last()), FormColors.FITNESS, density, bg)
+        // Form panel
+        drawForm(c, botR, days.map { it.form }, density, bg)
+        c.drawText("Form", 0f, botR.centerY() + 3.5f * density, text)
+        return bmp
+    }
+
+    /**
+     * SubT history (solid) and projection (dashed realistic line inside a fast–slow fan) against the
+     * 5K goal paces. Faster plots higher.
+     */
+    fun subtProjection(
+        hist: List<SubtMonth>, real: List<Double>, fast: List<Double>, slow: List<Double>,
+        goals: List<Pair<String, Double>>, w: Int, h: Int, density: Float, bg: Int,
+    ): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        if (hist.isEmpty() || real.isEmpty()) return bmp
+        val c = Canvas(bmp)
+        val text = labelPaint(density).apply { textSize = 10f * density }
+        val leftPad = 30f * density
+        val rightPad = 52f * density
+        val axisH = 15f * density
+        val r = RectF(leftPad, 6f * density, w - rightPad, h - axisH)
+        val n = hist.size + real.size - 1
+        fun x(i: Int) = r.left + i * r.width() / max(1, n - 1)
+        val all = hist.map { it.pace } + real + fast + slow
+        var lo = all.min(); var hi = all.max()   // pace: lo = fastest
+        val vis = goals.filter { it.second in (lo - 0.1)..(hi + 0.1) }
+        vis.forEach { lo = min(lo, it.second); hi = max(hi, it.second) }
+        val m = (hi - lo) * 0.06; lo -= m; hi += m
+        fun y(p: Double) = (r.top + (p - lo) / (hi - lo) * r.height()).toFloat()  // faster = higher
+
+        val grid = Paint().apply { color = GRID; strokeWidth = 1f }
+        for (k in 0..3) {
+            val p = lo + (hi - lo) * k / 3
+            c.drawLine(r.left, y(p), r.right, y(p), grid)
+            c.drawText(paceText(p), 0f, y(p) + 3.5f * density, text)
+        }
+        // Goal lines
+        val goalP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1f * density; color = 0x88FFC53D.toInt()
+            pathEffect = DashPathEffect(floatArrayOf(2f * density, 3f * density), 0f)
+        }
+        val goalT = Paint(text).apply { color = 0xFFFFC53D.toInt() }
+        vis.forEach { (name, pace) ->
+            c.drawLine(r.left, y(pace), r.right, y(pace), goalP)
+            c.drawText(name.removeSuffix(" 5K"), r.right + 4f * density, y(pace) + 3.5f * density, goalT)
+        }
+        // Fan between fast and slow
+        val off = hist.size - 1
+        val fan = Path()
+        fast.forEachIndexed { k, p -> if (k == 0) fan.moveTo(x(off + k), y(p)) else fan.lineTo(x(off + k), y(p)) }
+        for (k in slow.indices.reversed()) fan.lineTo(x(off + k), y(slow[k]))
+        fan.close()
+        c.drawPath(fan, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(SUBT, 0x22) })
+        // History + projection
+        val hp = Path()
+        hist.forEachIndexed { k, mo -> if (k == 0) hp.moveTo(x(k), y(mo.pace)) else hp.lineTo(x(k), y(mo.pace)) }
+        c.drawPath(hp, stroke(SUBT, density, 2f))
+        val pp = Path()
+        real.forEachIndexed { k, p -> if (k == 0) pp.moveTo(x(off + k), y(p)) else pp.lineTo(x(off + k), y(p)) }
+        c.drawPath(pp, stroke(SUBT, density, 2f).apply { pathEffect = DashPathEffect(floatArrayOf(5f * density, 4f * density), 0f) })
+        dot(c, x(off), y(hist.last().pace), SUBT, density, bg)
+        // Now marker and month labels
+        val nowP = Paint().apply { color = 0x55FFFFFF; strokeWidth = 1.5f * density }
+        c.drawLine(x(off), r.top, x(off), r.bottom, nowP)
+        val start = runCatching { LocalDate.parse(hist.first().month + "-01") }.getOrNull() ?: return bmp
+        val f = DateTimeFormatter.ofPattern("MMM yy", Locale.getDefault())
+        var lastRight = -1f
+        for (k in 0 until n step 6) {
+            val lbl = start.plusMonths(k.toLong()).format(f)
+            val tw = text.measureText(lbl)
+            val xx = (x(k) - tw / 2).coerceIn(0f, w - tw)
+            if (xx > lastRight + 4f * density) { c.drawText(lbl, xx, h - 2f * density, text); lastRight = xx + tw }
+        }
+        return bmp
     }
 
     private fun signed(v: Int) = if (v > 0) "+$v" else "$v"

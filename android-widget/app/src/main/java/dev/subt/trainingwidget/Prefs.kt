@@ -31,7 +31,8 @@ object Prefs {
 
     /** Days of history needed to draw every widget's chosen period. */
     fun historyNeeded(ctx: Context): Int =
-        (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + period(ctx, WidgetRenderer.APP_ID) + Periods.DEFAULT).max()
+        // 120 days minimum so the Race screen can show the 3-month build-up
+        (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + period(ctx, WidgetRenderer.APP_ID) + 120).max()
 
     fun subt(ctx: Context): SubtData? = sp(ctx).getString("subt", null)?.let { SubtData.fromJson(it) }
 
@@ -47,6 +48,16 @@ object Prefs {
 
     fun setRefreshing(ctx: Context, on: Boolean) =
         sp(ctx).edit().putLong("refreshing_since", if (on) System.currentTimeMillis() else 0L).apply()
+
+    // ---- race taper target: allowed Fitness drop from the 3-month peak, percent (low..high)
+
+    fun taperDrop(ctx: Context): Pair<Int, Int> {
+        val v = sp(ctx).getString("taper_drop", "5-10") ?: "5-10"
+        val p = v.split("-").mapNotNull { it.toIntOrNull() }
+        return if (p.size == 2) p[0] to p[1] else 5 to 10
+    }
+
+    fun setTaperDrop(ctx: Context, lo: Int, hi: Int) = sp(ctx).edit().putString("taper_drop", "$lo-$hi").apply()
 
     // ---- per-widget settings
 
