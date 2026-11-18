@@ -7,40 +7,57 @@ import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
 /**
- * Load-balance rules, judged day by day:
- *  - Outside a taper: Fitness ≥ (1 − band) × reference peak (blended 2/3/4-month peak).
- *  - Build day (all rules): Fatigue ≥ fatMin × Fitness and Form in the Grey zone (−10…+5).
- *  - Taper (A 14, B 10, C 5 days before a race): Fitness ≥ the race's floor (g × reference) and Form ≥ −10.
- *  - Race day and the 3 days after: not judged.
- * A week passes with no red day and ≥ N green days; a month with ≥ 75 % of its weeks passing.
+ * Load-balance streaks, judged on weekly (Mon–Sun) and monthly averages plus how you exit them.
+ *
+ * Week passes when, over its normal days:
+ *   • average Form is in the Grey zone (−10…+5)
+ *   • average Fatigue ≥ fatMin × average Fitness
+ *   • at exit (Sunday, or today for the current week) Fitness ≥ (1 − band) × reference peak and Form ≥ −20
+ * Excluded from the averages (Fitness floor still applies):
+ *   • TT mini-tapers: 2 days before a scheduled TT, the TT day and the day after
+ *   • race tapers (A 14 · B 10 · C 5 days before), race day and the 3 days after
+ * A week that's mostly taper / race is judged only on keeping Fitness above the race floor (0.88 × reference).
+ *
+ * Month passes when: average Form −12…+5, exit Fitness ≥ 97 % of entry (90 % with a race), ≤ 1 failed week.
  */
 object Streaks {
-    enum class Status { GREEN, AMBER, RED, TAPER_OK, TAPER_MISS, EXEMPT, NONE }
+    enum class Status { GREEN, AMBER, RED, TAPER_OK, TAPER_MISS, MINI, EXEMPT, NONE }
 
-    data class DayResult(val date: LocalDate, val status: Status, val notes: List<String>)
-    data class WeekResult(val monday: LocalDate, val days: List<DayResult>, val passed: Boolean?, val green: Int, val complete: Boolean)
-    data class MonthResult(val month: LocalDate, val weeks: List<WeekResult>, val passed: Boolean?)
+    data class DayResult(val date: LocalDate, val status: Status, val notes: List<String>, val day: Day? = null, val ref: Double? = null)
+    data class WeekResult(
+        val monday: LocalDate, val days: List<DayResult>, val passed: Boolean?, val green: Int, val complete: Boolean,
+        val avgForm: Double?, val avgRatio: Double?, val exitCtl: Double?, val exitForm: Double?, val floor: Double?,
+        val kind: String, val reasons: List<String>,
+    )
+    data class MonthResult(
+        val month: LocalDate, val weeks: List<WeekResult>, val passed: Boolean?,
+        val avgForm: Double?, val entryCtl: Double?, val exitCtl: Double?, val failedWeeks: Int, val hadRace: Boolean,
+    )
     data class Summary(
         val days: List<DayResult>, val weeks: List<WeekResult>, val months: List<MonthResult>,
         val weekStreak: Int, val monthStreak: Int, val bestWeekStreak: Int, val thisWeek: WeekResult?,
     )
 
     private data class RaceRef(val date: LocalDate, val category: String, val name: String)
+    private val TT = Regex("(\\bTT\\b|time ?trial|parkrun)", RegexOption.IGNORE_CASE)
 
     fun compute(ctx: Context): Summary? {
         val s = Prefs.snapshot(ctx) ?: return null
         val band = Prefs.fitnessBand(ctx) / 100.0
         val fatMin = Prefs.fatigueMin(ctx) / 100.0
-        val needGreen = Prefs.greyDays(ctx)
-        val series = (s.days).sortedBy { it.date }
+        val series = s.days.sortedBy { it.date }
         if (series.size < 30) return null
         val races = (Prefs.raceHistory(ctx)?.second.orEmpty().map { RaceRef(LocalDate.parse(it.date), it.category, it.name) } +
             s.races.map { RaceRef(LocalDate.parse(it.date), it.category, it.name) }).distinctBy { it.date }
+        val raceDates = races.map { it.date }.toSet()
+        // Scheduled / done time trials (not races) → mini-taper windows
+        val ttDates = (s.week.filter { TT.containsMatchIn(it.name) }.map { it.date } + s.runs.filter { TT.containsMatchIn(it.name) }.map { it.date })
+            .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.filter { it !in raceDates }.toSet()
 
         val byDate = series.associateBy { it.date }
         fun peak(d: LocalDate, days: Long) = series.filter { it.date > d.minusDays(days).toString() && it.date <= d.toString() }.maxOfOrNull { it.ctl }
 
-        val start = LocalDate.parse(series.first().date).plusDays(60)   // need 2 months for the peak
+        val start = LocalDate.parse(series.first().date).plusDays(60)
         val today = LocalDate.now()
         val dayResults = mutableListOf<DayResult>()
         var d = start
@@ -52,52 +69,86 @@ object Streaks {
             val ahead = races.filter { !it.date.isBefore(d) }.minByOrNull { it.date }
             val taperLen = when (ahead?.category) { "RACE_A" -> 14L; "RACE_B" -> 10L; "RACE_C" -> 5L; else -> 0L }
             val inTaper = ahead != null && ChronoUnit.DAYS.between(d, ahead.date) in 1..taperLen
+            val mini = ttDates.any { tt -> ChronoUnit.DAYS.between(d, tt) in -1L..2L }
+            val floorOk = day.ctl >= (1 - band) * ref
             val notes = mutableListOf<String>()
             val status = when {
                 after != null -> { notes += "Race / recovery (${after.name.take(24)})"; Status.EXEMPT }
                 inTaper -> {
-                    val g = 0.89 - (if (ahead!!.category == "RACE_A") 0.01 else 0.0)
-                    val ok = day.ctl >= g * ref && day.form >= -10
-                    notes += "Taper for ${ahead.name.take(24)}"
-                    if (day.ctl < g * ref) notes += "Fitness below taper floor"
-                    if (day.form < -10) notes += "Form still ${day.form.toInt()}"
+                    val ok = day.ctl >= 0.88 * ref
+                    notes += "Taper for ${ahead!!.name.take(24)}"
+                    if (!ok) notes += "Fitness below taper floor"
                     if (ok) Status.TAPER_OK else Status.TAPER_MISS
                 }
+                mini -> {
+                    notes += "TT mini-taper"
+                    if (!floorOk) { notes += "Fitness below floor"; Status.RED } else Status.MINI
+                }
                 else -> {
-                    val floorOk = day.ctl >= (1 - band) * ref
                     val fatOk = day.atl >= fatMin * day.ctl
                     val formOk = day.form in -10.0..5.0
-                    if (!floorOk) notes += "Fitness ${day.ctl.toInt()} below floor ${((1 - band) * ref).toInt()}"
-                    if (!fatOk) notes += "Fatigue ${day.atl.toInt()} under ${(fatMin * 100).toInt()}% of Fitness"
-                    if (!formOk) notes += "Form ${day.form.toInt()} outside Grey zone"
+                    if (!floorOk) notes += "Fitness below floor"
+                    if (!fatOk) notes += "Fatigue low"
+                    if (!formOk) notes += "Form outside Grey"
                     when { !floorOk -> Status.RED; fatOk && formOk -> Status.GREEN; else -> Status.AMBER }
                 }
             }
-            dayResults += DayResult(d, status, notes)
+            dayResults += DayResult(d, status, notes, day, ref)
             d = d.plusDays(1)
         }
 
-        // Weeks (Mon–Sun)
+        // ---- Weeks
         val weeks = dayResults.groupBy { it.date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)) }.toSortedMap().map { (mon, ds) ->
             val complete = mon.plusDays(6).isBefore(today)
-            val judged = ds.filter { it.status != Status.EXEMPT && it.status != Status.NONE }
-            val green = judged.count { it.status == Status.GREEN || it.status == Status.TAPER_OK }
-            val bad = judged.any { it.status == Status.RED || it.status == Status.TAPER_MISS }
-            val need = minOf(needGreen, judged.size)
-            val passed = if (judged.isEmpty()) null else !bad && green >= need
-            WeekResult(mon, ds, passed, green, complete)
+            val withData = ds.filter { it.day != null }
+            val normal = withData.filter { it.status == Status.GREEN || it.status == Status.AMBER || it.status == Status.RED }
+            val taperish = withData.count { it.status == Status.TAPER_OK || it.status == Status.TAPER_MISS || it.status == Status.EXEMPT }
+            val exit = withData.lastOrNull()
+            val reasons = mutableListOf<String>()
+            val green = ds.count { it.status == Status.GREEN }
+            if (exit == null) return@map WeekResult(mon, ds, null, green, complete, null, null, null, null, null, "no data", emptyList())
+            val exitDay = exit.day!!; val ref = exit.ref ?: exitDay.ctl
+            if (taperish >= 4) {
+                val ok = withData.none { it.status == Status.TAPER_MISS }
+                if (!ok) reasons += "Fitness dipped below the race floor"
+                return@map WeekResult(mon, ds, ok, green, complete, null, null, exitDay.ctl, exitDay.form, 0.88 * ref, "taper / race week", reasons)
+            }
+            val floor = (1 - band) * ref
+            val avgForm = normal.mapNotNull { it.day?.form }.takeIf { it.isNotEmpty() }?.average()
+            val avgCtl = normal.mapNotNull { it.day?.ctl }.takeIf { it.isNotEmpty() }?.average()
+            val avgAtl = normal.mapNotNull { it.day?.atl }.takeIf { it.isNotEmpty() }?.average()
+            val ratio = if (avgCtl != null && avgAtl != null && avgCtl > 0) avgAtl / avgCtl else null
+            val exitFloorOk = exitDay.ctl >= floor
+            val exitFormOk = exitDay.form >= -20
+            if (!exitFloorOk) reasons += "Exited with Fitness ${exitDay.ctl.toInt()} below floor ${floor.toInt()}"
+            if (!exitFormOk) reasons += "Exited buried (Form ${exitDay.form.toInt()})"
+            var passed = exitFloorOk && exitFormOk
+            if (normal.size >= 3) {
+                if (avgForm != null && avgForm !in -10.0..5.0) { passed = false; reasons += "Average Form ${avgForm.toInt()} outside Grey zone" }
+                if (ratio != null && ratio < fatMin) { passed = false; reasons += "Average Fatigue ${(ratio * 100).toInt()}% of Fitness" }
+            }
+            val kind = if (ds.any { it.status == Status.MINI }) "TT mini-taper week" else "build week"
+            WeekResult(mon, ds, passed, green, complete, avgForm, ratio, exitDay.ctl, exitDay.form, floor, kind, reasons)
         }
         val done = weeks.filter { it.complete }
         fun streak(list: List<Boolean?>): Int { var n = 0; for (p in list.reversed()) { if (p == null) continue; if (p) n++ else break }; return n }
         var best = 0; var run = 0
         for (w in done) { if (w.passed == true) { run++; best = maxOf(best, run) } else if (w.passed == false) run = 0 }
 
-        val months = done.groupBy { it.monday.withDayOfMonth(1) }.toSortedMap().map { (m, ws) ->
-            val judged = ws.filter { it.passed != null }
-            MonthResult(m, ws, if (judged.isEmpty()) null else judged.count { it.passed == true } >= kotlin.math.ceil(judged.size * 0.75))
+        // ---- Months (weeks assigned by their Monday)
+        val months = weeks.groupBy { it.monday.withDayOfMonth(1) }.toSortedMap().map { (m, ws) ->
+            val mDays = dayResults.filter { it.date.withDayOfMonth(1) == m && it.day != null }
+            val normalForms = mDays.filter { it.status == Status.GREEN || it.status == Status.AMBER || it.status == Status.RED }.mapNotNull { it.day?.form }
+            val avgForm = normalForms.takeIf { it.isNotEmpty() }?.average()
+            val entry = mDays.firstOrNull()?.day?.ctl; val exit = mDays.lastOrNull()?.day?.ctl
+            val hadRace = races.any { it.date.withDayOfMonth(1) == m }
+            val failed = ws.count { it.complete && it.passed == false }
+            val complete = m.plusMonths(1).minusDays(1).isBefore(today)
+            val passed = if (!complete || entry == null || exit == null) null else
+                failed <= 1 && exit >= entry * (if (hadRace) 0.90 else 0.97) && (avgForm == null || avgForm in -12.0..5.0)
+            MonthResult(m, ws, passed, avgForm, entry, exit, failed, hadRace)
         }
-        val completeMonths = months.filter { it.month.plusMonths(1).isBefore(today.withDayOfMonth(1).plusDays(1)) }
-        return Summary(dayResults, weeks, months, streak(done.map { it.passed }), streak(completeMonths.map { it.passed }), best,
+        return Summary(dayResults, weeks, months, streak(done.map { it.passed }), streak(months.map { it.passed }), best,
             weeks.lastOrNull()?.takeIf { !it.complete })
     }
 }

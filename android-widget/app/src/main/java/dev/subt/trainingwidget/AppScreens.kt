@@ -1303,6 +1303,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         Streaks.Status.AMBER -> WARN
         Streaks.Status.RED, Streaks.Status.TAPER_MISS -> BAD
         Streaks.Status.EXEMPT -> 0xFF5EC8FF.toInt()
+        Streaks.Status.MINI -> 0xFF8C9EFF.toInt()
         Streaks.Status.NONE -> 0xFF2C3240.toInt()
     }
 
@@ -1336,22 +1337,28 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         stats3(top, listOf(
             Triple("Week streak", "${st.weekStreak}" to GOOD, "best ${st.bestWeekStreak}"),
             Triple("Month streak", "${st.monthStreak}" to GOOD, "${st.months.count { it.passed == true }} months passed"),
-            Triple("This week", (st.thisWeek?.let { "${it.green}/${Prefs.greyDays(a)}" } ?: "–") to TEXT, "green days so far"),
+            Triple("This week", (st.thisWeek?.avgForm?.let { signed(it.roundToInt()) } ?: "–") to
+                (st.thisWeek?.avgForm?.let { if (it in -10.0..5.0) GOOD else WARN } ?: TEXT), "avg Form so far"),
         ))
         st.thisWeek?.let { dayDots(top, it.days, LocalDate.now()) }
 
         // Rules + adjusters
         val rules = card(col)
         label(rules, "Your rules")
-        val band = Prefs.fitnessBand(a); val fat = Prefs.fatigueMin(a); val g = Prefs.greyDays(a)
-        text(rules, spans("● " to GOOD, "Fitness stays within $band% of your reference peak (blended 2/3/4-month peak), except in a taper" to TEXT), 14f, top = 6)
-        chipRow(rules, listOf(5, 10, 15, 20).map { "$it%" }, listOf(5, 10, 15, 20).indexOf(band)) { Prefs.setFitnessBand(a, listOf(5, 10, 15, 20)[it]); onChange() }
-        text(rules, spans("● " to GOOD, "Building: Fatigue ≥ $fat% of Fitness and Form in the Grey zone (−10 to +5)" to TEXT), 14f, top = 10)
+        val band = Prefs.fitnessBand(a); val fat = Prefs.fatigueMin(a)
+        text(rules, spans("Week (Mon–Sun) passes when:" to TEXT), 14f, bold = true, top = 6)
+        text(rules, "• average Form across the week is in the Grey zone (−10 to +5)\n" +
+            "• average Fatigue is at least $fat% of average Fitness\n" +
+            "• you exit the week (Sunday) with Fitness within $band% of your reference peak and Form no lower than −20", 13.5f, DIM, top = 2)
+        chipRow(rules, listOf(5, 10, 15, 20).map { "Fitness within $it%" }, listOf(5, 10, 15, 20).indexOf(band)) { Prefs.setFitnessBand(a, listOf(5, 10, 15, 20)[it]); onChange() }
         chipRow(rules, listOf(90, 95, 100, 105).map { "Fatigue ≥ $it%" }, listOf(90, 95, 100, 105).indexOf(fat)) { Prefs.setFatigueMin(a, listOf(90, 95, 100, 105)[it]); onChange() }
-        text(rules, spans("● " to GOOD, "A week passes with no Fitness-floor misses and at least $g days meeting every rule. A month passes with 75% of its weeks." to TEXT), 14f, top = 10)
-        chipRow(rules, listOf(3, 4, 5, 6).map { "$it days" }, listOf(3, 4, 5, 6).indexOf(g)) { Prefs.setGreyDays(a, listOf(3, 4, 5, 6)[it]); onChange() }
-        text(rules, "Tapers (A 14 · B 10 · C 5 days before a race) are judged on keeping Fitness above the race floor with Form ≥ −10. Race day and the 3 days after aren't judged.", 12f, FAINT, top = 10)
-        text(rules, spans("● green all rules  " to GOOD, "● amber floor OK, build rule missed  " to WARN, "● red under floor  " to BAD, "● race / recovery" to 0xFF5EC8FF.toInt()), 11.5f, top = 8)
+        text(rules, spans("Month passes when:" to TEXT), 14f, bold = true, top = 12)
+        text(rules, "• average Form is −12 to +5\n• exit Fitness is at least 97% of entry (90% in a race month)\n• no more than one week failed", 13.5f, DIM, top = 2)
+        text(rules, spans("Lighter rules:" to TEXT), 14f, bold = true, top = 12)
+        text(rules, "• TT mini-taper (2 days before a scheduled TT, the TT day and the day after): left out of the Form and Fatigue averages, but the Fitness floor still applies\n" +
+            "• Race taper (A 14 · B 10 · C 5 days): judged only on Fitness staying above the race floor. Race day and the 3 days after aren't judged", 13.5f, DIM, top = 2)
+        text(rules, spans("Day dots: " to FAINT, "● all rules  " to GOOD, "● partly  " to WARN, "● under floor  " to BAD, "● TT mini-taper  " to 0xFF8C9EFF.toInt(), "● race / taper" to 0xFF5EC8FF.toInt()), 11.5f, top = 10)
+        text(rules, "Dots are a day-by-day guide. Pass or fail comes from the weekly averages and how you exit the week.", 11.5f, FAINT, top = 2)
 
         // Weeks, newest first
         val wc = card(col)
@@ -1361,24 +1368,36 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             head.addView(TextView(a).apply { text = "${w.monday.format(dm)} – ${w.monday.plusDays(6).format(dm)}"; setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) },
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             head.addView(TextView(a).apply {
-                text = when { !w.complete -> "in progress · ${w.green} green"; w.passed == true -> "✓ passed · ${w.green} green"; w.passed == false -> "missed · ${w.green} green"; else -> "not judged" }
+                text = when { !w.complete -> "in progress"; w.passed == true -> "✓ passed"; w.passed == false -> "missed"; else -> "not judged" }
                 setTextColor(when { !w.complete -> DIM; w.passed == true -> GOOD; w.passed == false -> BAD; else -> FAINT }); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
             })
             wc.addView(head)
             dayDots(wc, w.days, LocalDate.now())
-            val misses = w.days.flatMap { it.notes }.groupingBy { it.substringBefore(" ").let { k -> if (k.startsWith("Fitness")) "Fitness floor" else if (k.startsWith("Fatigue")) "Fatigue low" else if (k.startsWith("Form")) "Form outside Grey" else it } }.eachCount()
-            if (misses.isNotEmpty()) text(wc, misses.entries.joinToString(" · ") { "${it.key} ×${it.value}" }, 11.5f, FAINT, top = 2)
+            val facts = listOfNotNull(
+                w.kind.takeIf { it != "build week" },
+                w.avgForm?.let { "avg Form ${signed(it.roundToInt())}" },
+                w.avgRatio?.let { "Fatigue ${(it * 100).roundToInt()}% of Fitness" },
+                if (w.exitCtl != null && w.floor != null) "exit Fitness ${w.exitCtl.roundToInt()} (floor ${w.floor.roundToInt()})" else null,
+                w.exitForm?.let { "exit Form ${signed(it.roundToInt())}" },
+            )
+            text(wc, facts.joinToString(" · "), 11.5f, FAINT, top = 2)
+            if (w.reasons.isNotEmpty() && w.passed == false) text(wc, w.reasons.joinToString(" · "), 11.5f, WARN, top = 1)
         }
         // Months
         val mc = card(col)
         label(mc, "Months")
         for (m in st.months.reversed()) {
-            val passed = m.weeks.count { it.passed == true }; val judged = m.weeks.count { it.passed != null }
             row(mc, listOf(
                 m.month.format(DateTimeFormatter.ofPattern("MMMM yyyy", loc)) to TEXT,
-                "$passed / $judged weeks" to DIM,
-                (when (m.passed) { true -> "✓ passed"; false -> "missed"; null -> "–" }) to (when (m.passed) { true -> GOOD; false -> BAD; null -> FAINT }),
-            ), weights = listOf(1.4f, 1f, 1f))
+                (when (m.passed) { true -> "✓ passed"; false -> "missed"; null -> "in progress" }) to (when (m.passed) { true -> GOOD; false -> BAD; null -> FAINT }),
+            ), weights = listOf(1.4f, 1f))
+            val parts = listOfNotNull(
+                m.avgForm?.let { "avg Form ${signed(it.roundToInt())}" },
+                if (m.entryCtl != null && m.exitCtl != null) "Fitness ${m.entryCtl.roundToInt()} → ${m.exitCtl.roundToInt()} (${if (m.exitCtl >= m.entryCtl) "+" else "−"}${abs1((m.exitCtl / m.entryCtl - 1) * 100).roundToInt()}%)" else null,
+                "${m.failedWeeks} week${if (m.failedWeeks == 1) "" else "s"} failed",
+                if (m.hadRace) "race month" else null,
+            )
+            text(mc, parts.joinToString(" · "), 11.5f, FAINT, top = 0)
         }
     }
 
@@ -1414,6 +1433,9 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             Triple("W/kg", (p.wkg?.let { String.format(loc, "%.2f", it) } ?: "–") to TEXT, p.kg?.let { "${fmt1(it)} kg" } ?: "add weight"),
             Triple("RE", (p.re?.let { String.format(loc, "%.3f", it) } ?: "–") to GOOD, "speed per W/kg"),
         ))
+        text(c, spans("Weight ${p.kg?.let { "${fmt1(it)} kg" } ?: "not set"}" to DIM,
+            (if (Prefs.weightOverride(a) != null) "  (yours) · update ›" else "  (intervals.icu) · enter yours ›") to FormColors.FITNESS), 13f, top = 4)
+            .setOnClickListener { askNumber("Your weight today (kg)", p.kg) { Prefs.setWeightOverride(a, it) } }
         val longDrift = s.runs.filter { it.seconds >= 75 * 60 && it.decoupling != null }.takeLast(5).map { it.decoupling!! }
         val reps = Prefs.subtReps(a)?.second.orEmpty().filter { it.watts != null }
         val subtW = reps.mapNotNull { it.watts }.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
