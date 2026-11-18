@@ -64,8 +64,8 @@ object Streaks {
     }
 
     private data class RaceRef(val date: LocalDate, val category: String, val name: String)
-    /** Names that mark a TT / race / CP test: "race", "TT", "time trial", "parkrun", "CP" (but not "race pace"). */
-    val TT = Regex("(\\bTT\\b|time ?trial|parkrun|\\bCP\\b|\\brace\\b(?!\\s*-?\\s*pace))", RegexOption.IGNORE_CASE)
+    /** Names that mark a TT / race / CP test: "race", "TT", "time trial", "parkrun", "CP" / "CPT" (but not "race pace"). */
+    val TT = Regex("(\\bTT\\b|time ?trial|parkrun|\\bCPT?\\b|\\brace\\b(?!\\s*-?\\s*pace))", RegexOption.IGNORE_CASE)
     fun isTtName(name: String) = TT.containsMatchIn(name)
 
     /** [longSeries]: optional multi-year Fitness history (for the calendar view); defaults to the cached 12 months. */
