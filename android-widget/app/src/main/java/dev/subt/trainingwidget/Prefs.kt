@@ -148,10 +148,8 @@ object Prefs {
 
     fun effectivePbs(ctx: Context): Pbs {
         val f = pbs(ctx)
-        fun pick(fetched: Pb?, key: String): Pb? {
-            val m = manualPb(ctx, key)?.let { Pb(it, null, "entered by you") }
-            return listOfNotNull(fetched, m).minByOrNull { it.seconds }
-        }
+        // A PB you entered is treated as accurate and always wins
+        fun pick(fetched: Pb?, key: String): Pb? = manualPb(ctx, key)?.let { Pb(it, null, "entered by you") } ?: fetched
         return Pbs(f?.fetchedAt ?: 0L, pick(f?.fiveK, "5k"), pick(f?.tenK, "10k"), pick(f?.half, "hm"))
     }
     /** true = calibrate the race gap from your 5K PB; false = the projection page's 11 %. */

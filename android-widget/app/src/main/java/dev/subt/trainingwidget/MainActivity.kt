@@ -613,6 +613,7 @@ class MainActivity : Activity() {
                     applyInto(col, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, chartH, inApp = true), dp(chartH))
                     col.getChildAt(col.childCount - 1)?.let { enableScrub(it) }
                     col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
+                    screens.deviationsCard(col)
                     screens.todayPowerCard(col)
                     screens.weekChecklist(col)
                     screens.streakLine(col)

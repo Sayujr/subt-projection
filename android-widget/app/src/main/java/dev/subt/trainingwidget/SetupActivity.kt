@@ -63,6 +63,12 @@ class SetupActivity : Activity() {
             Triple(R.id.num_pbhm, Prefs.manualPb(this, "hm")?.let { tm(it) }, autoPb?.half?.let { "auto: ${tm(it.seconds)}" }),
         )
         for ((id, v, hint) in fields) findViewById<EditText>(id).apply { setText(v ?: ""); this.hint = hint ?: "auto" }
+        Deviations.compute(this).takeIf { it.isNotEmpty() }?.let { dev ->
+            findViewById<TextView>(R.id.num_deviations).apply {
+                visibility = View.VISIBLE
+                text = "Differs from intervals.icu (the app uses yours):\n" + dev.joinToString("\n") { "• $it" }
+            }
+        }
 
         val stored = Prefs.credentials(this)
         stored?.let {

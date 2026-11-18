@@ -68,6 +68,12 @@ object Notifier {
         }
         if (!Prefs.notifyAlerts(ctx)) return
 
+        // Your numbers vs intervals.icu (once each time the set of differences changes)
+        val dev = Deviations.compute(ctx)
+        if (dev.isNotEmpty()) once(ctx, "deviations", dev.joinToString("|").hashCode().toString()) {
+            post(ctx, ALERTS, 6, "Your numbers differ from intervals.icu", dev.joinToString("\n") + "\nThe app uses yours. Update intervals.icu if it should match.", "HOME")
+        }
+
         // Resting HR spike
         val rhr = s.days.mapNotNull { it.rhr }
         val last = s.days.last().rhr

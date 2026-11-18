@@ -1221,6 +1221,16 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         for ((color, t) in v.reasons) bullet(c, color, t)
     }
 
+    /** Differences between your entered numbers and intervals.icu (the app uses yours). */
+    fun deviationsCard(col: LinearLayout) {
+        val dev = Deviations.compute(a)
+        if (dev.isEmpty()) return
+        val c = card(col)
+        label(c, "Check intervals.icu", WARN)
+        dev.forEach { bullet(c, WARN, it) }
+        text(c, "The app is using your numbers. Update intervals.icu yourself if it should match. The app never changes it.", 11.5f, FAINT, top = 6)
+    }
+
     /** Today's planned sessions with their power steps (app only). */
     fun todayPowerCard(col: LinearLayout) {
         val s = Prefs.snapshot(a) ?: return
