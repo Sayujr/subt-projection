@@ -645,7 +645,7 @@ object Charts {
      */
     fun raceBuild(
         days: List<Day>, todayIndex: Int, marks: List<Pair<Int, String>>, peakIndex: Int,
-        target: Pair<Double, Double>?, w: Int, h: Int, density: Float, bg: Int,
+        guardrail: Double?, fatigueTarget: Double?, w: Int, h: Int, density: Float, bg: Int,
     ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         if (days.size < 2) return bmp
@@ -660,7 +660,8 @@ object Charts {
         val ctl = days.map { it.ctl }
         val atl = days.map { it.atl }
         var lo = min(ctl.min(), atl.min()); var hi = max(ctl.max(), atl.max())
-        target?.let { lo = min(lo, it.first) }
+        guardrail?.let { lo = min(lo, it) }
+        fatigueTarget?.let { lo = min(lo, it); hi = max(hi, it) }
         val f = Frame(topR, days.size, 3f * density, lo, hi)
         val grid = Paint().apply { color = GRID; strokeWidth = 1f }
         for (k in 0..2) {
@@ -668,13 +669,22 @@ object Charts {
             c.drawLine(topR.left, f.y(v), topR.right, f.y(v), grid)
             c.drawText(v.roundToInt().toString(), 0f, f.y(v) + 3.5f * density, text)
         }
-        // Taper target band on the last ~3 weeks
-        target?.let { (a, b) ->
-            val p = Paint().apply { color = 0x223DD68C }
+        // Fitness guardrail (blue) across the chart, Fatigue target (purple) over the last ~3 weeks
+        fun dashed(col: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.4f * density; this.color = col
+            pathEffect = DashPathEffect(floatArrayOf(5f * density, 4f * density), 0f)
+        }
+        guardrail?.let { g ->
+            c.drawLine(topR.left, f.y(g), topR.right, f.y(g), dashed(withAlpha(FormColors.FITNESS, 0xAA)))
+            val lbl = Paint(text).apply { this.color = FormColors.FITNESS }
+            c.drawText("fitness floor ${g.roundToInt()}", topR.left + 4f * density, f.y(g) + 12f * density, lbl)
+        }
+        fatigueTarget?.let { t ->
             val x0 = f.x(maxOf(0, days.size - 22))
-            c.drawRect(x0, f.y(b), topR.right, f.y(a), p)
-            val lbl = Paint(text).apply { color = 0xFF3DD68C.toInt() }
-            c.drawText("target", x0 + 2f * density, f.y(b) - 3f * density, lbl)
+            c.drawLine(x0, f.y(t), topR.right, f.y(t), dashed(FormColors.FATIGUE))
+            val lbl = Paint(text).apply { this.color = FormColors.FATIGUE }
+            val s2 = "fatigue target ${t.roundToInt()}"
+            c.drawText(s2, (topR.right - lbl.measureText(s2)), f.y(t) - 4f * density, lbl)
         }
         // Checkpoint markers
         val markP = Paint(Paint.ANTI_ALIAS_FLAG).apply {

@@ -191,7 +191,10 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val start = rd.minusDays(90).toString()
         val window = series.filter { it.date >= start && it.date <= eve.toString() }
         val hasEve = window.lastOrNull()?.date == eve.toString()
-        val (dropLo, dropHi) = Prefs.taperDrop(a)
+        val guard = Prefs.fitnessGuardrail(a)
+        // Fatigue target: fixed from the next race's projected race-morning Fatigue unless set
+        val nextEve = races.first().let { r0 -> series.firstOrNull { it.date == LocalDate.parse(r0.date).minusDays(1).toString() } }
+        val fatTarget: Double? = Prefs.fatigueTarget(a) ?: nextEve?.atl?.also { Prefs.setFatigueTarget(a, it) }
 
         if (window.size < 2) {
             val c = card(col)
@@ -211,7 +214,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         }
         val peakIdx = window.indices.maxBy { window[it].ctl }
         val peak = window[peakIdx]
-        val targetBand = peak.ctl * (1 - dropHi / 100.0) to peak.ctl * (1 - dropLo / 100.0)
+        val floor = peak.ctl * (1 - guard / 100.0)
         val todayIdx = window.indexOfLast { it.date <= today.toString() }
 
         fun idxFor(dd: LocalDate) = window.indexOfFirst { it.date == dd.toString() }
@@ -222,10 +225,10 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         // Build-up chart
         val cc = card(col)
         label(cc, "Fitness build-up · last 3 months")
-        image(cc, Charts.raceBuild(window, todayIdx, cps, peakIdx, targetBand, chartW(), dp(230), d, TILE), 230)
+        image(cc, Charts.raceBuild(window, todayIdx, cps, peakIdx, floor, fatTarget, chartW(), dp(230), d, TILE), 230)
         text(cc, spans(
             "━ Fitness " to FormColors.FITNESS, "(solid = done, dashed = planned)   " to FAINT,
-            "━ Fatigue   " to FormColors.FATIGUE, "▇ taper target" to GOOD,
+            "━ Fatigue   " to FormColors.FATIGUE, "┅ fatigue target · fitness floor" to DIM,
         ), 11f, top = 6)
         if (!hasEve) text(cc, "Your plan is projected only 12 weeks ahead, so race-day values appear once the race is within 12 weeks.", 12f, WARN, top = 6)
 
@@ -240,14 +243,14 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             val pct = (dd.ctl / peak.ctl * 100).roundToInt()
             val pctColor = when {
                 !highlight -> DIM
-                pct in (100 - dropHi)..(100 - dropLo) -> GOOD
-                else -> WARN
+                pct >= 100 - guard -> GOOD
+                else -> BAD
             }
             val dl = date(dd.date)?.format(dm) ?: ""
             row(t, listOf(
                 spans(name to (if (highlight) TEXT else DIM), "\n$dl" to FAINT) to TEXT,
                 "${dd.ctl.roundToInt()}" to FormColors.FITNESS,
-                "${dd.atl.roundToInt()}" to FormColors.FATIGUE,
+                "${dd.atl.roundToInt()}" to (if (highlight && fatTarget != null) (if (dd.atl <= fatTarget + 1) GOOD else WARN) else FormColors.FATIGUE),
                 signed(dd.form.roundToInt()) to z.color,
                 "$pct%" to pctColor,
             ))
@@ -259,63 +262,62 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         if (todayIdx >= 0 && window[todayIdx].date != eve.toString()) cpRow("Today", window[todayIdx])
         if (hasEve) cpRow("Race day", window.last(), highlight = true)
 
-        // Targets
+        // Targets: Fatigue is the target, Fitness is a guardrail, Form is the result
         val eveDay = if (hasEve) window.last() else null
         val tg = card(col)
-        label(tg, "Targets")
-        val (fLo, fHi) = formTarget(race.category)
-        text(tg, spans(
-            "Fitness: " to DIM, "$dropLo–$dropHi% below peak" to TEXT,
-            "  →  ${targetBand.first.roundToInt()}–${targetBand.second.roundToInt()}" to GOOD,
-        ), 15f, top = 4)
-        text(tg, spans("Form: " to DIM, "${signed(fLo)} to ${signed(fHi)}" to TEXT, " for a ${race.category.removePrefix("RACE_")} race" to DIM), 15f, top = 4)
-        if (eveTop != null) {
-            // Form = Fitness − Fatigue, so the Form range sets a Fatigue range for race-day Fitness
-            val atlLo = (eveTop.ctl - fHi).roundToInt()
-            val atlHi = (eveTop.ctl - fLo).roundToInt()
-            text(tg, spans("Fatigue: " to DIM, "$atlLo–$atlHi" to TEXT, " (race-day Fitness minus the Form range)" to DIM), 15f, top = 4)
+        label(tg, "Race-morning targets")
+        if (fatTarget != null) {
+            text(tg, spans("Fatigue target: " to DIM, "≤ ${fatTarget.roundToInt()}" to FormColors.FATIGUE,
+                "  (from ${races.first().name.take(28)}'s projection · adjust with the chips)" to FAINT), 15f, top = 4)
         }
+        text(tg, spans("Fitness guardrail: " to DIM, "stay above ${floor.roundToInt()}" to FormColors.FITNESS,
+            "  (no more than $guard% below the ${peak.ctl.roundToInt()} peak; higher is fine)" to FAINT), 15f, top = 4)
         if (eveDay != null) {
-            val pct = eveDay.ctl / peak.ctl * 100
-            val okF = pct in (100.0 - dropHi)..(100.0 - dropLo)
+            val drop = (1 - eveDay.ctl / peak.ctl) * 100
+            val okFit = drop <= guard
+            val okFat = fatTarget == null || eveDay.atl <= fatTarget + 1
             val form = eveDay.form.roundToInt()
-            val okForm = form in fLo..fHi
             text(tg, spans(
-                "Projected: Fitness ${eveDay.ctl.roundToInt()} (${pct.roundToInt()}% of peak) " to TEXT,
-                (if (okF) "✓" else "⚠") to (if (okF) GOOD else WARN),
-                "   Fatigue ${eveDay.atl.roundToInt()} " to TEXT, (if (okForm) "✓" else "⚠") to (if (okForm) GOOD else WARN),
-                "   Form ${signed(form)} " to TEXT, (if (okForm) "✓" else "⚠") to (if (okForm) GOOD else WARN),
+                "Projected: " to DIM,
+                "Fatigue ${eveDay.atl.roundToInt()} " to TEXT, (if (okFat) "✓" else "⚠") to (if (okFat) GOOD else WARN),
+                "   Fitness ${eveDay.ctl.roundToInt()} (−${drop.roundToInt()}%) " to TEXT, (if (okFit) "✓" else "⚠") to (if (okFit) GOOD else BAD),
+                "   → Form ${signed(form)} ${FormZone.of(eveDay.form).label}" to FormZone.of(eveDay.form).color,
             ), 15f, top = 8)
         }
-        text(tg, "Change the target drop with the chips above.", 12f, FAINT, top = 6)
+        text(tg, "Form is just Fitness minus Fatigue, so it follows from these two. Keep Fatigue down and Fitness above the floor and Form takes care of itself.", 12f, FAINT, top = 6)
 
         // Coach notes
         val cn = card(col)
         label(cn, "Coach notes")
-        coachNotes(cn, s, race, races, eveDay, peak, dropLo, dropHi, daysTo)
+        coachNotes(cn, s, race, races, eveDay, peak, guard, fatTarget, daysTo)
         text(cn, "Rule-of-thumb guidance from your intervals.icu data. It isn't medical advice.", 11f, FAINT, top = 10)
         return sv
     }
 
     private fun coachNotes(
         c: LinearLayout, s: Snapshot, race: Race, races: List<Race>, eve: Day?, peak: Day,
-        dropLo: Int, dropHi: Int, daysTo: Long,
+        guard: Int, fatTarget: Double?, daysTo: Long,
     ) {
         val today = LocalDate.now()
         if (eve != null) {
+            // Fatigue target first: it's what decides race-day freshness
+            if (fatTarget != null) {
+                val excess = eve.atl - fatTarget
+                if (excess <= 1) bullet(c, GOOD, "Race-morning Fatigue ${eve.atl.roundToInt()} meets your target of ${fatTarget.roundToInt()} or less.")
+                else {
+                    // ATL falls by ~13 % of any load removed per day; spreading a cut over the last 3 days
+                    val ka = 1 - Math.exp(-1.0 / 7)
+                    val perDay = excess / (ka * (1 + (1 - ka) + (1 - ka) * (1 - ka)))
+                    bullet(c, WARN, "Race-morning Fatigue ${eve.atl.roundToInt()} is ${excess.roundToInt()} above your target of ${fatTarget.roundToInt()}. " +
+                        "Trimming about ${perDay.roundToInt()} load a day from the last 3 days (shorter or easier sessions, not total rest) would bring it to target.")
+                }
+            }
             val drop = (1 - eve.ctl / peak.ctl) * 100
-            when {
-                drop < dropLo -> bullet(c, WARN, "Fitness is only ${fmt1(drop)}% below your peak of ${peak.ctl.roundToInt()} on race day. For more freshness, cut volume in the last 7–10 days but keep short race-pace efforts.")
-                drop > dropHi -> bullet(c, WARN, "Fitness drops ${fmt1(drop)}% from peak by race day, more than your ${dropHi}% limit. The taper may be too long or deep, so keep some intensity and don't add extra rest days.")
-                else -> bullet(c, GOOD, "Taper on target: race-day Fitness ${eve.ctl.roundToInt()} is ${fmt1(drop)}% below your peak (${peak.ctl.roundToInt()} on ${date(peak.date)?.format(dm)}).")
-            }
-            val (fLo, fHi) = formTarget(race.category)
+            if (drop > guard) bullet(c, BAD, "Fitness would fall ${fmt1(drop)}% below your ${peak.ctl.roundToInt()} peak, past your $guard% guardrail. Keep some volume and bring Fatigue down with shorter, easier sessions rather than extra rest days.")
+            else bullet(c, GOOD, "Fitness guardrail OK: ${fmt1(drop)}% below peak (limit $guard%). High Fitness is fine as long as Fatigue is managed.")
             val form = eve.form.roundToInt()
-            when {
-                form < fLo -> bullet(c, WARN, "Form ${signed(form)} is below the ${signed(fLo)}…${signed(fHi)} usually wanted. Lighten the last 3–4 days to arrive fresher.")
-                form > fHi + 5 -> bullet(c, WARN, "Form ${signed(form)} is very fresh, and some runners feel flat at this level. A short opener with a few race-pace minutes 1–2 days before helps.")
-                else -> bullet(c, GOOD, "Race-day Form ${signed(form)} (${FormZone.of(eve.form).label}) is in the ${signed(fLo)}…${signed(fHi)} range for this race.")
-            }
+            if (form < 0) bullet(c, WARN, "Form ${signed(form)}: you'd start the race carrying fatigue.")
+            else if (form > 25) bullet(c, DIM, "Form ${signed(form)} is very fresh, and some runners feel flat at this level. A short opener with a few race-pace minutes 1–2 days before helps.")
         }
         // Fatigue: how much it sheds into the race
         if (eve != null) {

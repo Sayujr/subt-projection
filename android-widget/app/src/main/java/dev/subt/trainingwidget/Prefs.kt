@@ -59,6 +59,13 @@ object Prefs {
 
     fun setTaperDrop(ctx: Context, lo: Int, hi: Int) = sp(ctx).edit().putString("taper_drop", "$lo-$hi").apply()
 
+    // ---- race taper: Fatigue target (race morning) and Fitness guardrail (max % below 3-month peak)
+
+    fun fatigueTarget(ctx: Context): Double? = sp(ctx).getFloat("fatigue_target", 0f).takeIf { it > 0 }?.toDouble()
+    fun setFatigueTarget(ctx: Context, v: Double?) = sp(ctx).edit().putFloat("fatigue_target", (v ?: 0.0).toFloat()).apply()
+    fun fitnessGuardrail(ctx: Context): Int = sp(ctx).getInt("fitness_guardrail", 15)
+    fun setFitnessGuardrail(ctx: Context, pct: Int) = sp(ctx).edit().putInt("fitness_guardrail", pct).apply()
+
     // ---- marathon / weight planning
 
     /** User-entered weight overrides the intervals.icu value. */

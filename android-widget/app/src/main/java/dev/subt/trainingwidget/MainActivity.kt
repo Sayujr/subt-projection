@@ -213,7 +213,6 @@ class MainActivity : Activity() {
             }
             Tab.RACE -> {
                 val races = Prefs.snapshot(this)?.races.orEmpty().filter { it.date >= LocalDate.now().toString() }
-                val drop = Prefs.taperDrop(this)
                 controls.visibility = View.VISIBLE
                 if (races.size > 1) {
                     races.forEachIndexed { i, r ->
@@ -221,9 +220,16 @@ class MainActivity : Activity() {
                         chips.addView(chip(name, i == raceIndex) { raceIndex = i; show() })
                     }
                 }
-                for ((lo, hi) in listOf(3 to 7, 5 to 10, 8 to 12, 10 to 15)) {
-                    chips.addView(chip("Taper drop $lo–$hi%", drop == lo to hi) { Prefs.setTaperDrop(this, lo, hi); show() })
+                // Fatigue target (race morning) and Fitness guardrail
+                val ft = Prefs.fatigueTarget(this)
+                if (ft != null) {
+                    chips.addView(chip("Fatigue ≤ ${ft.roundToInt()}", true) {})
+                    chips.addView(chip("−2", false) { Prefs.setFatigueTarget(this, ft - 2); show() })
+                    chips.addView(chip("+2", false) { Prefs.setFatigueTarget(this, ft + 2); show() })
                 }
+                chips.addView(chip("Use next race's projection", false) { Prefs.setFatigueTarget(this, null); show() })
+                val g = Prefs.fitnessGuardrail(this)
+                for (pct in listOf(10, 15, 20)) chips.addView(chip("Fitness floor −$pct%", pct == g) { Prefs.setFitnessGuardrail(this, pct); show() })
             }
             Tab.SUBT -> {
                 controls.visibility = View.VISIBLE
@@ -499,6 +505,7 @@ class MainActivity : Activity() {
         content.removeAllViews()
         try {
             when (tab) {
+                Tab.WEEK -> Unit
                 Tab.HOME -> {
                     applyInto(content, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true), ViewGroup.LayoutParams.MATCH_PARENT)
                     content.getChildAt(0)?.let { enableScrub(it) }
