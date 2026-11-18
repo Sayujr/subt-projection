@@ -31,14 +31,15 @@ import kotlin.math.roundToInt
  */
 class MainActivity : Activity() {
 
-    private enum class Tab(val icon: String, val label: String, val title: String) {
-        HOME("◉", "Today", "Training Today"),
-        WEEK("▥", "Week", "Training load"),
-        STREAKS("✦", "Streaks", "Streaks"),
-        RACE("⚑", "Race", "Next race"),
-        POWER("ϟ", "Power", "Power"),
-        RECOVERY("♥", "Recovery", "Recovery"),
-        SUBT("⏱", "SubT", "SubT pace"),
+    /** [inBar] tabs sit in the bottom bar; every tab is also in the ☰ menu. */
+    private enum class Tab(val icon: String, val label: String, val title: String, val inBar: Boolean) {
+        HOME("◉", "Today", "Training Today", true),
+        WEEK("▥", "Week", "Training load", true),
+        STREAKS("✦", "Streaks", "Streaks", true),
+        POWER("ϟ", "Power", "Power", true),
+        SUBT("⏱", "SubT", "SubT & sub-3", true),
+        RACE("⚑", "Race", "Race", false),
+        RECOVERY("♥", "Recovery", "Recovery", false),
     }
 
     private enum class RangeMode(val label: String) {
@@ -103,6 +104,17 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.open_settings).setOnClickListener {
             startActivity(Intent(this, SetupActivity::class.java))
         }
+        findViewById<View>(R.id.open_menu).setOnClickListener { v ->
+            val pm = android.widget.PopupMenu(this, v)
+            Tab.entries.forEachIndexed { i, t -> pm.menu.add(0, i, i, "${t.icon}   ${t.label}") }
+            pm.menu.add(0, 99, 99, "⚙   Settings")
+            pm.setOnMenuItemClickListener { item ->
+                if (item.itemId == 99) startActivity(Intent(this, SetupActivity::class.java))
+                else { tab = Tab.entries[item.itemId]; show() }
+                true
+            }
+            pm.show()
+        }
         buildTabs()
 
         if (Prefs.credentials(this) == null) {
@@ -161,11 +173,11 @@ class MainActivity : Activity() {
 
     private fun buildTabs() {
         val bar = findViewById<LinearLayout>(R.id.tabs)
-        for (t in Tab.entries) {
+        for (t in Tab.entries.filter { it.inBar }) {
             val tv = TextView(this).apply {
                 text = "${t.icon}\n${t.label}"
                 gravity = Gravity.CENTER
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
                 setLineSpacing(0f, 1.15f)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
                 setOnClickListener { tab = t; show() }
