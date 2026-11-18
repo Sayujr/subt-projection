@@ -675,35 +675,56 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             .setNegativeButton("Cancel", null).show()
     }
 
-    /** Your actual bests from intervals.icu plus the race-gap choice they feed. */
-    private fun pbCard(col: LinearLayout, cur: Double) {
-        val pbs = Prefs.pbs(a)
-        val c = card(col)
-        label(c, "Your bests · last 12 months (intervals.icu)")
-        if (pbs == null || (pbs.fiveK == null && pbs.tenK == null && pbs.half == null)) {
-            text(c, if (pbs == null) "Loading PBs… (tap ⟳ on any screen)" else "No 5K, 10K or half-marathon efforts found in the last year.", 14f, DIM, top = 4)
-            return
+    /** Asks for a race time as m:ss or h:mm:ss. */
+    private fun askTime(title: String, current: Double?, onValue: (Double?) -> Unit) {
+        val et = EditText(a).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            hint = "e.g. 20:45 or 1:32:10"
+            setText(current?.let { t(it) } ?: "")
+            setTextColor(TEXT)
         }
-        fun cap(p: Pb?) = p?.let { listOfNotNull(it.date?.let { d -> date(d)?.format(dm) }, it.name?.take(18)).joinToString(" · ") } ?: ""
+        AlertDialog.Builder(a).setTitle(title).setView(et)
+            .setPositiveButton("Save") { _, _ ->
+                val parts = et.text.toString().trim().split(":").mapNotNull { it.trim().toIntOrNull() }
+                val sec = when (parts.size) { 2 -> parts[0] * 60 + parts[1]; 3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]; else -> null }
+                onValue(sec?.toDouble()); onChange()
+            }
+            .setNeutralButton("Clear") { _, _ -> onValue(null); onChange() }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    /** Your actual bests (intervals.icu or entered) plus the race-gap choice they feed. */
+    private fun pbCard(col: LinearLayout, cur: Double) {
+        val pbs = Prefs.effectivePbs(a)
+        val c = card(col)
+        label(c, "Your bests · last 12 months")
+        fun cap(p: Pb?) = p?.let { listOfNotNull(it.date?.let { d -> date(d)?.format(dm) }, it.name?.take(18)).joinToString(" · ") } ?: "tap Edit to add"
         stats3(c, listOf(
             Triple("5K", (pbs.fiveK?.let { t(it.seconds) } ?: "–") to GOOD, cap(pbs.fiveK)),
             Triple("10K", (pbs.tenK?.let { t(it.seconds) } ?: "–") to TEXT, cap(pbs.tenK)),
             Triple("Half", (pbs.half?.let { t(it.seconds) } ?: "–") to TEXT, cap(pbs.half)),
         ))
-        val pb5 = pbs.fiveK
-        if (pb5 != null) {
-            val months = Prefs.subt(a)?.months.orEmpty().filter { !it.outlier }
-            val subtAt = pb5.date?.take(7)?.let { m -> months.lastOrNull { it.month <= m } }?.pace ?: cur
-            val calibrated = SubtModel.gapFrom5k(pb5.seconds, subtAt)
+        val edits = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4), 0, 0) }
+        for ((key, lbl) in listOf("5k" to "5K", "10k" to "10K", "hm" to "Half")) {
+            edits.addView(TextView(a).apply {
+                text = "Edit $lbl"; setTextColor(FormColors.FITNESS); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setOnClickListener { askTime("Your $lbl PB", Prefs.manualPb(a, key)) { Prefs.setManualPb(a, key, it) } }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        c.addView(edits)
+        if (Prefs.pbs(a) == null) text(c, "Still loading PBs from intervals.icu. Tap ⟳ on any screen, or enter them with Edit.", 12f, FAINT, top = 4)
+        if (pbs.fiveK != null || pbs.half != null) {
             val usePb = Prefs.gapFromPb(a)
+            SubtModel.applyGap(a)
             text(c, spans(
-                "Race gap: " to DIM,
-                "your 5K PB at SubT ${Charts.paceText(subtAt)} means you race ${fmt1(calibrated * 100)}% slower than pure VDOT" to TEXT,
-                " (the page assumes ${fmt1(SubtModel.PAGE_GAP * 100)}%)" to FAINT,
+                "Calibrated race gaps: " to DIM,
+                "5K ${fmt1(SubtModel.GAP * 100)}% · half ${fmt1(SubtModel.GAP_HM * 100)}% · marathon ${fmt1(SubtModel.GAP_FM * 100)}%" to TEXT,
+                (if (usePb) "  (from your PBs at the SubT you had then; the page assumes 11%)" else "  (page default)") to FAINT,
             ), 13f, top = 10)
-            chipRow(c, listOf("Use my PB (${fmt1(calibrated * 100)}%)", "Page default (11%)"), if (usePb) 0 else 1) {
+            chipRow(c, listOf("Use my PBs", "Page default (11%)"), if (usePb) 0 else 1) {
                 Prefs.setGapFromPb(a, it == 0); SubtModel.applyGap(a); onChange()
             }
+            text(c, "Predictions are never shown slower than a PB you've already run.", 12f, FAINT, top = 6)
         }
     }
 
@@ -715,7 +736,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val cur = months.lastOrNull()?.pace ?: return
         SubtModel.applyGap(a)
         pbCard(col, cur)
-        val pb5 = Prefs.pbs(a)?.fiveK
+        val pb5 = Prefs.effectivePbs(a).fiveK
 
         val c = card(col)
         label(c, "Projection to 5K goals")
@@ -753,7 +774,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 (if (done) "" else "${m(f)} – ${m(sl)}") to FAINT,
             ), weights = listOf(1.3f, 0.9f, 1.1f, 1.4f))
         }
-        text(c, "Same model as your projection page: Daniels VDOT, ${fmt1(SubtModel.GAP * 100)}% race gap (${if (Prefs.gapFromPb(a) && pb5 != null) "from your PB" else "page default"}), rates per month of −12 s/km while rebuilding to 4:32, then −2 (realistic; fast −3, slow −1) down to 4:00. Overrides you set on the page aren't visible here.", 12f, FAINT, top = 8)
+        text(c, "Same model as your projection page: Daniels VDOT, ${fmt1(SubtModel.GAP * 100)}% race gap (${if (Prefs.gapFromPb(a) && pb5 != null) "from your PB" else "page default"}; half/marathon ${fmt1(SubtModel.GAP_HM * 100)}/${fmt1(SubtModel.GAP_FM * 100)}%), rates per month of −12 s/km while rebuilding to 4:32, then −2 (realistic; fast −3, slow −1) down to 4:00. Overrides you set on the page aren't visible here.", 12f, FAINT, top = 8)
     }
 
     // ---------------------------------------------------------------- shared controls
@@ -860,6 +881,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val slow = SubtModel.pathWithWeight(cur, SubtModel.SLOW, 72, w.w0, w.plan.kgPerWeek, w.goal)
         val eR = SubtModel.arrival(real, need); val eF = SubtModel.arrival(fast, need); val eS = SubtModel.arrival(slow, need)
 
+        pbCard(col, cur)
         val h = card(col)
         label(h, "Sub-3 marathon forecast · weight: ${w.plan.label.lowercase(loc)}")
         text(h, spans((eR?.let { monthLabel(it) } ?: "Beyond 6 years") to GOOD, "  realistic" to DIM), 26f, bold = true, top = 4)
@@ -912,7 +934,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 t(fm) to (if (hit) GOOD else TEXT),
             ), weights = listOf(1f, 0.9f, 1f, 1.2f, 1.2f))
         }
-        text(tb, "These are the race times your SubT supports each month, using Daniels VDOT plus a ${fmt1(SubtModel.GAP * 100)}% race-readiness gap. A 5K at or under the time shown means you're on or ahead of the curve.", 12f, FAINT, top = 8)
+        text(tb, "These are the race times your SubT supports each month, using Daniels VDOT plus your race-readiness gaps (5K ${fmt1(SubtModel.GAP * 100)}%, half ${fmt1(SubtModel.GAP_HM * 100)}%, marathon ${fmt1(SubtModel.GAP_FM * 100)}%), never slower than your PBs. A 5K at or under the time shown means you're on or ahead of the curve.", 12f, FAINT, top = 8)
 
         weightCard(col, cur, need)
     }

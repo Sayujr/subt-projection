@@ -22,18 +22,37 @@ object SubtModel {
     /** The projection page's race-readiness gap. */
     const val PAGE_GAP = 0.11
 
-    /** Gap used by every calculation; the app sets it from your 5K PB when available. */
+    /** Gap for 5K predictions (calibrated from your 5K PB when available). */
     @Volatile var GAP = PAGE_GAP
+    /** Gap for half / full marathon predictions (calibrated from your half PB, else the 5K gap). */
+    @Volatile var GAP_HM = PAGE_GAP
+    @Volatile var GAP_FM = PAGE_GAP
+    /** Your PBs: predictions are never shown slower than a time you've already run. */
+    @Volatile var PB5K: Double? = null
+    @Volatile var PBHM: Double? = null
+    @Volatile var PBFM: Double? = null
 
-    /** Race gap implied by an actual 5K time at a given SubT pace (clamped to 0–25 %). */
-    fun gapFrom5k(pbSec: Double, subt: Double) = (pbSec / interp(subt, 1) - 1).coerceIn(0.0, 0.25)
+    /** Race gap implied by an actual race time at a given SubT pace (clamped to −5…25 %). */
+    fun gapFrom5k(pbSec: Double, subt: Double) = gapFrom(1, pbSec, subt)
+    fun gapFrom(idx: Int, pbSec: Double, subt: Double) = (pbSec / interp(subt, idx) - 1).coerceIn(-0.05, 0.25)
 
-    /** Applies the user's gap choice: calibrated from the 5K PB (using SubT in the PB's month) or the page default. */
-    fun applyGap(ctx: android.content.Context) {
-        val pb = Prefs.pbs(ctx)?.fiveK
+    /** SubT in the month a PB was set (or the latest month). */
+    fun subtAt(ctx: android.content.Context, date: String?): Double? {
         val months = Prefs.subt(ctx)?.months.orEmpty().filter { !it.outlier }
-        val subtAtPb = pb?.date?.take(7)?.let { m -> months.lastOrNull { it.month <= m } } ?: months.lastOrNull()
-        GAP = if (Prefs.gapFromPb(ctx) && pb != null && subtAtPb != null) gapFrom5k(pb.seconds, subtAtPb.pace) else PAGE_GAP
+        return date?.take(7)?.let { m -> months.lastOrNull { it.month <= m } }?.pace ?: months.lastOrNull()?.pace
+    }
+
+    /** Applies the gap choice: per distance from your PBs (5K → 5K; half → half and marathon) or the page default. */
+    fun applyGap(ctx: android.content.Context) {
+        val pbs = Prefs.effectivePbs(ctx)
+        PB5K = pbs.fiveK?.seconds; PBHM = pbs.half?.seconds; PBFM = null
+        if (!Prefs.gapFromPb(ctx)) { GAP = PAGE_GAP; GAP_HM = PAGE_GAP; GAP_FM = PAGE_GAP; return }
+        val g5 = pbs.fiveK?.let { p -> subtAt(ctx, p.date)?.let { gapFrom(1, p.seconds, it) } }
+        val gh = pbs.half?.let { p -> subtAt(ctx, p.date)?.let { gapFrom(2, p.seconds, it) } }
+        GAP = g5 ?: gh ?: PAGE_GAP
+        GAP_HM = gh ?: g5 ?: PAGE_GAP
+        // Marathons usually come out a little slower than half-equivalent for runners without one
+        GAP_FM = (gh ?: g5)?.plus(0.02) ?: PAGE_GAP
     }
     const val PEAK = 4 + 32 / 60.0
     const val FLOOR = 3 + 20 / 60.0
@@ -59,15 +78,17 @@ object SubtModel {
         return s.last()[idx]
     }
 
-    fun fiveK(subt: Double) = interp(subt, 1) * (1 + GAP)
-    fun half(subt: Double) = interp(subt, 2) * (1 + GAP)
-    fun full(subt: Double) = interp(subt, 3) * (1 + GAP)
+    fun fiveK(subt: Double) = (interp(subt, 1) * (1 + GAP)).let { t -> PB5K?.let { minOf(t, it) } ?: t }
+    fun half(subt: Double) = (interp(subt, 2) * (1 + GAP_HM)).let { t -> PBHM?.let { minOf(t, it) } ?: t }
+    fun full(subt: Double) = (interp(subt, 3) * (1 + GAP_FM)).let { t -> PBFM?.let { minOf(t, it) } ?: t }
+
+    private fun gapFor(idx: Int) = when (idx) { 1 -> GAP; 2 -> GAP_HM; else -> GAP_FM }
 
     fun requiredSubtFor5k(targetSec: Double): Double = requiredSubt(1, targetSec)
 
     /** SubT pace needed for a race time; [idx] 1 = 5K, 2 = HM, 3 = FM. */
     fun requiredSubt(idx: Int, targetSec: Double): Double {
-        val t = targetSec / (1 + GAP)
+        val t = targetSec / (1 + gapFor(idx))
         val s = VDOT.sortedBy { it[idx] }
         if (t <= s.first()[idx]) return s.first()[0]
         if (t >= s.last()[idx]) return s.last()[0]

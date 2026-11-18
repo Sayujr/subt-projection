@@ -77,6 +77,19 @@ object Prefs {
 
     fun pbs(ctx: Context): Pbs? = sp(ctx).getString("pbs", null)?.let { Pbs.fromJson(it) }
     fun savePbs(ctx: Context, p: Pbs) = sp(ctx).edit().putString("pbs", p.toJson()).apply()
+
+    /** PBs you typed in (seconds); 0 = none. They win when faster than what intervals.icu has. */
+    fun manualPb(ctx: Context, key: String): Double? = sp(ctx).getFloat("pb_manual_$key", 0f).takeIf { it > 0 }?.toDouble()
+    fun setManualPb(ctx: Context, key: String, sec: Double?) = sp(ctx).edit().putFloat("pb_manual_$key", (sec ?: 0.0).toFloat()).apply()
+
+    fun effectivePbs(ctx: Context): Pbs {
+        val f = pbs(ctx)
+        fun pick(fetched: Pb?, key: String): Pb? {
+            val m = manualPb(ctx, key)?.let { Pb(it, null, "entered by you") }
+            return listOfNotNull(fetched, m).minByOrNull { it.seconds }
+        }
+        return Pbs(f?.fetchedAt ?: 0L, pick(f?.fiveK, "5k"), pick(f?.tenK, "10k"), pick(f?.half, "hm"))
+    }
     /** true = calibrate the race gap from your 5K PB; false = the projection page's 11 %. */
     fun gapFromPb(ctx: Context): Boolean = sp(ctx).getBoolean("gap_from_pb", true)
     fun setGapFromPb(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("gap_from_pb", on).apply()
