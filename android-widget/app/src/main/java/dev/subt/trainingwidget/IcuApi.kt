@@ -87,8 +87,14 @@ class IcuApi(private val creds: Credentials) {
         // Run aerobic metrics (HR drift, efficiency) over ~90 days
         val runs = activities.filter { it.optString("type").contains("Run", ignoreCase = true) }.map {
             val zt = it.optJSONArray("icu_zone_times")
-            val zones = if (zt == null) emptyList() else (0 until zt.length()).map { i ->
-                zt.optJSONObject(i)?.optInt("secs") ?: zt.optInt(i)
+            // Power zones Z1…Z7; intervals.icu also lists an overlapping "Sweet Spot" entry, so skip it
+            val zones = if (zt == null) emptyList() else (0 until zt.length()).mapNotNull { i ->
+                val zo = zt.optJSONObject(i)
+                when {
+                    zo == null -> zt.optInt(i)
+                    zo.optString("id") == "SS" || zo.optBoolean("gap") -> null
+                    else -> zo.optInt("secs")
+                }
             }
             RunMetric(
                 watts = (it.optNum("icu_average_watts") ?: it.optNum("average_watts"))?.takeIf { v -> v > 0 },
@@ -143,7 +149,7 @@ class IcuApi(private val creds: Credentials) {
             .map { Day(it.key, it.value.first, it.value.second) }
         val weight = wellness.objects().sortedBy { it.optString("id") }.mapNotNull { it.optNum("weight")?.takeIf { w -> w > 25 } }.lastOrNull()
         val curveCp = runCatching { fetchCurveCp(ath) }.getOrNull()
-        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight, runFtp, curveCp)
+        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight ?: athleteWeight, runFtp, curveCp)
     }
 
     /** Planned workouts, races and completed activities between [start] and [end] (inclusive), for the app's Week screen. */
@@ -360,8 +366,12 @@ class IcuApi(private val creds: Credentials) {
     /** Running FTP from the athlete's sport settings (used to turn %FTP steps into watts). */
     private var runFtp: Double? = null
 
+    /** Weight on the athlete profile (used when wellness has none). */
+    private var athleteWeight: Double? = null
+
     private fun fetchRunFtp(ath: String): Double? = runCatching {
         val o = JSONObject(getText("/athlete/$ath", emptyMap()))
+        athleteWeight = o.optNum("icu_weight")?.takeIf { it > 25 } ?: o.optNum("weight")?.takeIf { it > 25 }
         val ss = o.optJSONArray("sportSettings")?.objects().orEmpty()
         ss.firstOrNull { s -> s.optJSONArray("types")?.let { t -> (0 until t.length()).any { t.optString(it).contains("Run") } } == true }
             ?.optNum("ftp")?.takeIf { it > 50 }
@@ -399,6 +409,11 @@ class IcuApi(private val creds: Credentials) {
         val ftp = runFtp
         fun dur(s: Int) = if (s >= 60) "${(s + 30) / 60}′" else "${s}″"
         fun target(st: JSONObject): String {
+            val hr = st.optJSONObject("hr")
+            if (st.optJSONObject("power") == null && hr != null) {
+                val lo = hr.optNum("start") ?: hr.optNum("value"); val hi = hr.optNum("end")
+                return when { lo == null -> "easy"; hi == null || hi == lo -> "${lo.roundToInt()}% HR"; else -> "${lo.roundToInt()}–${hi.roundToInt()}% HR" }
+            }
             val p = st.optJSONObject("power") ?: return st.optString("text").takeIf { it.isNotBlank() }?.take(24) ?: "easy"
             val units = p.optString("units")
             val lo = p.optNum("start") ?: p.optNum("value")
@@ -418,8 +433,11 @@ class IcuApi(private val creds: Credentials) {
                 if (reps > 1) "$reps× ($body)" else body
             } else {
                 val d = st.optInt("duration", 0)
+                val dist = st.optNum("distance") ?: 0.0
                 val t = target(st)
-                if (d > 0) "${dur(d)} @ $t" else t
+                val tag = if (st.optBoolean("warmup")) "WU " else if (st.optBoolean("cooldown")) "CD " else ""
+                val len = if (dist > 0 && st.optJSONObject("power") != null && dist > 1000) String.format(java.util.Locale.US, "%.1f km", dist / 1000) else if (d > 0) dur(d) else ""
+                if (len.isNotEmpty()) "$tag$len @ $t" else "$tag$t"
             }
         }
         return render(doc.optJSONArray("steps")).joinToString(" · ")

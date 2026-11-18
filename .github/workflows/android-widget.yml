@@ -25,6 +25,9 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # keep the dependency cache on this branch too (fewer Maven Central downloads / 429s)
+          cache-read-only: false
 
       - name: Use the private signing key from secrets
         env:

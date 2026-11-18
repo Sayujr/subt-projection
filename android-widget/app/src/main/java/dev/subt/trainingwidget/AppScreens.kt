@@ -1429,7 +1429,13 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             bullet(n, if (sl > 0.5) GOOD else if (sl < -0.5) WARN else DIM, "CP ${if (sl >= 0) "rising" else "falling"} ${fmt1(abs1(sl))} W/month over the last 90 days" +
                 (p.cp3moAgo?.let { " (${delta(p.cp, it)} vs 3 months ago)" } ?: "") + ".")
         }
-        p.re?.let { re -> bullet(n, DIM, "Running effectiveness ${String.format(loc, "%.3f", re)}: ${if (re >= 1.0) "efficient. Stryd runners typically sit at 0.98–1.05" else "room to improve. Strides, hills, strength and cadence work usually lift it"}.") }
+        p.re?.let { re ->
+            val reRuns = s.runs.mapNotNull { it.re(p.kg) }
+            val ch = if (reRuns.size >= 10) (reRuns.takeLast(5).average() / reRuns.take(5).average() - 1) * 100 else null
+            bullet(n, if (ch == null) DIM else if (ch >= 0) GOOD else WARN, "Running effectiveness ${String.format(loc, "%.3f", re)}" +
+                (ch?.let { ", ${if (it >= 0) "up" else "down"} ${fmt1(abs1(it))}% over 90 days" } ?: "") +
+                ". Judge RE by its trend rather than its absolute level: Garmin power usually gives about 0.85–0.90 and Stryd about 1.0. Strides, hills, strength and cadence work tend to lift it.")
+        }
         if (longDrift.isNotEmpty()) bullet(n, if (longDrift.average() < 5) GOOD else WARN,
             if (longDrift.average() < 5) "Power:HR drift under 5% on long runs, which is good marathon durability." else "Power:HR drift ${fmt1(longDrift.average())}% on long runs. Build durability with longer easy runs and late-run steady segments.")
         subtW?.let { w -> val pct = w / p.cp * 100
