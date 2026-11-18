@@ -179,6 +179,8 @@ class SetupActivity : Activity() {
         }
     }
 
+    private companion object { val sentToday = mutableMapOf<String, String>() }
+
     /** "Send to intervals.icu": one button per value you entered, each confirming before it writes. */
     private fun buildSyncButtons() {
         val box = findViewById<android.widget.LinearLayout>(R.id.sync_buttons)
@@ -200,6 +202,15 @@ class SetupActivity : Activity() {
         )
         for (it in items) {
             if (it.mine == null) continue
+            val inSync = it.mine == it.theirs || sentToday["${today}|${it.label}"] == it.mine
+            if (inSync) {
+                box.addView(TextView(this).apply {
+                    text = "✓ ${it.label} ${it.mine}: in sync with intervals.icu"
+                    setTextColor(0xFF4ADE80.toInt()); textSize = 14f
+                    setPadding(0, (8 * resources.displayMetrics.density).toInt(), 0, 0)
+                })
+                continue
+            }
             val b = Button(this).apply {
                 text = "Send ${it.label}: ${it.theirs} → ${it.mine}"
                 isAllCaps = false
@@ -216,7 +227,11 @@ class SetupActivity : Activity() {
                             val r = runCatching { it.send(IcuApi(creds)) }
                             runOnUiThread {
                                 findViewById<TextView>(R.id.status).text = r.fold({ _ -> "✓ ${it.label} updated in intervals.icu" }, { e -> "Couldn't update ${it.label}: ${e.message}" })
-                                if (r.isSuccess) Refresh.now(this, replace = true)
+                                if (r.isSuccess) {
+                                    sentToday["${today}|${it.label}"] = it.mine
+                                    buildSyncButtons()
+                                    Refresh.now(this, replace = true)
+                                }
                             }
                         }.start()
                     }
