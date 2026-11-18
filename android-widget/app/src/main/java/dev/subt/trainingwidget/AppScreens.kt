@@ -119,6 +119,22 @@ class AppScreens(private val a: Activity, private val wDp: Int) {
         parent.addView(r)
     }
 
+    /** Three side-by-side numbers: label, big value, small caption. */
+    private fun stats3(parent: LinearLayout, items: List<Triple<String, Pair<String, Int>, String>>) {
+        val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
+        for ((lbl, value, cap) in items) {
+            val c = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+            c.addView(TextView(a).apply { text = lbl.uppercase(loc); letterSpacing = 0.08f; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f) })
+            c.addView(TextView(a).apply {
+                text = value.first; setTextColor(value.second); setTextSize(TypedValue.COMPLEX_UNIT_SP, 28f)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            })
+            c.addView(TextView(a).apply { text = cap; setTextColor(FAINT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f) })
+            r.addView(c, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        parent.addView(r)
+    }
+
     private fun chartW() = dp(wDp - 28)
     private fun signed(v: Int) = if (v > 0) "+$v" else "$v"
     private fun fmt1(v: Double) = String.format(loc, "%.1f", v)
@@ -176,6 +192,17 @@ class AppScreens(private val a: Activity, private val wDp: Int) {
             val c = card(col)
             text(c, "Not enough fitness history yet to chart this race build-up.", 14f, DIM)
             return sv
+        }
+        val nowDay = s.days.lastOrNull()
+        val eveTop = if (hasEve) window.last() else null
+        if (eveTop != null) {
+            val z = FormZone.of(eveTop.form)
+            label(h, "Race day (morning)", DIM).apply { setPadding(0, dp(12), 0, 0) }
+            stats3(h, listOf(
+                Triple("Fitness", "${eveTop.ctl.roundToInt()}" to FormColors.FITNESS, nowDay?.let { "now ${it.ctl.roundToInt()}" } ?: ""),
+                Triple("Fatigue", "${eveTop.atl.roundToInt()}" to FormColors.FATIGUE, nowDay?.let { "now ${it.atl.roundToInt()}" } ?: ""),
+                Triple("Form", signed(eveTop.form.roundToInt()) to z.color, z.label),
+            ))
         }
         val peakIdx = window.indices.maxBy { window[it].ctl }
         val peak = window[peakIdx]
@@ -237,6 +264,12 @@ class AppScreens(private val a: Activity, private val wDp: Int) {
             "  →  ${targetBand.first.roundToInt()}–${targetBand.second.roundToInt()}" to GOOD,
         ), 15f, top = 4)
         text(tg, spans("Form: " to DIM, "${signed(fLo)} to ${signed(fHi)}" to TEXT, " for a ${race.category.removePrefix("RACE_")} race" to DIM), 15f, top = 4)
+        if (eveTop != null) {
+            // Form = Fitness − Fatigue, so the Form range sets a Fatigue range for race-day Fitness
+            val atlLo = (eveTop.ctl - fHi).roundToInt()
+            val atlHi = (eveTop.ctl - fLo).roundToInt()
+            text(tg, spans("Fatigue: " to DIM, "$atlLo–$atlHi" to TEXT, " (race-day Fitness minus the Form range)" to DIM), 15f, top = 4)
+        }
         if (eveDay != null) {
             val pct = eveDay.ctl / peak.ctl * 100
             val okF = pct in (100.0 - dropHi)..(100.0 - dropLo)
@@ -245,6 +278,7 @@ class AppScreens(private val a: Activity, private val wDp: Int) {
             text(tg, spans(
                 "Projected: Fitness ${eveDay.ctl.roundToInt()} (${pct.roundToInt()}% of peak) " to TEXT,
                 (if (okF) "✓" else "⚠") to (if (okF) GOOD else WARN),
+                "   Fatigue ${eveDay.atl.roundToInt()} " to TEXT, (if (okForm) "✓" else "⚠") to (if (okForm) GOOD else WARN),
                 "   Form ${signed(form)} " to TEXT, (if (okForm) "✓" else "⚠") to (if (okForm) GOOD else WARN),
             ), 15f, top = 8)
         }
@@ -276,6 +310,21 @@ class AppScreens(private val a: Activity, private val wDp: Int) {
                 form < fLo -> bullet(c, WARN, "Form ${signed(form)} is below the ${signed(fLo)}…${signed(fHi)} usually wanted. Lighten the last 3–4 days to arrive fresher.")
                 form > fHi + 5 -> bullet(c, WARN, "Form ${signed(form)} is very fresh, and some runners feel flat at this level. A short opener with a few race-pace minutes 1–2 days before helps.")
                 else -> bullet(c, GOOD, "Race-day Form ${signed(form)} (${FormZone.of(eve.form).label}) is in the ${signed(fLo)}…${signed(fHi)} range for this race.")
+            }
+        }
+        // Fatigue: how much it sheds into the race
+        if (eve != null) {
+            val recent = (s.days + s.proj).filter { it.date >= LocalDate.parse(race.date).minusDays(21).toString() && it.date <= eve.date }
+            val peakAtl = recent.maxByOrNull { it.atl }
+            if (peakAtl != null && peakAtl.atl > 0) {
+                val dropPct = (1 - eve.atl / peakAtl.atl) * 100
+                val txt = "Fatigue falls from ${peakAtl.atl.roundToInt()} (${date(peakAtl.date)?.format(dm)}) to ${eve.atl.roundToInt()} by race morning, " +
+                    "${dropPct.roundToInt()}% lower. That drop is where race-day freshness comes from."
+                when {
+                    eve.atl > eve.ctl -> bullet(c, WARN, "$txt Fatigue is still above Fitness, so you'd start tired. Ease off in the final days.")
+                    dropPct < 25 -> bullet(c, WARN, "$txt That's a small drop. Shorter, easier runs in the last week would help more.")
+                    else -> bullet(c, GOOD, txt)
+                }
             }
         }
         // Phase advice

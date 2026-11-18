@@ -231,6 +231,8 @@ object ExtraWidgets {
                     (if (narrow) "Race day " else "Projected race day ") to R0.DIM,
                     "Fit ${next.projCtl.roundToInt()}" to Charts.FITNESS_COLOR,
                     " · " to R0.DIM,
+                    "Fat ${next.projAtl?.roundToInt() ?: "–"}" to FormColors.FATIGUE,
+                    " · " to R0.DIM,
                     (if (narrow) "Form ${signed(pf.roundToInt())}" else "Form ${signed(pf.roundToInt())} ${z.label}") to z.color,
                 )
             )
