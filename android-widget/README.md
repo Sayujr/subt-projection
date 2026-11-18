@@ -6,7 +6,7 @@ Three widgets that share one intervals.icu connection. You pick them from the wi
 
 | Widget | Default size | What it shows |
 |---|---|---|
-| **Training Today · Full** | 4×3 (resize from about 4×2 up) | Today's workouts above three tiles for Fitness, Fatigue and Form, each with its own trend line. At 300dp tall or more it switches to a large layout with bigger numbers and taller charts, and it lists more workouts as you make it taller. |
+| **Training Today · Full** | 4×3 (resize from about 4×2 up) | Today's workouts above three tiles for Fitness, Fatigue and Form, each with its own trend line. At about 4×4 or bigger it switches to a large layout: up to 8 workouts above one big combined chart (like Trends) with date and value labels. It lists more workouts as you make it taller. |
 | **Training Today · Trends** | 4×2 (3×2 and up) | One chart only: Fitness (filled blue) and Fatigue (purple) on top, Form underneath on its own scale with zone colouring, and today's three numbers above. Faint lines mark each week. |
 | **Training Today · Workouts** | 4×1 (any size) | A compact list. At 1 row tall you see only the top workout, and you scroll for the rest. Workouts still to do come first, then completed ones. `+2 ↓` tells you how many more there are. |
 

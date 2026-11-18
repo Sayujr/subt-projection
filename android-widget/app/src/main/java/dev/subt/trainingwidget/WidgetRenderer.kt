@@ -22,6 +22,7 @@ object WidgetRenderer {
     private const val PLANNED = 0xFFFFC53D.toInt()
     private const val TEXT = 0xFFF2F4F8.toInt()
     private const val WIDGET_BG = 0xFF161A22.toInt()
+    private const val TILE_BG = 0xFF222733.toInt()
 
     private const val CALENDAR_URL = "https://intervals.icu/calendar"
     private const val FITNESS_URL = "https://intervals.icu/fitness"
@@ -70,7 +71,7 @@ object WidgetRenderer {
     fun renderFull(ctx: Context, mgr: AppWidgetManager, id: Int) {
         val s = State(ctx)
         val (widthDp, heightDp) = sizeDp(mgr, id, 300, 200)
-        val large = heightDp >= 300
+        val large = heightDp >= 360 // roughly 4×4 and up
         val views = RemoteViews(ctx.packageName, if (large) R.layout.widget_training_large else R.layout.widget_training)
 
         views.setTextViewText(R.id.title, titleText(s.today))
@@ -83,10 +84,12 @@ object WidgetRenderer {
             views.setOnClickPendingIntent(R.id.metrics, browser(ctx, 12, FITNESS_URL))
         }
 
-        // Workouts: rows fill whatever height is left above the tiles (~22dp each)
+        // Workouts. Small layout: rows fill the space above the tiles (~22dp each).
+        // Large layout: up to ~40% of the height, the combined chart takes the rest.
         views.removeAllViews(R.id.workouts)
-        val tilesDp = if (large) 128 else 90
-        val maxRows = ((heightDp - 60 - tilesDp) / 22).coerceIn(1, 12)
+        val maxRows = if (large) (heightDp * 0.4 / 22).toInt().coerceIn(2, 8)
+        else ((heightDp - 150) / 22).coerceIn(1, 12)
+        var rowsShown = 1
         val msg = workoutMessage(s)
         if (msg != null) {
             views.addView(R.id.workouts, message(ctx, msg))
@@ -95,19 +98,30 @@ object WidgetRenderer {
             val shown = if (list.size > maxRows) list.take(maxRows - 1) else list
             shown.forEach { views.addView(R.id.workouts, row(ctx, it)) }
             if (shown.size < list.size) views.addView(R.id.workouts, message(ctx, "+${list.size - shown.size} more"))
+            rowsShown = minOf(list.size, maxRows)
         }
 
-        // Metric tiles
         val days = s.snap?.days.orEmpty()
         if (days.isNotEmpty()) {
             val density = ctx.resources.displayMetrics.density
-            val chartWdp = ((widthDp - 24 - 12) / 3 - 18).coerceAtLeast(40)
-            val wPx = (chartWdp * density).roundToInt()
-            val hPx = ((if (large) 64 else 34) * density).roundToInt()
             setNumbers(views, days)
-            views.setImageViewBitmap(R.id.ctl_chart, Charts.line(days.map { it.ctl }, FormColors.FITNESS, wPx, hPx, density))
-            views.setImageViewBitmap(R.id.atl_chart, Charts.line(days.map { it.atl }, FormColors.FATIGUE, wPx, hPx, density))
-            views.setImageViewBitmap(R.id.form_chart, Charts.form(days.map { it.form }, wPx, hPx, density))
+            if (large) {
+                // padding 24, header 28, rows, margins 14, tile padding 20, numbers 46, chart margin 6
+                val chartHdp = (heightDp - 138 - rowsShown * 22).coerceAtLeast(60)
+                val wPx = ((widthDp - 44).coerceAtLeast(60) * density).roundToInt()
+                val hPx = (chartHdp * density).roundToInt()
+                views.setImageViewBitmap(
+                    R.id.trend_chart,
+                    Charts.combined(days, wPx, hPx, density, TILE_BG, labels = chartHdp >= 110)
+                )
+            } else {
+                val chartWdp = ((widthDp - 24 - 12) / 3 - 18).coerceAtLeast(40)
+                val wPx = (chartWdp * density).roundToInt()
+                val hPx = (34 * density).roundToInt()
+                views.setImageViewBitmap(R.id.ctl_chart, Charts.line(days.map { it.ctl }, FormColors.FITNESS, wPx, hPx, density))
+                views.setImageViewBitmap(R.id.atl_chart, Charts.line(days.map { it.atl }, FormColors.FATIGUE, wPx, hPx, density))
+                views.setImageViewBitmap(R.id.form_chart, Charts.form(days.map { it.form }, wPx, hPx, density))
+            }
         }
         mgr.updateAppWidget(id, views)
     }
@@ -132,8 +146,12 @@ object WidgetRenderer {
             val density = ctx.resources.displayMetrics.density
             val wPx = ((widthDp - 24).coerceAtLeast(60) * density).roundToInt()
             // padding 24 + numbers ~42 + footer ~14 + margin 6
-            val hPx = ((heightDp - 86).coerceAtLeast(30) * density).roundToInt()
-            views.setImageViewBitmap(R.id.trend_chart, Charts.combined(days, wPx, hPx, density, WIDGET_BG))
+            val chartHdp = (heightDp - 86).coerceAtLeast(30)
+            val hPx = (chartHdp * density).roundToInt()
+            views.setImageViewBitmap(
+                R.id.trend_chart,
+                Charts.combined(days, wPx, hPx, density, WIDGET_BG, labels = chartHdp >= 110)
+            )
         }
         mgr.updateAppWidget(id, views)
     }
