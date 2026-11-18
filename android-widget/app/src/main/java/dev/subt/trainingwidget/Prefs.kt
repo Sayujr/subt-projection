@@ -66,6 +66,13 @@ object Prefs {
     fun fitnessGuardrail(ctx: Context): Int = sp(ctx).getInt("fitness_guardrail", 15)
     fun setFitnessGuardrail(ctx: Context, pct: Int) = sp(ctx).edit().putInt("fitness_guardrail", pct).apply()
 
+    // ---- race history + taper preset (0 strict, 1 standard, 2 relaxed)
+
+    fun raceHistory(ctx: Context): Pair<Long, List<RaceResult>>? = sp(ctx).getString("race_history", null)?.let { RaceResult.listFromJson(it) }
+    fun saveRaceHistory(ctx: Context, l: List<RaceResult>) = sp(ctx).edit().putString("race_history", RaceResult.listToJson(l, System.currentTimeMillis())).apply()
+    fun taperPreset(ctx: Context): Int = sp(ctx).getInt("taper_preset", 1)
+    fun setTaperPreset(ctx: Context, i: Int) = sp(ctx).edit().putInt("taper_preset", i).apply()
+
     // ---- PBs and race gap
 
     fun pbs(ctx: Context): Pbs? = sp(ctx).getString("pbs", null)?.let { Pbs.fromJson(it) }

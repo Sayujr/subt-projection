@@ -124,6 +124,7 @@ class IcuApi(private val creds: Credentials) {
                 category = e.optString("category"),
                 projCtl = p?.first,
                 projAtl = p?.second,
+                distanceM = e.optNum("distance")?.takeIf { it > 0 },
             )
         }
 
@@ -241,6 +242,51 @@ class IcuApi(private val creds: Credentials) {
             }
         }
         return Pbs(System.currentTimeMillis(), best[0], best[1], best[2])
+    }
+
+    /**
+     * Past races (A/B/C events) over [years] with the activity that was raced and the Fitness /
+     * Fatigue going in: race-eve values and the Fitness peaks over the 2, 3 and 4 months before.
+     */
+    fun fetchRaceHistory(years: Long = 3, today: LocalDate = LocalDate.now()): List<RaceResult> {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val evs = getArray(
+            "/athlete/$ath/events",
+            mapOf("oldest" to today.minusYears(years).toString(), "newest" to today.toString(), "category" to "RACE_A,RACE_B,RACE_C"),
+        ).objects().filter { it.optString("category").startsWith("RACE") && date(it) < today.toString() }
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
+        try {
+            return evs.map { ev ->
+                pool.submit<RaceResult> {
+                    val d = LocalDate.parse(date(ev))
+                    val acts = runCatching {
+                        getArray("/athlete/$ath/activities", mapOf("oldest" to d.toString(), "newest" to d.plusDays(1).toString()))
+                            .objects().filter { date(it) == d.toString() && it.optString("type").contains("Run", ignoreCase = true) }
+                    }.getOrDefault(emptyList())
+                    val act = acts.firstOrNull { it.optNum("paired_event_id")?.toLong() == ev.optLong("id") }
+                        ?: acts.maxByOrNull { it.optNum("distance") ?: 0.0 }
+                    val well = runCatching {
+                        getArray("/athlete/$ath/wellness", mapOf("oldest" to d.minusDays(121).toString(), "newest" to d.minusDays(1).toString()))
+                            .objects().mapNotNull { o -> o.optNum("ctl")?.let { c -> Triple(o.optString("id"), c, o.optNum("atl")) } }
+                    }.getOrDefault(emptyList())
+                    fun peak(days: Long) = well.filter { it.first >= d.minusDays(days).toString() }.maxOfOrNull { it.second }
+                    val eve = well.maxByOrNull { it.first }
+                    val elapsed = act?.optNum("elapsed_time"); val moving = act?.optNum("moving_time")
+                    RaceResult(
+                        date = d.toString(),
+                        name = ev.optString("name").ifBlank { act?.optString("name") ?: "Race" },
+                        category = ev.optString("category"),
+                        distanceM = act?.optNum("distance") ?: ev.optNum("distance"),
+                        seconds = if (elapsed != null && moving != null && elapsed <= moving * 1.1) elapsed else moving ?: elapsed,
+                        avgHr = act?.optNum("average_heartrate"),
+                        eveCtl = eve?.second, eveAtl = eve?.third,
+                        peak60 = peak(60), peak90 = peak(90), peak120 = peak(120),
+                    )
+                }
+            }.map { it.get() }.sortedBy { it.date }
+        } finally {
+            pool.shutdown()
+        }
     }
 
     /** Sets one wellness field for a day in intervals.icu (used to correct an obviously wrong sleep value). */

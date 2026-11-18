@@ -58,6 +58,9 @@ class MainActivity : Activity() {
     private val loading = mutableSetOf<String>()
     private var rangeError: String? = null
     private var raceIndex = 0
+    private var racePast = false
+    private var histLoading = false
+    private var histError: String? = null
 
     // SubT sub-screens
     private enum class SubtView(val label: String) { PACE("Pace"), ANALYSIS("Analysis"), FORECAST("Sub-3 forecast"), PLAN("Sub-3 plan") }
@@ -214,28 +217,42 @@ class MainActivity : Activity() {
             Tab.RACE -> {
                 val races = Prefs.snapshot(this)?.races.orEmpty().filter { it.date >= LocalDate.now().toString() }
                 controls.visibility = View.VISIBLE
-                if (races.size > 1) {
-                    races.forEachIndexed { i, r ->
-                        val name = if (r.name.length > 22) r.name.take(20) + "…" else r.name
-                        chips.addView(chip(name, i == raceIndex) { raceIndex = i; show() })
+                chips.addView(chip("‹ Past races", racePast) { racePast = true; show() })
+                races.forEachIndexed { i, r ->
+                    val name = if (r.name.length > 22) r.name.take(20) + "…" else r.name
+                    chips.addView(chip(name, !racePast && i == raceIndex) { racePast = false; raceIndex = i; show() })
+                }
+                // Taper strictness for the formula targets
+                if (!racePast) {
+                    val p = Prefs.taperPreset(this)
+                    listOf("Strict taper", "Standard taper", "Relaxed taper").forEachIndexed { i, l ->
+                        chips.addView(chip(l, i == p) { Prefs.setTaperPreset(this, i); show() })
                     }
                 }
-                // Fatigue target (race morning) and Fitness guardrail
-                val ft = Prefs.fatigueTarget(this)
-                if (ft != null) {
-                    chips.addView(chip("Fatigue ≤ ${ft.roundToInt()}", true) {})
-                    chips.addView(chip("−2", false) { Prefs.setFatigueTarget(this, ft - 2); show() })
-                    chips.addView(chip("+2", false) { Prefs.setFatigueTarget(this, ft + 2); show() })
-                }
-                chips.addView(chip("Use next race's projection", false) { Prefs.setFatigueTarget(this, null); show() })
-                val g = Prefs.fitnessGuardrail(this)
-                for (pct in listOf(10, 15, 20)) chips.addView(chip("Fitness floor −$pct%", pct == g) { Prefs.setFitnessGuardrail(this, pct); show() })
             }
             Tab.SUBT -> {
                 controls.visibility = View.VISIBLE
                 for (v in SubtView.entries) chips.addView(chip(v.label, v == subtView) { subtView = v; show() })
             }
         }
+    }
+
+    /** Past races feed the Past races screen and calibrate the Fatigue target; refreshed daily. */
+    private fun loadHistory(force: Boolean) {
+        val creds = Prefs.credentials(this) ?: return
+        val cached = Prefs.raceHistory(this)
+        if (histLoading) return
+        if (!force && cached != null && System.currentTimeMillis() - cached.first < 24 * 3600_000L) return
+        histLoading = true
+        histError = null
+        Thread {
+            val r = runCatching { IcuApi(creds).fetchRaceHistory() }
+            runOnUiThread {
+                histLoading = false
+                r.onSuccess { Prefs.saveRaceHistory(this, it) }.onFailure { histError = it.message ?: it.javaClass.simpleName }
+                if (tab == Tab.RACE) drawContent()
+            }
+        }.start()
     }
 
     private fun loadReps(force: Boolean) {
@@ -513,7 +530,13 @@ class MainActivity : Activity() {
                     applyInto(content, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true), ViewGroup.LayoutParams.MATCH_PARENT)
                     content.getChildAt(0)?.let { enableScrub(it) }
                 }
-                Tab.RACE -> content.addView(AppScreens(this, wDp).race(raceIndex), full)
+                Tab.RACE -> {
+                    loadHistory(force = false)
+                    if (racePast) content.addView(scrollPage("past") {
+                        AppScreens(this, wDp) { drawContent() }.pastRaces(it, histLoading, histError) { loadHistory(force = true); drawContent() }
+                    }, full)
+                    else content.addView(AppScreens(this, wDp).race(raceIndex), full)
+                }
                 Tab.RECOVERY -> content.addView(AppScreens(this, wDp).recovery(Prefs.period(this, WidgetRenderer.APP_ID)), full)
                 Tab.SUBT -> if (subtPage != null) content.addView(subtPage, full) else {
                     // SubT: the widget card at a comfortable height, then the goal projection below

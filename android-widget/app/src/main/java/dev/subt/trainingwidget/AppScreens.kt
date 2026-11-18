@@ -191,10 +191,11 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val start = rd.minusDays(90).toString()
         val window = series.filter { it.date >= start && it.date <= eve.toString() }
         val hasEve = window.lastOrNull()?.date == eve.toString()
-        val guard = Prefs.fitnessGuardrail(a)
-        // Fatigue target: fixed from the next race's projected race-morning Fatigue unless set
-        val nextEve = races.first().let { r0 -> series.firstOrNull { it.date == LocalDate.parse(r0.date).minusDays(1).toString() } }
-        val fatTarget: Double? = Prefs.fatigueTarget(a) ?: nextEve?.atl?.also { Prefs.setFatigueTarget(a, it) }
+        val dist = RaceDistance.of(race.distanceM, race.name)
+        val history = Prefs.raceHistory(a)?.second.orEmpty()
+        val preset = Prefs.taperPreset(a)
+        val tt = Taper.targets(series, rd, race.category, dist, history, preset)
+        val fatTarget = tt?.fatTarget
 
         if (window.size < 2) {
             val c = card(col)
@@ -214,7 +215,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         }
         val peakIdx = window.indices.maxBy { window[it].ctl }
         val peak = window[peakIdx]
-        val floor = peak.ctl * (1 - guard / 100.0)
+        val floor = tt?.floor ?: peak.ctl * 0.9
+        val ref = tt?.ref ?: peak.ctl
         val todayIdx = window.indexOfLast { it.date <= today.toString() }
 
         fun idxFor(dd: LocalDate) = window.indexOfFirst { it.date == dd.toString() }
@@ -235,22 +237,22 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         // Checkpoints table
         val t = card(col)
         label(t, "Checkpoints · race day = morning (end of the day before)")
-        row(t, listOf("" to FAINT, "FITNESS" to FAINT, "FATIGUE" to FAINT, "FORM" to FAINT, "% PEAK" to FAINT), header = true)
+        row(t, listOf("" to FAINT, "FITNESS" to FAINT, "FATIGUE" to FAINT, "FORM" to FAINT, "% REF" to FAINT), header = true)
         divider(t)
         fun cpRow(name: String, dd: Day?, highlight: Boolean = false) {
             if (dd == null) return
             val z = FormZone.of(dd.form)
-            val pct = (dd.ctl / peak.ctl * 100).roundToInt()
+            val pct = (dd.ctl / ref * 100).roundToInt()
             val pctColor = when {
                 !highlight -> DIM
-                pct >= 100 - guard -> GOOD
+                dd.ctl >= floor -> GOOD
                 else -> BAD
             }
             val dl = date(dd.date)?.format(dm) ?: ""
             row(t, listOf(
                 spans(name to (if (highlight) TEXT else DIM), "\n$dl" to FAINT) to TEXT,
                 "${dd.ctl.roundToInt()}" to FormColors.FITNESS,
-                "${dd.atl.roundToInt()}" to (if (highlight && fatTarget != null) (if (dd.atl <= fatTarget + 1) GOOD else WARN) else FormColors.FATIGUE),
+                "${dd.atl.roundToInt()}" to (if (highlight && tt != null) fatColor(dd.atl, tt) else FormColors.FATIGUE),
                 signed(dd.form.roundToInt()) to z.color,
                 "$pct%" to pctColor,
             ))
@@ -262,59 +264,72 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         if (todayIdx >= 0 && window[todayIdx].date != eve.toString()) cpRow("Today", window[todayIdx])
         if (hasEve) cpRow("Race day", window.last(), highlight = true)
 
-        // Targets: Fatigue is the target, Fitness is a guardrail, Form is the result
+        // Targets from the formula: Fatigue is the target, Fitness a guardrail, Form the result
         val eveDay = if (hasEve) window.last() else null
         val tg = card(col)
-        label(tg, "Race-morning targets")
-        if (fatTarget != null) {
-            text(tg, spans("Fatigue target: " to DIM, "≤ ${fatTarget.roundToInt()}" to FormColors.FATIGUE,
-                "  (from ${races.first().name.take(28)}'s projection · adjust with the chips)" to FAINT), 15f, top = 4)
-        }
-        text(tg, spans("Fitness guardrail: " to DIM, "stay above ${floor.roundToInt()}" to FormColors.FITNESS,
-            "  (no more than $guard% below the ${peak.ctl.roundToInt()} peak; higher is fine)" to FAINT), 15f, top = 4)
-        if (eveDay != null) {
-            val drop = (1 - eveDay.ctl / peak.ctl) * 100
-            val okFit = drop <= guard
-            val okFat = fatTarget == null || eveDay.atl <= fatTarget + 1
-            val form = eveDay.form.roundToInt()
+        label(tg, "Race-morning targets · ${dist.label}, ${race.category.removePrefix("RACE_")} race")
+        if (tt == null) {
+            text(tg, "Not enough Fitness history before this race to set targets.", 14f, DIM, top = 4)
+        } else {
+            stats3(tg, listOf(
+                Triple("Fatigue target", "${tt.fatTarget.roundToInt()}" to FormColors.FATIGUE, "range ${tt.fatLo.roundToInt()}–${tt.fatHi.roundToInt()}"),
+                Triple("Fitness floor", "${tt.floor.roundToInt()}" to FormColors.FITNESS, "higher is fine"),
+                Triple("Reference peak", "${tt.ref.roundToInt()}" to TEXT, "blended"),
+            ))
+            if (eveDay != null) {
+                val okFit = eveDay.ctl >= tt.floor
+                val fc = fatColor(eveDay.atl, tt)
+                text(tg, spans(
+                    "Projected: " to DIM,
+                    "Fatigue ${eveDay.atl.roundToInt()} (${Taper.pct(eveDay.atl / tt.ref)}) " to fc, fatVerdict(eveDay.atl, tt) to fc,
+                    "   Fitness ${eveDay.ctl.roundToInt()} (${Taper.pct(eveDay.ctl / tt.ref)}) " to TEXT, (if (okFit) "✓" else "⚠ below floor") to (if (okFit) GOOD else BAD),
+                    "   → Form ${signed(eveDay.form.roundToInt())}" to FormZone.of(eveDay.form).color,
+                ), 15f, top = 10)
+            }
+            // Show the working
+            val f = DateTimeFormatter.ofPattern("d MMM", loc)
             text(tg, spans(
-                "Projected: " to DIM,
-                "Fatigue ${eveDay.atl.roundToInt()} " to TEXT, (if (okFat) "✓" else "⚠") to (if (okFat) GOOD else WARN),
-                "   Fitness ${eveDay.ctl.roundToInt()} (−${drop.roundToInt()}%) " to TEXT, (if (okFit) "✓" else "⚠") to (if (okFit) GOOD else BAD),
-                "   → Form ${signed(form)} ${FormZone.of(eveDay.form).label}" to FormZone.of(eveDay.form).color,
-            ), 15f, top = 8)
+                "How it's worked out\n" to DIM,
+                "Reference peak = 50% × 2-month peak ${tt.p60?.roundToInt() ?: "–"} + 30% × 3-month ${tt.p90?.roundToInt() ?: "–"} + 20% × 4-month ${tt.p120?.roundToInt() ?: "–"} = ${tt.ref.roundToInt()}\n" to FAINT,
+                "Fatigue target = ${Taper.pct(tt.f)} of reference: ${race.category.removePrefix("RACE_")} race, ${dist.label.lowercase(loc)}, ${listOf("strict", "standard", "relaxed")[preset]} preset → ${Taper.pct(tt.baseF)}" to FAINT,
+                (if (tt.personalF != null) ", blended 50/50 with your ${tt.personalN} improved race${if (tt.personalN > 1) "s" else ""} (${Taper.pct(tt.personalF)})" else ", not yet calibrated (load Past races)") to FAINT,
+                "\nFitness floor = ${Taper.pct(tt.g)} of reference (by distance and priority)" to FAINT,
+            ), 12f, top = 10)
+            text(tg, "Form is Fitness minus Fatigue, so it follows from these two. Change the strictness with the chips above.", 12f, FAINT, top = 6)
         }
-        text(tg, "Form is just Fitness minus Fatigue, so it follows from these two. Keep Fatigue down and Fitness above the floor and Form takes care of itself.", 12f, FAINT, top = 6)
 
         // Coach notes
         val cn = card(col)
         label(cn, "Coach notes")
-        coachNotes(cn, s, race, races, eveDay, peak, guard, fatTarget, daysTo)
+        coachNotes(cn, s, race, races, eveDay, peak, tt, daysTo)
         text(cn, "Rule-of-thumb guidance from your intervals.icu data. It isn't medical advice.", 11f, FAINT, top = 10)
         return sv
     }
 
     private fun coachNotes(
         c: LinearLayout, s: Snapshot, race: Race, races: List<Race>, eve: Day?, peak: Day,
-        guard: Int, fatTarget: Double?, daysTo: Long,
+        tt: Taper.Targets?, daysTo: Long,
     ) {
         val today = LocalDate.now()
         if (eve != null) {
             // Fatigue target first: it's what decides race-day freshness
-            if (fatTarget != null) {
-                val excess = eve.atl - fatTarget
-                if (excess <= 1) bullet(c, GOOD, "Race-morning Fatigue ${eve.atl.roundToInt()} meets your target of ${fatTarget.roundToInt()} or less.")
-                else {
-                    // ATL falls by ~13 % of any load removed per day; spreading a cut over the last 3 days
-                    val ka = 1 - Math.exp(-1.0 / 7)
-                    val perDay = excess / (ka * (1 + (1 - ka) + (1 - ka) * (1 - ka)))
-                    bullet(c, WARN, "Race-morning Fatigue ${eve.atl.roundToInt()} is ${excess.roundToInt()} above your target of ${fatTarget.roundToInt()}. " +
-                        "Trimming about ${perDay.roundToInt()} load a day from the last 3 days (shorter or easier sessions, not total rest) would bring it to target.")
+            if (tt != null) {
+                val ka = 1 - Math.exp(-1.0 / 7)
+                when {
+                    eve.atl > tt.fatHi -> {
+                        // ATL falls by ~13 % of any load removed per day; spread a cut over the last 3 days
+                        val excess = eve.atl - tt.fatTarget
+                        val perDay = excess / (ka * (1 + (1 - ka) + (1 - ka) * (1 - ka)))
+                        bullet(c, WARN, "Race-morning Fatigue ${eve.atl.roundToInt()} is above your ${tt.fatLo.roundToInt()}–${tt.fatHi.roundToInt()} range. " +
+                            "Trimming about ${perDay.roundToInt()} load a day from the last 3 days (shorter or easier sessions, not total rest) would bring it to ${tt.fatTarget.roundToInt()}.")
+                    }
+                    eve.atl < tt.fatLo -> bullet(c, FormColors.FITNESS, "Race-morning Fatigue ${eve.atl.roundToInt()} is below the ${tt.fatLo.roundToInt()}–${tt.fatHi.roundToInt()} range, so you'd be fresher than you need to be. " +
+                        "You could keep a little more steady running in the final week to protect Fitness.")
+                    else -> bullet(c, GOOD, "Race-morning Fatigue ${eve.atl.roundToInt()} sits in your ${tt.fatLo.roundToInt()}–${tt.fatHi.roundToInt()} target range.")
                 }
+                if (eve.ctl < tt.floor) bullet(c, BAD, "Fitness ${eve.ctl.roundToInt()} would be under your ${tt.floor.roundToInt()} floor (${Taper.pct(tt.g)} of the ${tt.ref.roundToInt()} reference peak). The taper is too deep, so keep some volume and drop Fatigue with shorter, easier sessions rather than rest days.")
+                else bullet(c, GOOD, "Fitness ${eve.ctl.roundToInt()} stays above the ${tt.floor.roundToInt()} floor. High Fitness is fine as long as Fatigue is managed.")
             }
-            val drop = (1 - eve.ctl / peak.ctl) * 100
-            if (drop > guard) bullet(c, BAD, "Fitness would fall ${fmt1(drop)}% below your ${peak.ctl.roundToInt()} peak, past your $guard% guardrail. Keep some volume and bring Fatigue down with shorter, easier sessions rather than extra rest days.")
-            else bullet(c, GOOD, "Fitness guardrail OK: ${fmt1(drop)}% below peak (limit $guard%). High Fitness is fine as long as Fatigue is managed.")
             val form = eve.form.roundToInt()
             if (form < 0) bullet(c, WARN, "Form ${signed(form)}: you'd start the race carrying fatigue.")
             else if (form > 25) bullet(c, DIM, "Form ${signed(form)} is very fresh, and some runners feel flat at this level. A short opener with a few race-pace minutes 1–2 days before helps.")
@@ -373,6 +388,98 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             if (gap in 1..35) bullet(c, FormColors.FITNESS, "Next: ${nx.name} is $gap days later. Plan 3–5 easy days after this race, then a short mini-taper to bring Form back to about +5…+10.")
         }
         if (today.isAfter(rd)) bullet(c, DIM, "This race is in the past.")
+    }
+
+    private fun fatColor(atl: Double, tt: Taper.Targets) = when {
+        atl > tt.fatHi -> WARN
+        atl < tt.fatLo -> 0xFF5EC8FF.toInt()
+        else -> GOOD
+    }
+
+    private fun fatVerdict(atl: Double, tt: Taper.Targets) = when {
+        atl > tt.fatHi -> "⚠ above range"
+        atl < tt.fatLo -> "fresher than needed"
+        else -> "✓"
+    }
+
+    // ---------------------------------------------------------------- Past races
+
+    fun pastRaces(col: LinearLayout, loading: Boolean, error: String?, onRefresh: () -> Unit) {
+        val cached = Prefs.raceHistory(a)
+        val top = card(col)
+        label(top, "Past races · last 3 years")
+        text(top, when {
+            loading -> "Loading your races from intervals.icu…"
+            error != null -> "Couldn't load: $error"
+            cached != null -> "Updated ${android.text.format.DateFormat.getTimeFormat(a).format(java.util.Date(cached.first))} · tap to refresh"
+            else -> "Tap to load"
+        }, 13f, if (error != null) WARN else FAINT, top = 2).setOnClickListener { onRefresh() }
+        val list = cached?.second.orEmpty().filter { it.seconds != null }
+        if (cached == null) return
+        if (list.isEmpty()) { text(top, "No past A/B/C races with a recorded run found.", 15f, DIM, top = 8); return }
+
+        // Summary by distance
+        val byDist = list.groupBy { RaceDistance.of(it.distanceM, it.name) }
+        val sum = card(col)
+        label(sum, "By distance")
+        row(sum, listOf("DISTANCE" to FAINT, "RACES" to FAINT, "BEST" to FAINT, "LATEST" to FAINT, "CHANGE" to FAINT), header = true,
+            weights = listOf(1.2f, 0.7f, 1.1f, 1.1f, 1.1f))
+        divider(sum)
+        for (dd in RaceDistance.entries) {
+            val l = byDist[dd]?.sortedBy { it.date } ?: continue
+            val best = l.minOf { it.seconds!! }
+            val change = if (l.size >= 2) l.last().seconds!! - l.first().seconds!! else null
+            row(sum, listOf(
+                dd.label to TEXT, "${l.size}" to DIM, t(best) to GOOD, t(l.last().seconds!!) to TEXT,
+                (change?.let { (if (it < 0) "−" else "+") + t(abs1(it)) } ?: "–") to (if (change != null && change < 0) GOOD else if (change != null) BAD else FAINT),
+            ), weights = listOf(1.2f, 0.7f, 1.1f, 1.1f, 1.1f))
+        }
+        // Times chart for the distance raced most
+        byDist.filterKeys { it != RaceDistance.OTHER }.maxByOrNull { it.value.size }?.takeIf { it.value.size >= 2 }?.let { (dd, l) ->
+            val pts = l.mapNotNull { r -> date(r.date)?.let { it to r.seconds!! / 60 } }
+            image(sum, Charts.timeChart(pts, pts.minOf { it.first }.minusDays(20), pts.maxOf { it.first }.plusDays(20), GOOD, chartW(), dp(150), d, TILE,
+                scatter = false, invert = true, fmt = { m -> "%d:%02d".format(m.toInt(), ((m - m.toInt()) * 60).roundToInt()) }), 150)
+            text(sum, "${dd.label} times (minutes), with faster plotted higher.", 12f, FAINT, top = 4)
+        }
+
+        // Each race, newest first, against the previous race at the same distance
+        for (r in list.sortedByDescending { it.date }) {
+            val dd = RaceDistance.of(r.distanceM, r.name)
+            val prev = byDist[dd].orEmpty().filter { it.date < r.date }.maxByOrNull { it.date }.takeIf { dd != RaceDistance.OTHER }
+            val c = card(col)
+            label(c, "${date(r.date)?.format(edm) ?: r.date} ${date(r.date)?.year ?: ""} · ${r.category.removePrefix("RACE_")} race · ${dd.label}")
+            text(c, r.name, 17f, bold = true, top = 2)
+            val km = (r.distanceM ?: dd.metres) / 1000
+            val pace = if (km > 0) r.seconds!! / km / 60 else null
+            stats3(c, listOf(
+                Triple("Time", t(r.seconds!!) to TEXT, pace?.let { "${Charts.paceText(it)} /km" } ?: ""),
+                Triple("Avg HR", (r.avgHr?.roundToInt()?.toString() ?: "–") to 0xFFFF7A90.toInt(), String.format(loc, "%.2f km", km)),
+                Triple("Race-morning Form", (if (r.eveCtl != null && r.eveAtl != null) signed((r.eveCtl - r.eveAtl).roundToInt()) else "–") to
+                    (if (r.eveCtl != null && r.eveAtl != null) FormZone.of(r.eveCtl - r.eveAtl).color else DIM), ""),
+            ))
+            val refP = Taper.reference(r.peak60, r.peak90, r.peak120)
+            if (r.eveCtl != null && r.eveAtl != null && refP != null) {
+                text(c, spans(
+                    "Fitness ${r.eveCtl.roundToInt()} (${Taper.pct(r.eveCtl / refP)} of ref peak ${refP.roundToInt()})" to FormColors.FITNESS,
+                    "  ·  " to FAINT,
+                    "Fatigue ${r.eveAtl.roundToInt()} (${Taper.pct(r.eveAtl / refP)})" to FormColors.FATIGUE,
+                ), 13f, top = 6)
+            }
+            val prevSec = prev?.seconds
+            if (prev != null && prevSec != null) {
+                val delta = r.seconds!! - prevSec
+                val per = if (km > 0) delta / km else 0.0
+                text(c, spans(
+                    (if (delta < 0) "▲ ${t(-delta)} faster" else if (delta > 0) "▼ ${t(delta)} slower" else "＝ same time") to (if (delta < 0) GOOD else if (delta > 0) BAD else DIM),
+                    " than ${prev.name.take(30)} (${date(prev.date)?.format(dm)} ${date(prev.date)?.year}), ${if (per < 0) "−" else "+"}${abs1(per).roundToInt()} s/km" to DIM,
+                ), 14f, top = 6)
+                val pr = Taper.reference(prev.peak60, prev.peak90, prev.peak120)
+                if (pr != null && refP != null && prev.eveAtl != null && r.eveAtl != null) {
+                    text(c, "Going in: reference peak ${pr.roundToInt()} → ${refP.roundToInt()}, race-morning Fatigue ${Taper.pct(prev.eveAtl / pr)} → ${Taper.pct(r.eveAtl / refP)} of peak.", 12f, FAINT, top = 4)
+                }
+            } else if (dd != RaceDistance.OTHER) text(c, "Your first ${dd.label} in this period.", 12f, FAINT, top = 6)
+        }
+        text(card(col), "Races where you beat your previous time at that distance calibrate your Fatigue target on upcoming races.", 12f, FAINT)
     }
 
     // ---------------------------------------------------------------- Recovery

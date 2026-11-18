@@ -38,6 +38,8 @@ data class Race(
     val category: String,
     val projCtl: Double? = null,
     val projAtl: Double? = null,
+    /** Planned race distance in metres, when the event has one. */
+    val distanceM: Double? = null,
 ) {
     val projForm: Double? get() = if (projCtl != null && projAtl != null) projCtl - projAtl else null
 }
@@ -103,7 +105,7 @@ data class Snapshot(
             races.forEach {
                 put(
                     JSONObject().put("d", it.date).put("n", it.name).put("t", it.type).put("c", it.category)
-                        .putOpt("pc", it.projCtl).putOpt("pa", it.projAtl)
+                        .putOpt("pc", it.projCtl).putOpt("pa", it.projAtl).putOpt("dm", it.distanceM)
                 )
             }
         })
@@ -167,12 +169,72 @@ data class Snapshot(
                     val x = r.getJSONObject(it)
                     Race(
                         x.getString("d"), x.getString("n"), x.optString("t"), x.optString("c"),
-                        x.optNullableDouble("pc"), x.optNullableDouble("pa"),
+                        x.optNullableDouble("pc"), x.optNullableDouble("pa"), x.optNullableDouble("dm"),
                     )
                 },
             )
         } catch (e: Exception) {
             null
+        }
+    }
+}
+
+/** A completed race with its result and the Fitness picture going into it. */
+data class RaceResult(
+    val date: String,
+    val name: String,
+    val category: String,
+    val distanceM: Double?,
+    val seconds: Double?,
+    val avgHr: Double?,
+    val eveCtl: Double?,
+    val eveAtl: Double?,
+    val peak60: Double?,
+    val peak90: Double?,
+    val peak120: Double?,
+) {
+    fun toJson(): JSONObject = JSONObject().put("d", date).put("n", name).put("c", category)
+        .putOpt("dm", distanceM).putOpt("s", seconds).putOpt("hr", avgHr).putOpt("ec", eveCtl).putOpt("ea", eveAtl)
+        .putOpt("p60", peak60).putOpt("p90", peak90).putOpt("p120", peak120)
+
+    companion object {
+        private fun JSONObject.d(k: String): Double? = if (has(k) && !isNull(k)) optDouble(k).takeUnless { it.isNaN() } else null
+        fun fromJson(o: JSONObject) = RaceResult(
+            o.getString("d"), o.optString("n"), o.optString("c"), o.d("dm"), o.d("s"), o.d("hr"),
+            o.d("ec"), o.d("ea"), o.d("p60"), o.d("p90"), o.d("p120"),
+        )
+        fun listToJson(l: List<RaceResult>, t: Long) = JSONObject().put("t", t).put("r", JSONArray().apply { l.forEach { put(it.toJson()) } }).toString()
+        fun listFromJson(s: String): Pair<Long, List<RaceResult>>? = try {
+            val o = JSONObject(s); val a = o.getJSONArray("r")
+            o.getLong("t") to (0 until a.length()).map { fromJson(a.getJSONObject(it)) }
+        } catch (e: Exception) { null }
+    }
+}
+
+/** Standard race distances for comparing like with like. */
+enum class RaceDistance(val label: String, val metres: Double) {
+    K5("5K", 5000.0), K10("10K", 10000.0), HALF("Half", 21097.5), FULL("Marathon", 42195.0), OTHER("Other", 0.0);
+
+    companion object {
+        fun of(distanceM: Double?, name: String = ""): RaceDistance {
+            val n = name.lowercase()
+            if (distanceM != null && distanceM > 0) {
+                val km = distanceM / 1000
+                return when {
+                    km in 4.7..5.4 -> K5
+                    km in 9.6..10.6 -> K10
+                    km in 20.6..21.8 -> HALF
+                    km in 41.5..43.0 -> FULL
+                    else -> OTHER
+                }
+            }
+            return when {
+                "half" in n -> HALF
+                "marathon" in n -> FULL
+                "10k" in n || "10 k" in n -> K10
+                "5k" in n || "5 k" in n || "parkrun" in n -> K5
+                else -> OTHER
+            }
         }
     }
 }
