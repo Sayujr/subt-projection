@@ -16,6 +16,17 @@ object Deviations {
             s?.runFtp?.let { f -> if (abs(cp - f) >= 5) out += "CP ${cp.roundToInt()} W (yours) vs FTP ${f.roundToInt()} W in intervals.icu" }
             s?.runs?.lastOrNull { it.cp != null }?.cp?.let { e -> if (abs(cp - e) >= 5) out += "CP ${cp.roundToInt()} W (yours) vs eFTP ${e.roundToInt()} W estimated by intervals.icu" }
         }
+        val todayDay = s?.days?.lastOrNull()?.takeIf { it.date == java.time.LocalDate.now().toString() }
+        Prefs.rhrOverride(ctx)?.let { r ->
+            val i = todayDay?.rhr
+            if (i == null) out += "Resting HR ${r.roundToInt()} (yours) isn't in intervals.icu for today"
+            else if (abs(r - i) >= 3) out += "Resting HR ${r.roundToInt()} (yours) vs ${i.roundToInt()} in intervals.icu today"
+        }
+        Prefs.hrvOverride(ctx)?.let { h ->
+            val i = todayDay?.hrv
+            if (i == null) out += "HRV ${h.roundToInt()} ms (yours) isn't in intervals.icu for today"
+            else if (abs(h - i) >= 5) out += "HRV ${h.roundToInt()} ms (yours) vs ${i.roundToInt()} ms in intervals.icu today"
+        }
         Prefs.subtOverride(ctx)?.let { p ->
             Prefs.subt(ctx)?.months?.lastOrNull { !it.outlier }?.pace?.let { m ->
                 if (abs(p - m) * 60 >= 5) out += "SubT ${Charts.paceText(p)}/km (yours) vs ${Charts.paceText(m)}/km latest monthly median"

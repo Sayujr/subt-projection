@@ -36,6 +36,8 @@ object WidgetRenderer {
         val snap = Prefs.snapshot(ctx)
         val error = Prefs.error(ctx)
         val refreshing = Prefs.isRefreshing(ctx)
+        val rhrToday = Prefs.rhrOverride(ctx)
+        val hrvToday = Prefs.hrvOverride(ctx)
         val today: LocalDate = LocalDate.now()
         val isToday get() = snap?.today == today.toString()
     }
@@ -289,7 +291,7 @@ object WidgetRenderer {
 
     /** "● PUSH / HOLD / BACK OFF / TAPER" in the widget header. */
     private fun setVerdict(views: RemoteViews, s: State) {
-        val v = if (s.isToday) Verdict.compute(s.snap) else null
+        val v = if (s.isToday) Verdict.compute(s.snap, s.rhrToday, s.hrvToday) else null
         views.setTextViewText(R.id.verdict, v?.let { "● " + it.call.label.uppercase(Locale.getDefault()) } ?: "")
         v?.let { views.setTextColor(R.id.verdict, it.call.color) }
     }

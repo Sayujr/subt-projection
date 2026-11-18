@@ -133,6 +133,19 @@ object Prefs {
     // ---- numbers you enter in Settings (override intervals.icu / measured values in this app only)
     fun cpOverride(ctx: Context): Double? = sp(ctx).getFloat("cp_override", 0f).takeIf { it > 0 }?.toDouble()
     fun setCpOverride(ctx: Context, w: Double?) = sp(ctx).edit().putFloat("cp_override", (w ?: 0.0).toFloat()).apply()
+    /** Today's resting HR / HRV you entered (used as today's reading). Stored with the date they apply to. */
+    fun rhrOverride(ctx: Context): Double? = todayValue(ctx, "rhr_override")
+    fun setRhrOverride(ctx: Context, v: Double?) = setTodayValue(ctx, "rhr_override", v)
+    fun hrvOverride(ctx: Context): Double? = todayValue(ctx, "hrv_override")
+    fun setHrvOverride(ctx: Context, v: Double?) = setTodayValue(ctx, "hrv_override", v)
+    private fun todayValue(ctx: Context, k: String): Double? {
+        val p = sp(ctx)
+        if (p.getString("${k}_date", null) != java.time.LocalDate.now().toString()) return null
+        return p.getFloat(k, 0f).takeIf { it > 0 }?.toDouble()
+    }
+    private fun setTodayValue(ctx: Context, k: String, v: Double?) =
+        sp(ctx).edit().putFloat(k, (v ?: 0.0).toFloat()).putString("${k}_date", java.time.LocalDate.now().toString()).apply()
+
     /** SubT pace, min/km. */
     fun subtOverride(ctx: Context): Double? = sp(ctx).getFloat("subt_override", 0f).takeIf { it > 0 }?.toDouble()
     fun setSubtOverride(ctx: Context, p: Double?) = sp(ctx).edit().putFloat("subt_override", (p ?: 0.0).toFloat()).apply()

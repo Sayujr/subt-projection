@@ -227,6 +227,50 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
+            android:text="Resting HR today (bpm)"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/num_rhr"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/input_bg"
+            android:hint="auto"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_faint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="HRV today (ms)"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/num_hrv"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/input_bg"
+            android:hint="auto"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_faint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:text="SubT pace (m:ss /km)"
             android:textColor="@color/text_dim"
             android:textSize="13sp" />
@@ -310,6 +354,30 @@
             android:paddingEnd="12dp"
             android:textColor="@color/text"
             android:textColorHint="@color/text_faint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:fontFamily="sans-serif-medium"
+            android:text="Send to intervals.icu"
+            android:textColor="@color/text"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Optional. Each button asks before changing anything in intervals.icu. Weight, resting HR and HRV go to today's wellness, and FTP to your Run sport settings."
+            android:textColor="@color/text_faint"
+            android:textSize="12.5sp" />
+
+        <LinearLayout
+            android:id="@+id/sync_buttons"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
 
         <TextView
             android:id="@+id/status"

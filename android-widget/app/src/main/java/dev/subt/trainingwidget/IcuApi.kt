@@ -360,6 +360,28 @@ class IcuApi(private val creds: Credentials) {
             }.sortedBy { it.date }
     }
 
+    /** Sets the run FTP in intervals.icu sport settings (only when you tap "Send" in Settings). */
+    fun updateRunFtp(ftp: Int) {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val o = JSONObject(getText("/athlete/$ath", emptyMap()))
+        val run = o.optJSONArray("sportSettings")?.objects().orEmpty()
+            .firstOrNull { s -> s.optJSONArray("types")?.let { t -> (0 until t.length()).any { t.optString(it) == "Run" } } == true }
+            ?: throw IOException("No Run sport settings found in intervals.icu")
+        val id = run.opt("id")?.toString() ?: throw IOException("Run sport settings have no id")
+        val conn = URL("$BASE/athlete/$ath/sport-settings/${URLEncoder.encode(id, "UTF-8")}").openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "PUT"; conn.doOutput = true
+            conn.connectTimeout = 15_000; conn.readTimeout = 25_000
+            val token = Base64.encodeToString("API_KEY:${creds.apiKey}".toByteArray(), Base64.NO_WRAP)
+            conn.setRequestProperty("Authorization", "Basic $token")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.outputStream.use { it.write(JSONObject().put("ftp", ftp).toString().toByteArray()) }
+            val code = conn.responseCode
+            if (code == 401 || code == 403) throw AuthException()
+            if (code !in 200..299) throw IOException("intervals.icu returned HTTP $code")
+        } finally { conn.disconnect() }
+    }
+
     /** Sets one wellness field for a day in intervals.icu (used to correct an obviously wrong sleep value). */
     fun updateWellness(date: String, fields: JSONObject) {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")

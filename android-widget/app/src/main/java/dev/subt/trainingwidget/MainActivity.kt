@@ -34,10 +34,10 @@ class MainActivity : Activity() {
     /** [inBar] tabs sit in the bottom bar; every tab is also in the ☰ menu. */
     private enum class Tab(val icon: String, val label: String, val title: String, val inBar: Boolean) {
         HOME("◉", "Today", "Training Today", true),
+        WEEK("▥", "Week", "Training load", true),
         STREAKS("✦", "Streaks", "Streaks", true),
-        POWER("ϟ", "Power", "Power", true),
         SUBT("⏱", "SubT", "SubT & sub-3", true),
-        WEEK("▥", "Week", "Training load", false),
+        POWER("ϟ", "Power", "Power", false),
         RACE("⚑", "Race", "Race", false),
         RECOVERY("♥", "Recovery", "Recovery", false),
     }

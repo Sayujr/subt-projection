@@ -20,9 +20,10 @@ object Verdict {
     private const val WARN = 0xFFFFC53D.toInt()
     private const val BAD = 0xFFFF7A7A.toInt()
 
-    fun compute(s: Snapshot?): Result? {
+    fun compute(s: Snapshot?, rhrToday: Double? = null, hrvToday: Double? = null): Result? {
         if (s == null || s.days.isEmpty()) return null
-        val d = s.days.last()
+        // Your entered RHR / HRV (Settings) are treated as today's readings
+        val d = s.days.last().let { it.copy(rhr = rhrToday ?: it.rhr, hrv = hrvToday ?: it.hrv) }
         val reasons = mutableListOf<Pair<Int, String>>()
         var score = 0
 

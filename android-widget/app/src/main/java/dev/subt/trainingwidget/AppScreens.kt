@@ -537,10 +537,11 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             else signals += GOOD to "$title normal"
         }
 
-        dailyCard("Resting HR", 0xFFFF7A90.toInt(), days.mapNotNull { dd -> dd.rhr?.let { date(dd.date)!! to it } }, "bpm", false,
+        fun withToday(list: List<Pair<LocalDate, Double>>, v: Double?) = if (v == null) list else list.filter { it.first != today } + (today to v)
+        dailyCard("Resting HR", 0xFFFF7A90.toInt(), withToday(days.mapNotNull { dd -> dd.rhr?.let { date(dd.date)!! to it } }, Prefs.rhrOverride(a)), "bpm", false,
             { it.roundToInt().toString() },
             "Higher than normal often means fatigue, illness, heat, alcohol or short sleep.")
-        dailyCard("HRV", 0xFF2DD4BF.toInt(), days.mapNotNull { dd -> dd.hrv?.let { date(dd.date)!! to it } }, "ms", true,
+        dailyCard("HRV", 0xFF2DD4BF.toInt(), withToday(days.mapNotNull { dd -> dd.hrv?.let { date(dd.date)!! to it } }, Prefs.hrvOverride(a)), "ms", true,
             { it.roundToInt().toString() },
             "Lower than normal suggests your body is still absorbing stress. Higher means well recovered.")
 
@@ -1213,7 +1214,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
 
     /** Push / Hold / Back off / Taper: a clean stack (label, call, one-line reason, signals as bullets). */
     fun verdictCard(col: LinearLayout) {
-        val v = Verdict.compute(Prefs.snapshot(a)) ?: return
+        val v = Verdict.compute(Prefs.snapshot(a), Prefs.rhrOverride(a), Prefs.hrvOverride(a)) ?: return
         val c = card(col)
         label(c, "Today's call")
         text(c, v.call.label, 26f, v.call.color, bold = true, top = 2).apply { letterSpacing = 0.02f }

@@ -54,7 +54,7 @@ object Notifier {
         val s = Prefs.snapshot(ctx) ?: return
         val today = LocalDate.now().toString()
         if (s.today != today) return
-        val v = Verdict.compute(s)
+        val v = Verdict.compute(s, Prefs.rhrOverride(ctx), Prefs.hrvOverride(ctx))
 
         // Morning summary (first refresh after 6:00)
         if (Prefs.notifyMorning(ctx) && LocalTime.now().hour in 6..11 && v != null) {
@@ -76,7 +76,7 @@ object Notifier {
 
         // Resting HR spike
         val rhr = s.days.mapNotNull { it.rhr }
-        val last = s.days.last().rhr
+        val last = Prefs.rhrOverride(ctx) ?: s.days.last().rhr
         if (last != null && rhr.size >= 10) {
             val base = rhr.dropLast(1).takeLast(42).average()
             if (last - base >= 5) once(ctx, "rhr", today) {

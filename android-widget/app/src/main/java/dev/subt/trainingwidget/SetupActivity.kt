@@ -54,9 +54,12 @@ class SetupActivity : Activity() {
         val autoKg = Prefs.snapshot(this)?.weight
         val autoCp = Prefs.snapshot(this)?.runFtp
         val autoSubt = Prefs.subt(this)?.months?.lastOrNull { !it.outlier }?.pace
+        val todayIcu = Prefs.snapshot(this)?.days?.lastOrNull()?.takeIf { it.date == java.time.LocalDate.now().toString() }
         val fields = listOf(
             Triple(R.id.num_weight, Prefs.weightOverride(this)?.let { String.format(java.util.Locale.US, "%.1f", it) }, autoKg?.let { "auto: %.1f (intervals.icu)".format(it) }),
             Triple(R.id.num_cp, Prefs.cpOverride(this)?.let { it.roundToInt().toString() }, autoCp?.let { "auto: ${it.roundToInt()} W (intervals.icu FTP)" }),
+            Triple(R.id.num_rhr, Prefs.rhrOverride(this)?.let { it.roundToInt().toString() }, todayIcu?.rhr?.let { "auto: ${it.roundToInt()} (intervals.icu today)" }),
+            Triple(R.id.num_hrv, Prefs.hrvOverride(this)?.let { it.roundToInt().toString() }, todayIcu?.hrv?.let { "auto: ${it.roundToInt()} ms (intervals.icu today)" }),
             Triple(R.id.num_subt, Prefs.subtOverride(this)?.let { Charts.paceText(it) }, autoSubt?.let { "auto: ${Charts.paceText(it)} (latest monthly median)" }),
             Triple(R.id.num_pb5, Prefs.manualPb(this, "5k")?.let { tm(it) }, autoPb?.fiveK?.let { "auto: ${tm(it.seconds)}" }),
             Triple(R.id.num_pb10, Prefs.manualPb(this, "10k")?.let { tm(it) }, autoPb?.tenK?.let { "auto: ${tm(it.seconds)}" }),
@@ -70,6 +73,7 @@ class SetupActivity : Activity() {
             }
         }
 
+        buildSyncButtons()
         val stored = Prefs.credentials(this)
         stored?.let {
             athlete.setText(if (it.athleteId == "0") "" else it.athleteId)
@@ -175,6 +179,56 @@ class SetupActivity : Activity() {
         }
     }
 
+    /** "Send to intervals.icu": one button per value you entered, each confirming before it writes. */
+    private fun buildSyncButtons() {
+        val box = findViewById<android.widget.LinearLayout>(R.id.sync_buttons)
+        box.removeAllViews()
+        val creds = Prefs.credentials(this)
+        val snap = Prefs.snapshot(this)
+        val today = java.time.LocalDate.now().toString()
+        val todayIcu = snap?.days?.lastOrNull()?.takeIf { it.date == today }
+        data class Item(val label: String, val mine: String?, val theirs: String, val send: (IcuApi) -> Unit)
+        val items = listOf(
+            Item("Weight", Prefs.weightOverride(this)?.let { String.format(java.util.Locale.US, "%.1f kg", it) }, snap?.weight?.let { "%.1f kg".format(it) } ?: "none") { api ->
+                api.updateWellness(today, org.json.JSONObject().put("weight", Prefs.weightOverride(this))) },
+            Item("Resting HR", Prefs.rhrOverride(this)?.let { "${it.roundToInt()} bpm" }, todayIcu?.rhr?.let { "${it.roundToInt()} bpm" } ?: "none") { api ->
+                api.updateWellness(today, org.json.JSONObject().put("restingHR", Prefs.rhrOverride(this)!!.roundToInt())) },
+            Item("HRV", Prefs.hrvOverride(this)?.let { "${it.roundToInt()} ms" }, todayIcu?.hrv?.let { "${it.roundToInt()} ms" } ?: "none") { api ->
+                api.updateWellness(today, org.json.JSONObject().put("hrv", Prefs.hrvOverride(this)!!)) },
+            Item("FTP", Prefs.cpOverride(this)?.let { "${it.roundToInt()} W" }, snap?.runFtp?.let { "${it.roundToInt()} W" } ?: "none") { api ->
+                api.updateRunFtp(Prefs.cpOverride(this)!!.roundToInt()) },
+        )
+        for (it in items) {
+            if (it.mine == null) continue
+            val b = Button(this).apply {
+                text = "Send ${it.label}: ${it.theirs} → ${it.mine}"
+                isAllCaps = false
+                setTextColor(0xFFF2F4F8.toInt())
+                setBackgroundResource(R.drawable.input_bg)
+            }
+            b.setOnClickListener { _ ->
+                if (creds == null) { findViewById<TextView>(R.id.status).text = "Connect intervals.icu first."; return@setOnClickListener }
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Change ${it.label} in intervals.icu?")
+                    .setMessage("intervals.icu now: ${it.theirs}\nNew value: ${it.mine}" + if (it.label == "FTP") "\n\nThis changes your Run FTP setting and the power zones based on it." else "\n\nThis is written to today's wellness entry.")
+                    .setPositiveButton("Send") { _, _ ->
+                        Thread {
+                            val r = runCatching { it.send(IcuApi(creds)) }
+                            runOnUiThread {
+                                findViewById<TextView>(R.id.status).text = r.fold({ _ -> "✓ ${it.label} updated in intervals.icu" }, { e -> "Couldn't update ${it.label}: ${e.message}" })
+                                if (r.isSuccess) Refresh.now(this, replace = true)
+                            }
+                        }.start()
+                    }
+                    .setNegativeButton("Cancel", null).show()
+            }
+            box.addView(b, android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = (6 * resources.displayMetrics.density).toInt() })
+        }
+        if (box.childCount == 0) box.addView(TextView(this).apply {
+            text = "Enter a value under Your numbers to get a send button here."; setTextColor(0xFF6B7386.toInt()); textSize = 12.5f
+        })
+    }
+
     /** Parses and stores the "Your numbers" fields; blank = automatic, unparseable = left unchanged. */
     private fun saveNumbers() {
         fun txt(id: Int) = findViewById<EditText>(id).text.toString().trim()
@@ -185,6 +239,8 @@ class SetupActivity : Activity() {
         }
         if (txt(R.id.num_weight).isEmpty()) Prefs.setWeightOverride(this, null) else num(R.id.num_weight)?.takeIf { it in 30.0..200.0 }?.let { Prefs.setWeightOverride(this, it) }
         if (txt(R.id.num_cp).isEmpty()) Prefs.setCpOverride(this, null) else num(R.id.num_cp)?.takeIf { it in 80.0..700.0 }?.let { Prefs.setCpOverride(this, it) }
+        if (txt(R.id.num_rhr).isEmpty()) Prefs.setRhrOverride(this, null) else num(R.id.num_rhr)?.takeIf { it in 25.0..120.0 }?.let { Prefs.setRhrOverride(this, it) }
+        if (txt(R.id.num_hrv).isEmpty()) Prefs.setHrvOverride(this, null) else num(R.id.num_hrv)?.takeIf { it in 5.0..300.0 }?.let { Prefs.setHrvOverride(this, it) }
         if (txt(R.id.num_subt).isEmpty()) Prefs.setSubtOverride(this, null) else time(R.id.num_subt)?.takeIf { it in 150.0..480.0 }?.let { Prefs.setSubtOverride(this, it / 60) }
         for ((id, key) in listOf(R.id.num_pb5 to "5k", R.id.num_pb10 to "10k", R.id.num_pbhm to "hm")) {
             if (txt(id).isEmpty()) Prefs.setManualPb(this, key, null) else time(id)?.let { Prefs.setManualPb(this, key, it) }
