@@ -1,5 +1,7 @@
 # Training Today: Android widget for intervals.icu
 
+![Widget preview (sample data)](preview.png)
+
 A home-screen widget that shows:
 
 - **Today's workouts**: planned workouts and races from your intervals.icu calendar (`○` planned, `★` race), plus completed activities (`✓`). Each row shows duration and training load.
