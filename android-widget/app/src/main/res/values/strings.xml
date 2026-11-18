@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Training Today</string>
+    <string name="widget_label">Training Today</string>
+    <string name="widget_description">Today\'s workouts plus Fitness, Fatigue and Form from intervals.icu</string>
+</resources>

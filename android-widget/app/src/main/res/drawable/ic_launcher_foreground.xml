@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- fitness / fatigue / form style trend lines -->
+    <path android:strokeColor="#FF4EA1FF" android:strokeWidth="5" android:strokeLineCap="round"
+        android:strokeLineJoin="round" android:fillColor="#00000000"
+        android:pathData="M32,66 L44,58 L54,61 L64,50 L76,44" />
+    <path android:strokeColor="#FFC17BFF" android:strokeWidth="5" android:strokeLineCap="round"
+        android:strokeLineJoin="round" android:fillColor="#00000000"
+        android:pathData="M32,52 L44,44 L54,56 L64,40 L76,48" />
+    <path android:strokeColor="#FF3DD68C" android:strokeWidth="5" android:strokeLineCap="round"
+        android:strokeLineJoin="round" android:fillColor="#00000000"
+        android:pathData="M32,74 L44,72 L54,76 L64,70 L76,66" />
+</vector>

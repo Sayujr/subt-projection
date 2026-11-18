@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.TrainingWidget" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">@color/fitness</item>
+        <item name="android:colorPrimary">#FF161A22</item>
+        <item name="android:windowBackground">#FF161A22</item>
+        <item name="android:statusBarColor">#FF161A22</item>
+        <item name="android:navigationBarColor">#FF161A22</item>
+    </style>
+</resources>

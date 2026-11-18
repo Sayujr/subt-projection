@@ -1,0 +1,52 @@
+name: Build Android widget APK
+
+on:
+  push:
+    paths:
+      - 'android-widget/**'
+      - '.github/workflows/android-widget.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to publish the APK as a GitHub release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-widget
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk training-widget.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: training-widget-apk
+          path: android-widget/training-widget.apk
+
+      - name: Publish as "android-widget-latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-widget-latest
+          name: Training Today widget (latest build)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          files: android-widget/training-widget.apk
+          body: |
+            Android home-screen widget showing today's intervals.icu workouts plus Fitness / Fatigue / Form trends.
+            Download `training-widget.apk` on your phone and open it to install (allow "install unknown apps" for your browser).
+            Built from ${{ github.sha }}.

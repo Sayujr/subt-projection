@@ -1,0 +1,12 @@
+<resources>
+    <color name="bg">#E6161A22</color>
+    <color name="tile">#FF222733</color>
+    <color name="text">#FFF2F4F8</color>
+    <color name="text_dim">#FF9AA3B2</color>
+    <color name="text_faint">#FF6B7386</color>
+    <color name="divider">#FF2C3240</color>
+    <color name="fitness">#FF4EA1FF</color>
+    <color name="fatigue">#FFC17BFF</color>
+    <color name="done">#FF3DD68C</color>
+    <color name="planned">#FFFFC53D</color>
+</resources>
