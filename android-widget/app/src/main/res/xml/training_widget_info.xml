@@ -9,8 +9,8 @@
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_training"
-    android:previewLayout="@layout/widget_training"
+    android:previewImage="@drawable/preview_full"
     android:configure="dev.subt.trainingwidget.SetupActivity"
-    android:widgetFeatures="reconfigurable"
+    android:widgetFeatures="reconfigurable|configuration_optional"
     android:description="@string/widget_description"
     android:widgetCategory="home_screen" />

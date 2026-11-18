@@ -1,5 +1,9 @@
 <resources>
     <string name="app_name">Training Today</string>
-    <string name="widget_label">Training Today</string>
+    <string name="widget_label">Training Today · Full</string>
     <string name="widget_description">Today\'s workouts plus Fitness, Fatigue and Form from intervals.icu</string>
+    <string name="trend_widget_label">Training Today · Trends</string>
+    <string name="trend_widget_description">Fitness, Fatigue and Form in one chart, with today\'s numbers</string>
+    <string name="workouts_widget_label">Training Today · Workouts</string>
+    <string name="workouts_widget_description">Today\'s workouts. Scroll for more.</string>
 </resources>
