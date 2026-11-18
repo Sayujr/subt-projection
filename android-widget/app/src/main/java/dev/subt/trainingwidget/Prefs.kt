@@ -31,7 +31,7 @@ object Prefs {
 
     /** Days of history needed to draw every widget's chosen period. */
     fun historyNeeded(ctx: Context): Int =
-        (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + Periods.DEFAULT).max()
+        (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + period(ctx, WidgetRenderer.APP_ID) + Periods.DEFAULT).max()
 
     fun subt(ctx: Context): SubtData? = sp(ctx).getString("subt", null)?.let { SubtData.fromJson(it) }
 

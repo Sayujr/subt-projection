@@ -33,6 +33,26 @@
             android:src="@drawable/ic_settings" />
     </LinearLayout>
 
+    <!-- Range / period chips for the Today, Week and Recovery screens -->
+    <HorizontalScrollView
+        android:id="@+id/controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingBottom="8dp"
+        android:clipToPadding="false"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/chips"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
+
     <!-- The selected screen: one of the widget views rendered at full size -->
     <FrameLayout
         android:id="@+id/content"

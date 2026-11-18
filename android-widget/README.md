@@ -10,6 +10,11 @@ These are the same views as the widgets, drawn at full size. ⚙ opens your acco
 
 Tapping a widget on your home screen opens the app on that widget's screen. Inside the app, taps open intervals.icu.
 
+- **Week screen:** step back and forward with ‹ ›, or switch to **Month**, **3 months**, **6 months** or a **Custom** date range.
+  It shows a bar per day, or a bar per week for long ranges, with Done, To do and Missed totals and the average per week.
+  Underneath is a scrolling list of every session, grouped by day (✓ done, ○ planned, ★ race, ✕ missed).
+- **Today and Recovery screens:** period chips (2 weeks to 1 year) or **Custom…** to pick a start date.
+
 ![App home (sample data)](preview-app.png)
 
 ## Widgets

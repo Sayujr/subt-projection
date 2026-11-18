@@ -113,6 +113,23 @@ class IcuApi(private val creds: Credentials) {
         return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races)
     }
 
+    /** Planned workouts, races and completed activities between [start] and [end] (inclusive), for the app's Week screen. */
+    fun fetchRange(start: LocalDate, end: LocalDate): List<Workout> {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val s = start.toString()
+        val e = end.toString()
+        val events = getArray(
+            "/athlete/$ath/events", mapOf("oldest" to s, "newest" to end.plusDays(1).toString()),
+        ).objects().filter {
+            val cat = it.optString("category")
+            (cat == "WORKOUT" || cat.startsWith("RACE")) && date(it) in s..e
+        }.sortedBy { it.optString("start_date_local") }
+        val activities = if (start.isAfter(LocalDate.now())) emptyList() else getArray(
+            "/athlete/$ath/activities", mapOf("oldest" to s, "newest" to end.plusDays(1).toString()),
+        ).objects().filter { date(it) in s..e }.sortedBy { it.optString("start_date_local") }
+        return merge(events, activities)
+    }
+
     /** Planned events (marked done when an activity is paired with them) + unplanned completed activities. */
     private fun merge(events: List<JSONObject>, activities: List<JSONObject>): List<Workout> {
         val activityByEvent = activities.mapNotNull { a ->

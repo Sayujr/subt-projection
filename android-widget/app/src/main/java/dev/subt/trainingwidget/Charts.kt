@@ -231,24 +231,52 @@ object Charts {
 
     // ---------------------------------------------------------------- week bars
 
+    /** Mon–Sun columns for the week widget. */
+    fun weekBars(week: List<Workout>, monday: LocalDate, today: LocalDate, w: Int, h: Int, density: Float): Bitmap =
+        rangeBars(week, monday, monday.plusDays(6), today, w, h, density)
+
     /**
-     * Mon–Sun columns: completed load (green), still-planned load (amber, translucent),
-     * missed planned load on past days (grey outline). Today's column is highlighted.
+     * Load bars over [start]..[end]: one per day up to ~5 weeks, otherwise one per week (Mon–Sun).
+     * Completed load is green, missed planned load (before today) a dashed outline, and still-to-do
+     * planned load amber. The bar containing today is highlighted.
      */
-    fun weekBars(week: List<Workout>, monday: LocalDate, today: LocalDate, w: Int, h: Int, density: Float): Bitmap {
+    fun rangeBars(items: List<Workout>, start: LocalDate, end: LocalDate, today: LocalDate, w: Int, h: Int, density: Float): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
-        val dates = (0 until 7).map { monday.plusDays(it.toLong()) }
-        val done = dates.map { d -> week.filter { it.date == d.toString() && it.status == WorkoutStatus.DONE }.sumOf { it.load } }
-        val planned = dates.map { d -> week.filter { it.date == d.toString() && it.status != WorkoutStatus.DONE }.sumOf { it.load } }
-        val max = (0 until 7).maxOf { done[it] + planned[it] }.coerceAtLeast(50)
+        val nDays = java.time.temporal.ChronoUnit.DAYS.between(start, end).toInt() + 1
+        val daily = nDays <= 35
+        val bucketStarts: List<LocalDate> = if (daily) {
+            (0 until nDays).map { start.plusDays(it.toLong()) }
+        } else {
+            val first = start.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+            generateSequence(first) { it.plusWeeks(1) }.takeWhile { !it.isAfter(end) }.toList()
+        }
+        val len = if (daily) 0L else 6L
+        fun inBucket(i: Int, date: String): Boolean {
+            val b0 = bucketStarts[i].toString()
+            val b1 = bucketStarts[i].plusDays(len).toString()
+            return date in b0..b1
+        }
+        val t = today.toString()
+        val n = bucketStarts.size
+        val done = IntArray(n); val missed = IntArray(n); val todo = IntArray(n)
+        for (wk in items) for (i in 0 until n) if (inBucket(i, wk.date)) {
+            when {
+                wk.status == WorkoutStatus.DONE -> done[i] += wk.load
+                wk.date < t -> missed[i] += wk.load
+                else -> todo[i] += wk.load
+            }
+            break
+        }
+        val max = (0 until n).maxOfOrNull { done[it] + missed[it] + todo[it] }?.coerceAtLeast(50) ?: 50
 
         val label = labelPaint(density).apply { textSize = 10f * density }
         val number = labelPaint(density).apply { textSize = 10f * density; color = 0xFF9AA3B2.toInt() }
-        val topPad = 14f * density
+        val colW = w / n.toFloat()
+        val showNumbers = colW >= 22f * density
+        val topPad = if (showNumbers) 14f * density else 4f * density
         val bottomPad = 15f * density
-        val colW = w / 7f
-        val barW = colW * 0.56f
+        val barW = colW * (if (n <= 7) 0.56f else 0.7f)
         val chartH = h - topPad - bottomPad
         val doneP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3DD68C.toInt() }
         val planP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x99FFC53D.toInt() }
@@ -260,34 +288,40 @@ object Charts {
         val base = Paint().apply { color = GRID; strokeWidth = 1f }
         c.drawLine(0f, topPad + chartH, w.toFloat(), topPad + chartH, base)
 
-        val r = 3f * density
-        for (i in 0 until 7) {
-            val d = dates[i]
+        // Label every k-th bar so labels never collide
+        val sample = if (daily && n <= 7) "Wed" else if (daily) "30" else "30 Nov"
+        val k = maxOf(1, kotlin.math.ceil((label.measureText(sample) + 6f * density) / colW).toInt())
+        val r = (if (n <= 14) 3f else 1.5f) * density
+        for (i in 0 until n) {
             val cx = colW * i + colW / 2
             val left = cx - barW / 2
             val right = cx + barW / 2
-            if (d == today) c.drawRoundRect(colW * i + 2f, 0f, colW * (i + 1) - 2f, h.toFloat(), 8f * density, 8f * density, todayBg)
+            val isToday = inBucket(i, t)
+            if (isToday) c.drawRoundRect(colW * i + 1f, 0f, colW * (i + 1) - 1f, h.toFloat(), 6f * density, 6f * density, todayBg)
             var y = topPad + chartH
-            if (done[i] > 0) {
-                val bh = chartH * done[i] / max
-                c.drawRoundRect(left, y - bh, right, y, r, r, doneP)
+            fun seg(v: Int, p: Paint) {
+                if (v <= 0) return
+                val bh = chartH * v / max
+                c.drawRoundRect(left, y - bh, right, y, r, r, p)
                 y -= bh
             }
-            if (planned[i] > 0) {
-                val bh = chartH * planned[i] / max
-                if (d.isBefore(today)) c.drawRoundRect(left, y - bh, right, y, r, r, missP)
-                else c.drawRoundRect(left, y - bh, right, y, r, r, planP)
-                y -= bh
+            seg(done[i], doneP); seg(missed[i], missP); seg(todo[i], planP)
+            val total = done[i] + missed[i] + todo[i]
+            if (showNumbers && total > 0) {
+                val s = total.toString()
+                c.drawText(s, cx - number.measureText(s) / 2, y - 3f * density, number)
             }
-            val total = done[i] + planned[i]
-            if (total > 0) {
-                val t = total.toString()
-                c.drawText(t, cx - number.measureText(t) / 2, y - 3f * density, number)
+            if (i % k == 0 || isToday) {
+                val d = bucketStarts[i]
+                val dl = when {
+                    daily && n <= 7 -> d.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault()).take(3)
+                    daily -> d.dayOfMonth.toString()
+                    else -> d.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
+                }
+                label.color = if (isToday) 0xFFF2F4F8.toInt() else LABEL
+                label.isFakeBoldText = isToday
+                c.drawText(dl, cx - label.measureText(dl) / 2, h - 3f * density, label)
             }
-            val dl = d.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault()).take(3)
-            label.color = if (d == today) 0xFFF2F4F8.toInt() else LABEL
-            label.isFakeBoldText = d == today
-            c.drawText(dl, cx - label.measureText(dl) / 2, h - 3f * density, label)
         }
         return bmp
     }

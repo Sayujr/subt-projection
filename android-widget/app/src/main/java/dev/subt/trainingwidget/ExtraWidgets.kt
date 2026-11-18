@@ -18,6 +18,17 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import dev.subt.trainingwidget.WidgetRenderer as R0
 
+/** A date range shown on the app's Week screen (week, month, 3 / 6 months or custom). */
+data class WeekRange(
+    val start: LocalDate,
+    val end: LocalDate,
+    val items: List<Workout>,
+    val title: String,
+    val loading: Boolean,
+    /** Last week's completed load, shown only for the current week. */
+    val lastWeekLoad: Int? = null,
+)
+
 /** This week, Race countdown, Recovery and SubT pace: as widgets and as in-app screens. */
 object ExtraWidgets {
 
@@ -84,7 +95,7 @@ object ExtraWidgets {
 
     // ---------------------------------------------------------------- This week
 
-    fun buildWeek(ctx: Context, wDp: Int, hDp: Int, inApp: Boolean = false): RemoteViews {
+    fun buildWeek(ctx: Context, wDp: Int, hDp: Int, inApp: Boolean = false, range: WeekRange? = null): RemoteViews {
         val s = R0.State(ctx)
         val v = RemoteViews(ctx.packageName, R.layout.widget_week)
         val today = s.today
@@ -97,6 +108,8 @@ object ExtraWidgets {
                 sunday.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
         }
         header(ctx, v, s, "THIS WEEK · ${range.uppercase(Locale.getDefault())}", WeekWidgetProvider::class.java, R0.CALENDAR_URL, "WEEK", inApp)
+
+        if (range != null) return buildRange(ctx, v, s, range, wDp, hDp)
 
         val snap = s.snap
         // Only trust a snapshot from this same week
@@ -142,6 +155,30 @@ object ExtraWidgets {
         v.setImageViewBitmap(
             R.id.week_chart,
             Charts.weekBars(week, monday, today, px(ctx, wDp - 24), px(ctx, chartH), ctx.resources.displayMetrics.density)
+        )
+        return v
+    }
+
+    /** Week screen in the app: bars and totals for any range; the session list is drawn by the app below. */
+    private fun buildRange(ctx: Context, v: RemoteViews, s: R0.State, r: WeekRange, wDp: Int, hDp: Int): RemoteViews {
+        v.setTextViewText(R.id.title, r.title)
+        v.removeAllViews(R.id.week_list)
+        val t = s.today.toString()
+        val done = r.items.filter { it.status == WorkoutStatus.DONE }.sumOf { it.load }
+        val missed = r.items.filter { it.status != WorkoutStatus.DONE && it.date < t }.sumOf { it.load }
+        val todo = r.items.filter { it.status != WorkoutStatus.DONE && it.date >= t }.sumOf { it.load }
+        val parts = mutableListOf<Pair<String, Int?>>()
+        if (done > 0 || r.start.toString() <= t) parts += listOf("Done " to R0.DIM, "$done" to R0.UP)
+        if (todo > 0 || r.end.toString() >= t) parts += listOf("   To do " to R0.DIM, "$todo" to AMBER)
+        if (missed > 0) parts += listOf("   Missed " to R0.DIM, "$missed" to R0.DIM)
+        if (r.lastWeekLoad != null) parts += listOf("   Last week " to R0.DIM, "${r.lastWeekLoad}" to R0.TEXT)
+        val days = ChronoUnit.DAYS.between(r.start, r.end) + 1
+        if (days > 10) parts += listOf("   ${((done + todo) * 7.0 / days).roundToInt()}/wk" to R0.DIM)
+        v.setTextViewText(R.id.week_summary, if (r.loading) "Loading from intervals.icu…" else spans(*parts.toTypedArray()))
+        val chartH = hDp - 24 - 28 - 18 - 6
+        v.setImageViewBitmap(
+            R.id.week_chart,
+            Charts.rangeBars(r.items, r.start, r.end, s.today, px(ctx, wDp - 24), px(ctx, chartH), ctx.resources.displayMetrics.density)
         )
         return v
     }
