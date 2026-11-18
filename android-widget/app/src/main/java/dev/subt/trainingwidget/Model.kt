@@ -28,6 +28,8 @@ data class Workout(
     val date: String = "",
     /** Load the plan had for this session (0 for unplanned activities). */
     val plannedLoad: Int = 0,
+    /** Planned steps with power targets, e.g. "15′ easy · 3× (10′ @ 285–295 W · 2′ rec)". */
+    val steps: String? = null,
 )
 
 /** An upcoming race from the intervals.icu calendar, with projected race-day Fitness / Fatigue when known. */
@@ -56,7 +58,21 @@ data class RunMetric(
     val ef: Double?,
     /** Power : HR ratio. */
     val powerHr: Double?,
-)
+    val watts: Double? = null,
+    val distanceM: Double? = null,
+    /** Critical power / eFTP intervals.icu estimated around this run (W). */
+    val cp: Double? = null,
+    /** Seconds in each power zone (Z1…), when intervals.icu provides them. */
+    val zoneSecs: List<Int> = emptyList(),
+) {
+    /** Running effectiveness: speed (m/s) ÷ power per kg. */
+    fun re(kg: Double?): Double? {
+        val w = watts ?: return null
+        val d = distanceM ?: return null
+        if (kg == null || seconds <= 0 || w <= 0) return null
+        return (d / seconds) / (w / kg)
+    }
+}
 
 data class Snapshot(
     val fetchedAt: Long,
@@ -76,6 +92,10 @@ data class Snapshot(
     val runs: List<RunMetric> = emptyList(),
     /** Latest body weight recorded in intervals.icu wellness, kg. */
     val weight: Double? = null,
+    /** Running FTP / CP set in intervals.icu (W). */
+    val runFtp: Double? = null,
+    /** CP from the 90-day power curve (3-min and 12-min bests), W. */
+    val curveCp: Double? = null,
 ) {
     fun toJson(): String = JSONObject().apply {
         put("fetchedAt", fetchedAt)
@@ -92,12 +112,16 @@ data class Snapshot(
         put("week", workoutsJson(week))
         put("lastWeekLoad", lastWeekLoad)
         putOpt("weight", weight)
+        putOpt("runFtp", runFtp)
+        putOpt("curveCp", curveCp)
         put("proj", JSONArray().apply { proj.forEach { put(JSONObject().put("d", it.date).put("c", it.ctl).put("a", it.atl)) } })
         put("runs", JSONArray().apply {
             runs.forEach {
                 put(
                     JSONObject().put("d", it.date).put("n", it.name).put("s", it.seconds)
                         .putOpt("hr", it.avgHr).putOpt("dc", it.decoupling).putOpt("ef", it.ef).putOpt("ph", it.powerHr)
+                        .putOpt("w", it.watts).putOpt("dm", it.distanceM).putOpt("cp", it.cp)
+                        .put("z", JSONArray(it.zoneSecs))
                 )
             }
         })
@@ -117,7 +141,7 @@ data class Snapshot(
                 put(
                     JSONObject()
                         .put("n", it.name).put("t", it.type).put("s", it.seconds)
-                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date).put("pl", it.plannedLoad)
+                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date).put("pl", it.plannedLoad).putOpt("sp", it.steps)
                 )
             }
         }
@@ -127,7 +151,7 @@ data class Snapshot(
                 val x = a.getJSONObject(it)
                 Workout(
                     x.getString("n"), x.getString("t"), x.getInt("s"), x.getInt("l"),
-                    x.getDouble("m"), WorkoutStatus.valueOf(x.getString("st")), x.optString("d"), x.optInt("pl"),
+                    x.getDouble("m"), WorkoutStatus.valueOf(x.getString("st")), x.optString("d"), x.optInt("pl"), x.optString("sp").ifBlank { null },
                 )
             }
 
@@ -162,9 +186,13 @@ data class Snapshot(
                     RunMetric(
                         x.getString("d"), x.optString("n"), x.optInt("s"), x.optNullableDouble("hr"),
                         x.optNullableDouble("dc"), x.optNullableDouble("ef"), x.optNullableDouble("ph"),
+                        x.optNullableDouble("w"), x.optNullableDouble("dm"), x.optNullableDouble("cp"),
+                        x.optJSONArray("z")?.let { z -> (0 until z.length()).map { i -> z.optInt(i) } } ?: emptyList(),
                     )
                 },
                 weight = o.optNullableDouble("weight"),
+                runFtp = o.optNullableDouble("runFtp"),
+                curveCp = o.optNullableDouble("curveCp"),
                 races = if (r == null) emptyList() else (0 until r.length()).map {
                     val x = r.getJSONObject(it)
                     Race(

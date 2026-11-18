@@ -34,7 +34,9 @@ class MainActivity : Activity() {
     private enum class Tab(val icon: String, val label: String, val title: String) {
         HOME("◉", "Today", "Training Today"),
         WEEK("▥", "Week", "Training load"),
+        STREAKS("✦", "Streaks", "Streaks"),
         RACE("⚑", "Race", "Next race"),
+        POWER("ϟ", "Power", "Power"),
         RECOVERY("♥", "Recovery", "Recovery"),
         SUBT("⏱", "SubT", "SubT pace"),
     }
@@ -65,6 +67,7 @@ class MainActivity : Activity() {
     // SubT sub-screens
     private enum class SubtView(val label: String) { PACE("Pace"), ANALYSIS("Analysis"), FORECAST("Sub-3 forecast"), PLAN("Sub-3 plan") }
     private var subtView = SubtView.PACE
+    private var powerView = 0
     private var repsLoading = false
     private var repsError: String? = null
 
@@ -97,6 +100,10 @@ class MainActivity : Activity() {
 
         if (Prefs.credentials(this) == null) {
             startActivity(Intent(this, SetupActivity::class.java))
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7)
         }
     }
 
@@ -151,7 +158,7 @@ class MainActivity : Activity() {
             val tv = TextView(this).apply {
                 text = "${t.icon}\n${t.label}"
                 gravity = Gravity.CENTER
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
                 setLineSpacing(0f, 1.15f)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
                 setOnClickListener { tab = t; show() }
@@ -234,6 +241,11 @@ class MainActivity : Activity() {
                 controls.visibility = View.VISIBLE
                 for (v in SubtView.entries) chips.addView(chip(v.label, v == subtView) { subtView = v; show() })
             }
+            Tab.POWER -> {
+                controls.visibility = View.VISIBLE
+                listOf("Dashboard", "Trends", "Zones", "Race model").forEachIndexed { i, l -> chips.addView(chip(l, i == powerView) { powerView = i; show() }) }
+            }
+            Tab.STREAKS -> controls.visibility = View.GONE
         }
     }
 
@@ -526,10 +538,20 @@ class MainActivity : Activity() {
         try {
             when (tab) {
                 Tab.WEEK -> Unit
-                Tab.HOME -> {
-                    applyInto(content, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true), ViewGroup.LayoutParams.MATCH_PARENT)
-                    content.getChildAt(0)?.let { enableScrub(it) }
-                }
+                Tab.HOME -> content.addView(scrollPage("home") { col ->
+                    // Verdict, the full view (chart scrubbable), today's power targets, the week checklist, streak
+                    val screens = AppScreens(this, wDp) { drawContent() }
+                    screens.verdictCard(col)
+                    val chartH = (hDp * 0.72).roundToInt().coerceAtLeast(320)
+                    applyInto(col, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, chartH, inApp = true), dp(chartH))
+                    col.getChildAt(col.childCount - 1)?.let { enableScrub(it) }
+                    col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
+                    screens.todayPowerCard(col)
+                    screens.weekChecklist(col)
+                    screens.streakLine(col)
+                }, full)
+                Tab.STREAKS -> content.addView(scrollPage("streaks") { AppScreens(this, wDp) { drawContent() }.streaks(it) }, full)
+                Tab.POWER -> content.addView(scrollPage("power$powerView") { AppScreens(this, wDp) { drawContent() }.power(it, powerView) }, full)
                 Tab.RACE -> {
                     loadHistory(force = false)
                     if (racePast) content.addView(scrollPage("past") {

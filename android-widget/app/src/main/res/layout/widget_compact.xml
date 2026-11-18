@@ -26,6 +26,16 @@
             android:textColor="@color/text_dim"
             android:textSize="10sp" />
         <TextView
+            android:id="@+id/verdict"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.06"
+            android:singleLine="true"
+            android:text=""
+            android:textSize="11sp" />
+        <TextView
             android:id="@+id/more"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

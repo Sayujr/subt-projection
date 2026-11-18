@@ -1208,4 +1208,347 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
     }
 
     private fun abs1(v: Double) = if (v < 0) -v else v
+
+    // ================================================================ Home cards
+
+    /** Push / Hold / Back off with the reasons behind it. */
+    fun verdictCard(col: LinearLayout) {
+        val v = Verdict.compute(Prefs.snapshot(a)) ?: return
+        val c = card(col)
+        val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        r.addView(TextView(a).apply {
+            text = v.call.label.uppercase(loc); setTextColor(v.call.color); letterSpacing = 0.08f
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f); typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        })
+        r.addView(TextView(a).apply { text = "   " + v.headline; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        c.addView(r)
+        val reasons = TextView(a).apply {
+            text = spans(*v.reasons.flatMapIndexed { i, (col2, t) -> listOf((if (i > 0) "  ·  " else "") to FAINT, t to col2) }.toTypedArray())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f); setPadding(0, dp(6), 0, 0); setLineSpacing(dpf(2f).toFloat(), 1f)
+        }
+        c.addView(reasons)
+    }
+
+    /** Today's planned sessions with their power steps (app only). */
+    fun todayPowerCard(col: LinearLayout) {
+        val s = Prefs.snapshot(a) ?: return
+        val todo = s.workouts.filter { it.status != WorkoutStatus.DONE }
+        if (todo.isEmpty()) return
+        val c = card(col)
+        label(c, "Today's targets")
+        val cp = PowerModel.now(a)?.cp
+        for (w in todo) {
+            text(c, spans(WidgetRenderer.sportIcon(w.type) + "  " to TEXT, w.name to TEXT, "   " + WidgetRenderer.meta(w) to FAINT), 15f, top = 8)
+            val steps = w.steps
+            if (steps != null) text(c, steps, 13.5f, Charts.SUBT, top = 2)
+            else if (cp != null && Regex("sub.?t|threshold", RegexOption.IGNORE_CASE).containsMatchIn(w.name))
+                text(c, "SubT reps ≈ ${(cp * 0.88).roundToInt()}–${(cp * 0.92).roundToInt()} W (88–92% of CP ${cp.roundToInt()} W), HR under 172", 13.5f, Charts.SUBT, top = 2)
+        }
+    }
+
+    /** Quiet weekly checklist: key sessions and load against plan. */
+    fun weekChecklist(col: LinearLayout) {
+        val s = Prefs.snapshot(a) ?: return
+        val wk = s.week
+        if (wk.isEmpty()) return
+        val c = card(col)
+        label(c, "This week")
+        fun matches(w: Workout, re: Regex) = re.containsMatchIn(w.name)
+        val subt = Regex("sub.?t|threshold", RegexOption.IGNORE_CASE)
+        val strength = Regex("gym|strength|weights", RegexOption.IGNORE_CASE)
+        fun line(name: String, done: Int, total: Int, caption: String = "") {
+            val r = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(8), 0, 0) }
+            val top = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+            val complete = total > 0 && done >= total
+            top.addView(TextView(a).apply { text = name; setTextColor(if (complete) DIM else TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            top.addView(TextView(a).apply {
+                text = (if (caption.isNotEmpty()) "$caption  " else "") + (if (total > 0) "$done / $total" else "–") + if (complete) "  ✓" else ""
+                setTextColor(if (complete) GOOD else FAINT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            })
+            r.addView(top)
+            // hairline progress
+            val bar = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4), 0, 0) }
+            val frac = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
+            bar.addView(View(a).apply { setBackgroundColor(if (complete) 0x993DD68C.toInt() else 0x994EA1FF.toInt()) }, LinearLayout.LayoutParams(0, dp(2), frac.coerceAtLeast(0.001f)))
+            bar.addView(View(a).apply { setBackgroundColor(0xFF2C3240.toInt()) }, LinearLayout.LayoutParams(0, dp(2), (1 - frac).coerceAtLeast(0.001f)))
+            r.addView(bar)
+            c.addView(r)
+        }
+        val subtAll = wk.filter { matches(it, subt) }
+        line("SubT sessions", subtAll.count { it.status == WorkoutStatus.DONE }, subtAll.size)
+        val longDone = wk.any { it.status == WorkoutStatus.DONE && it.type.contains("Run", true) && it.seconds >= 75 * 60 }
+        val longPlanned = wk.any { it.type.contains("Run", true) && it.seconds >= 75 * 60 }
+        line("Long run (75′+)", if (longDone) 1 else 0, if (longPlanned || longDone) 1 else 0)
+        val str = wk.filter { matches(it, strength) }
+        line("Strength", str.count { it.status == WorkoutStatus.DONE }, str.size)
+        val loadDone = wk.filter { it.status == WorkoutStatus.DONE }.sumOf { it.load }
+        val loadPlan = wk.sumOf { if (it.status == WorkoutStatus.DONE) maxOf(it.plannedLoad, it.load) else it.load }
+        line("Load", loadDone, loadPlan, "vs plan")
+    }
+
+    /** One-line streak summary for home. */
+    fun streakLine(col: LinearLayout) {
+        val st = Streaks.compute(a) ?: return
+        val c = card(col)
+        label(c, "Load-balance streak")
+        text(c, spans("${st.weekStreak}" to TEXT, " week${if (st.weekStreak == 1) "" else "s"}" to DIM, "   ·   " to FAINT,
+            "${st.monthStreak}" to TEXT, " month${if (st.monthStreak == 1) "" else "s"}" to DIM, "   ·   best ${st.bestWeekStreak} wk" to FAINT), 18f, top = 2)
+        st.thisWeek?.let { dayDots(c, it.days, LocalDate.now()) }
+    }
+
+    private fun statusColor(st: Streaks.Status) = when (st) {
+        Streaks.Status.GREEN, Streaks.Status.TAPER_OK -> GOOD
+        Streaks.Status.AMBER -> WARN
+        Streaks.Status.RED, Streaks.Status.TAPER_MISS -> BAD
+        Streaks.Status.EXEMPT -> 0xFF5EC8FF.toInt()
+        Streaks.Status.NONE -> 0xFF2C3240.toInt()
+    }
+
+    private fun dayDots(parent: LinearLayout, days: List<Streaks.DayResult>, today: LocalDate) {
+        val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+        val monday = days.firstOrNull()?.date ?: return
+        for (i in 0 until 7) {
+            val dd = monday.plusDays(i.toLong())
+            val res = days.firstOrNull { it.date == dd }
+            val cell = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+            cell.addView(TextView(a).apply {
+                text = if (res == null) "○" else "●"; gravity = Gravity.CENTER
+                setTextColor(if (res == null) 0xFF2C3240.toInt() else statusColor(res.status)); setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            })
+            cell.addView(TextView(a).apply {
+                text = dd.dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, loc); gravity = Gravity.CENTER
+                setTextColor(if (dd == today) TEXT else FAINT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            })
+            r.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        parent.addView(r)
+    }
+
+    // ================================================================ Streaks tab
+
+    fun streaks(col: LinearLayout) {
+        val st = Streaks.compute(a)
+        val top = card(col)
+        label(top, "Load-balance streaks")
+        if (st == null) { text(top, "Needs about two months of Fitness history. Loading…", 14f, DIM, top = 4); return }
+        stats3(top, listOf(
+            Triple("Week streak", "${st.weekStreak}" to GOOD, "best ${st.bestWeekStreak}"),
+            Triple("Month streak", "${st.monthStreak}" to GOOD, "${st.months.count { it.passed == true }} months passed"),
+            Triple("This week", (st.thisWeek?.let { "${it.green}/${Prefs.greyDays(a)}" } ?: "–") to TEXT, "green days so far"),
+        ))
+        st.thisWeek?.let { dayDots(top, it.days, LocalDate.now()) }
+
+        // Rules + adjusters
+        val rules = card(col)
+        label(rules, "Your rules")
+        val band = Prefs.fitnessBand(a); val fat = Prefs.fatigueMin(a); val g = Prefs.greyDays(a)
+        text(rules, spans("● " to GOOD, "Fitness stays within $band% of your reference peak (blended 2/3/4-month peak), except in a taper" to TEXT), 14f, top = 6)
+        chipRow(rules, listOf(5, 10, 15, 20).map { "$it%" }, listOf(5, 10, 15, 20).indexOf(band)) { Prefs.setFitnessBand(a, listOf(5, 10, 15, 20)[it]); onChange() }
+        text(rules, spans("● " to GOOD, "Building: Fatigue ≥ $fat% of Fitness and Form in the Grey zone (−10 to +5)" to TEXT), 14f, top = 10)
+        chipRow(rules, listOf(90, 95, 100, 105).map { "Fatigue ≥ $it%" }, listOf(90, 95, 100, 105).indexOf(fat)) { Prefs.setFatigueMin(a, listOf(90, 95, 100, 105)[it]); onChange() }
+        text(rules, spans("● " to GOOD, "A week passes with no Fitness-floor misses and at least $g days meeting every rule. A month passes with 75% of its weeks." to TEXT), 14f, top = 10)
+        chipRow(rules, listOf(3, 4, 5, 6).map { "$it days" }, listOf(3, 4, 5, 6).indexOf(g)) { Prefs.setGreyDays(a, listOf(3, 4, 5, 6)[it]); onChange() }
+        text(rules, "Tapers (A 14 · B 10 · C 5 days before a race) are judged on keeping Fitness above the race floor with Form ≥ −10. Race day and the 3 days after aren't judged.", 12f, FAINT, top = 10)
+        text(rules, spans("● green all rules  " to GOOD, "● amber floor OK, build rule missed  " to WARN, "● red under floor  " to BAD, "● race / recovery" to 0xFF5EC8FF.toInt()), 11.5f, top = 8)
+
+        // Weeks, newest first
+        val wc = card(col)
+        label(wc, "Weeks")
+        for (w in st.weeks.reversed()) {
+            val head = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
+            head.addView(TextView(a).apply { text = "${w.monday.format(dm)} – ${w.monday.plusDays(6).format(dm)}"; setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            head.addView(TextView(a).apply {
+                text = when { !w.complete -> "in progress · ${w.green} green"; w.passed == true -> "✓ passed · ${w.green} green"; w.passed == false -> "missed · ${w.green} green"; else -> "not judged" }
+                setTextColor(when { !w.complete -> DIM; w.passed == true -> GOOD; w.passed == false -> BAD; else -> FAINT }); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            })
+            wc.addView(head)
+            dayDots(wc, w.days, LocalDate.now())
+            val misses = w.days.flatMap { it.notes }.groupingBy { it.substringBefore(" ").let { k -> if (k.startsWith("Fitness")) "Fitness floor" else if (k.startsWith("Fatigue")) "Fatigue low" else if (k.startsWith("Form")) "Form outside Grey" else it } }.eachCount()
+            if (misses.isNotEmpty()) text(wc, misses.entries.joinToString(" · ") { "${it.key} ×${it.value}" }, 11.5f, FAINT, top = 2)
+        }
+        // Months
+        val mc = card(col)
+        label(mc, "Months")
+        for (m in st.months.reversed()) {
+            val passed = m.weeks.count { it.passed == true }; val judged = m.weeks.count { it.passed != null }
+            row(mc, listOf(
+                m.month.format(DateTimeFormatter.ofPattern("MMMM yyyy", loc)) to TEXT,
+                "$passed / $judged weeks" to DIM,
+                (when (m.passed) { true -> "✓ passed"; false -> "missed"; null -> "–" }) to (when (m.passed) { true -> GOOD; false -> BAD; null -> FAINT }),
+            ), weights = listOf(1.4f, 1f, 1f))
+        }
+    }
+
+    // ================================================================ Power tab
+
+    fun power(col: LinearLayout, view: Int) {
+        val p = PowerModel.now(a)
+        val s = Prefs.snapshot(a)
+        if (p == null || s == null) {
+            val c = card(col)
+            label(c, "Power")
+            text(c, "No running power found yet. Make sure Stryd (or Garmin) power syncs to intervals.icu, and set your running FTP or CP under intervals.icu Settings → Run.", 14f, DIM, top = 4)
+            return
+        }
+        when (view) {
+            0 -> powerDashboard(col, p, s)
+            1 -> powerTrends(col, p, s)
+            2 -> powerZones(col, s)
+            else -> powerRace(col, p)
+        }
+        text(card(col), "Power comes from intervals.icu's primary power source (CP source: ${p.cpSource}). Stryd and Garmin read about 20% apart, so keep one source, ideally Stryd, as primary.", 12f, FAINT)
+    }
+
+    private fun fmtW(v: Double?) = v?.let { "${it.roundToInt()} W" } ?: "–"
+    private fun delta(now: Double, then: Double?, unit: String = "W") =
+        then?.let { val dd = now - it; (if (dd >= 0) "+" else "−") + "${abs1(dd).roundToInt()} $unit" } ?: ""
+
+    private fun powerDashboard(col: LinearLayout, p: PowerModel.Now, s: Snapshot) {
+        val c = card(col)
+        label(c, "Power dashboard")
+        stats3(c, listOf(
+            Triple("CP", "${p.cp.roundToInt()}" to FormColors.FITNESS, delta(p.cp, p.cp6wAgo).takeIf { it.isNotEmpty() }?.let { "W · $it in 6 wk" } ?: "W"),
+            Triple("W/kg", (p.wkg?.let { String.format(loc, "%.2f", it) } ?: "–") to TEXT, p.kg?.let { "${fmt1(it)} kg" } ?: "add weight"),
+            Triple("RE", (p.re?.let { String.format(loc, "%.3f", it) } ?: "–") to GOOD, "speed per W/kg"),
+        ))
+        val longDrift = s.runs.filter { it.seconds >= 75 * 60 && it.decoupling != null }.takeLast(5).map { it.decoupling!! }
+        val reps = Prefs.subtReps(a)?.second.orEmpty().filter { it.watts != null }
+        val subtW = reps.mapNotNull { it.watts }.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
+        stats3(c, listOf(
+            Triple("Power : HR", (p.powerHr?.let { String.format(loc, "%.2f", it) } ?: "–") to TEXT, "W per beat · 10 runs"),
+            Triple("Durability", (if (longDrift.isEmpty()) "–" else "${fmt1(longDrift.average())}%") to (if (longDrift.isEmpty()) DIM else if (longDrift.average() < 5) GOOD else WARN), "drift on 75′+ runs"),
+            Triple("SubT power", fmtW(subtW) to Charts.SUBT, subtW?.let { "${(it / p.cp * 100).roundToInt()}% of CP" } ?: "load Analysis"),
+        ))
+        // Reading
+        val n = card(col)
+        label(n, "What it says")
+        p.slopePerMonth?.let { sl ->
+            bullet(n, if (sl > 0.5) GOOD else if (sl < -0.5) WARN else DIM, "CP ${if (sl >= 0) "rising" else "falling"} ${fmt1(abs1(sl))} W/month over the last 90 days" +
+                (p.cp3moAgo?.let { " (${delta(p.cp, it)} vs 3 months ago)" } ?: "") + ".")
+        }
+        p.re?.let { re -> bullet(n, DIM, "Running effectiveness ${String.format(loc, "%.3f", re)}: ${if (re >= 1.0) "efficient. Stryd runners typically sit at 0.98–1.05" else "room to improve. Strides, hills, strength and cadence work usually lift it"}.") }
+        if (longDrift.isNotEmpty()) bullet(n, if (longDrift.average() < 5) GOOD else WARN,
+            if (longDrift.average() < 5) "Power:HR drift under 5% on long runs, which is good marathon durability." else "Power:HR drift ${fmt1(longDrift.average())}% on long runs. Build durability with longer easy runs and late-run steady segments.")
+        subtW?.let { w -> val pct = w / p.cp * 100
+            bullet(n, if (pct in 86.0..93.0) GOOD else WARN, "SubT reps at ${pct.roundToInt()}% of CP. Sub-threshold usually sits at 88–92%${if (pct > 93) ", so you're running them a bit hot" else if (pct < 86) ", so you could press a little" else ""}.") }
+        // Predictions
+        powerPredictions(col, p)
+    }
+
+    private fun powerPredictions(col: LinearLayout, p: PowerModel.Now) {
+        val re = p.re; val kg = p.kg
+        val c = card(col)
+        label(c, "Race predictions from power")
+        if (re == null || kg == null) { text(c, "Needs your weight and a few runs with power to work out running effectiveness.", 14f, DIM, top = 4); return }
+        val fm = PowerModel.fmShare(a)
+        SubtModel.applyGap(a)
+        val months = Prefs.subt(a)?.months.orEmpty().filter { !it.outlier }
+        val subt = months.lastOrNull()?.pace
+        val pbs = Prefs.effectivePbs(a)
+        row(c, listOf("" to FAINT, "POWER" to FAINT, "@ W" to FAINT, "VDOT" to FAINT, "PB" to FAINT), header = true, weights = listOf(0.9f, 1.1f, 0.8f, 1.1f, 1.1f))
+        divider(c)
+        val rows = listOf(Triple("5K", 5000.0, 1.04), Triple("10K", 10000.0, 1.00), Triple("Half", 21097.5, 0.94), Triple("Marathon", 42195.0, fm))
+        for ((name, dist, share) in rows) {
+            val tp = PowerModel.time(dist, p.cp, share, re, kg)
+            val vd = subt?.let { when (name) { "5K" -> SubtModel.fiveK(it); "Half" -> SubtModel.half(it); "Marathon" -> SubtModel.full(it); else -> null } }
+            val pb = when (name) { "5K" -> pbs.fiveK; "10K" -> pbs.tenK; "Half" -> pbs.half; else -> null }?.seconds
+            row(c, listOf(name to TEXT, t(tp) to FormColors.FITNESS, "${(p.cp * share).roundToInt()}" to DIM, (vd?.let { t(it) } ?: "–") to Charts.SUBT, (pb?.let { t(it) } ?: "–") to GOOD),
+                weights = listOf(0.9f, 1.1f, 0.8f, 1.1f, 1.1f))
+        }
+        text(c, "Power: time = distance ÷ (RE × W/kg at race power). Race power as % of CP: 5K 104, 10K 100, half 94, marathon ${(fm * 100).roundToInt()} (set in Race model). Where power and VDOT disagree, the gap is usually RE or durability.", 12f, FAINT, top = 8)
+    }
+
+    private fun powerTrends(col: LinearLayout, p: PowerModel.Now, s: Snapshot) {
+        val today = LocalDate.now(); val start = today.minusDays(89)
+        fun pts(f: (RunMetric) -> Double?) = s.runs.mapNotNull { r -> f(r)?.let { v -> date(r.date)?.let { it to v } } }
+        val charts = listOf(
+            Triple("CP / eFTP (W)", pts { it.cp }, FormColors.FITNESS),
+            Triple("W/kg (CP)", pts { r -> r.cp?.let { cp -> p.kg?.let { cp / it } } }, GOOD),
+            Triple("Running effectiveness", pts { it.re(p.kg) }, 0xFF5EC8FF.toInt()),
+            Triple("Power : HR (W per beat)", pts { r -> r.watts?.let { w -> r.avgHr?.let { w / it } } }, 0xFFFF7A90.toInt()),
+            Triple("Average power per run (W)", pts { it.watts }, Charts.SUBT),
+        )
+        for ((title, data, color) in charts) {
+            val c = card(col)
+            label(c, title, color)
+            if (data.size < 2) { text(c, "Not enough runs with this value yet.", 13f, DIM, top = 4); continue }
+            val first = data.take(5).map { it.second }.average(); val last = data.takeLast(5).map { it.second }.average()
+            val ch = (last / first - 1) * 100
+            text(c, spans(String.format(loc, if (last < 10) "%.2f" else "%.0f", last) to TEXT, "  recent  ·  ${if (ch >= 0) "+" else ""}${fmt1(ch)}% over 90 days" to (if (ch >= 0) GOOD else WARN)), 16f, top = 2)
+            image(c, Charts.timeChart(data, start, today, color, chartW(), dp(140), d, TILE, scatter = data.size > 12,
+                fmt = { v -> if (v < 10) String.format(loc, "%.2f", v) else v.roundToInt().toString() }), 140)
+        }
+    }
+
+    private fun powerZones(col: LinearLayout, s: Snapshot) {
+        val since = LocalDate.now().minusDays(27).toString()
+        val runs = s.runs.filter { it.date >= since && it.zoneSecs.isNotEmpty() }
+        val c = card(col)
+        label(c, "Time in power zones · last 4 weeks")
+        if (runs.isEmpty()) { text(c, "intervals.icu hasn't sent power-zone times for recent runs. Check your power zones are set under Settings → Run.", 14f, DIM, top = 4); return }
+        val n = runs.maxOf { it.zoneSecs.size }
+        val totals = IntArray(n); runs.forEach { r -> r.zoneSecs.forEachIndexed { i, v -> totals[i] += v } }
+        val all = totals.sum().coerceAtLeast(1)
+        val colors = listOf(0xFF5EC8FF, 0xFF3DD68C, 0xFFFFC53D, 0xFFFF9F5A, 0xFFFF7A7A, 0xFFC17BFF, 0xFFFF5CA8).map { it.toInt() }
+        for (i in 0 until n) {
+            val pct = totals[i] * 100.0 / all
+            val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, 0) }
+            r.addView(TextView(a).apply { text = "Z${i + 1}"; setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f) }, LinearLayout.LayoutParams(dp(34), ViewGroup.LayoutParams.WRAP_CONTENT))
+            val bar = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+            bar.addView(View(a).apply { setBackgroundColor(colors[i % colors.size]) }, LinearLayout.LayoutParams(0, dp(8), pct.toFloat().coerceAtLeast(0.2f)))
+            bar.addView(View(a).apply { setBackgroundColor(0xFF2C3240.toInt()) }, LinearLayout.LayoutParams(0, dp(8), (100 - pct).toFloat().coerceAtLeast(0.2f)))
+            r.addView(bar, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            r.addView(TextView(a).apply { text = "  ${pct.roundToInt()}% · ${totals[i] / 60}′"; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f) }, LinearLayout.LayoutParams(dp(96), ViewGroup.LayoutParams.WRAP_CONTENT))
+            c.addView(r)
+        }
+        val low = (totals.getOrElse(0) { 0 } + totals.getOrElse(1) { 0 }) * 100.0 / all
+        text(c, "Zones are your intervals.icu power zones. Easy (Z1–Z2) is ${low.roundToInt()}% of your time. " +
+            (if (low >= 75) "That's a healthy base for sub-threshold training." else "Most SubT-based plans keep 75–80% easy, so the easy days may be drifting too hard."), 12.5f, if (low >= 75) GOOD else WARN, top = 10)
+    }
+
+    private fun powerRace(col: LinearLayout, p: PowerModel.Now) {
+        val re = p.re; val kg = p.kg
+        val c = card(col)
+        label(c, "Sub-3 by power")
+        val fmPct = Prefs.fmPct(a)
+        chipRow(c, listOf(84, 86, 88, 90).map { "Marathon at $it% CP" }, listOf(84, 86, 88, 90).indexOf(fmPct)) { Prefs.setFmPct(a, listOf(84, 86, 88, 90)[it]); onChange() }
+        if (re == null || kg == null) { text(c, "Needs your weight and runs with power.", 14f, DIM, top = 8); return }
+        val share = fmPct / 100.0
+        val need = PowerModel.cpFor(SubtModel.SUB3, share, re, kg)
+        val gap = need - p.cp
+        stats3(c, listOf(
+            Triple("CP now", "${p.cp.roundToInt()} W" to FormColors.FITNESS, String.format(loc, "%.2f W/kg", p.cp / kg)),
+            Triple("Sub-3 needs", "${need.roundToInt()} W" to TEXT, String.format(loc, "%.2f W/kg", need / kg)),
+            Triple("Gap", (if (gap <= 0) "✓" else "+${gap.roundToInt()} W") to (if (gap <= 0) GOOD else WARN), "marathon @ ${(need * share).roundToInt()} W"),
+        ))
+        // ETA from the CP trend, with the weight plan
+        val w = weightIn()
+        val slope = p.slopePerMonth
+        if (gap > 0 && slope != null && slope > 0.1) {
+            var m = 0; var hit: Int? = null
+            while (m <= 72) {
+                val w0 = w.w0
+                val kgM = if (w0 != null) SubtModel.weightAt(w0, w.plan.kgPerWeek, m.toDouble(), w.goal) * kg / w0 else kg
+                if (p.cp + slope * m >= PowerModel.cpFor(SubtModel.SUB3, share, re, kgM)) { hit = m; break }
+                m++
+            }
+            text(c, spans("At your current CP trend (+${fmt1(slope)} W/month) and weight plan (${w.plan.label.lowercase(loc)}): " to DIM,
+                (hit?.let { monthLabel(it) } ?: "beyond 6 years") to GOOD), 15f, top = 8)
+        } else if (gap > 0) text(c, "Your CP isn't trending up over the last 90 days, so there's no ETA yet. The levers below show what moves it.", 14f, WARN, top = 8)
+
+        // What each lever is worth on marathon time
+        val base = PowerModel.time(42195.0, p.cp, share, re, kg)
+        fun diff(x: Double) = (base - x).let { (if (it >= 0) "−" else "+") + t(abs1(it)) }
+        val lv = card(col)
+        label(lv, "What each lever is worth (marathon time)")
+        row(lv, listOf("+5 W CP" to TEXT, diff(PowerModel.time(42195.0, p.cp + 5, share, re, kg)) to GOOD), weights = listOf(1.5f, 1f))
+        row(lv, listOf("+1% running effectiveness" to TEXT, diff(PowerModel.time(42195.0, p.cp, share, re * 1.01, kg)) to GOOD), weights = listOf(1.5f, 1f))
+        row(lv, listOf("−1 kg body weight" to TEXT, diff(PowerModel.time(42195.0, p.cp, share, re, kg - 1)) to GOOD), weights = listOf(1.5f, 1f))
+        row(lv, listOf("+1% durability (race at a higher % of CP)" to TEXT, diff(PowerModel.time(42195.0, p.cp, share + 0.01, re, kg)) to GOOD), weights = listOf(1.5f, 1f))
+        text(lv, "Predicted marathon now: ${t(base)} at ${(p.cp * share).roundToInt()} W. Compare it with the Sub-3 forecast (VDOT) on the SubT tab.", 12.5f, FAINT, top = 8)
+        weightCard(col, Prefs.subt(a)?.months?.lastOrNull { !it.outlier }?.pace ?: 4.5, SubtModel.requiredSubt(3, SubtModel.SUB3))
+    }
 }

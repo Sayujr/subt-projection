@@ -103,6 +103,7 @@ object WidgetRenderer {
         views.setTextViewText(R.id.title, titleText(s.today))
         views.setTextViewText(R.id.updated, updatedText(ctx, s))
         views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, TrainingWidgetProvider::class.java))
+        setVerdict(views, s)
         if (s.creds == null) {
             views.setOnClickPendingIntent(R.id.root, setupIntent(ctx))
         } else {
@@ -168,6 +169,7 @@ object WidgetRenderer {
 
         views.setTextViewText(R.id.title, titleText(s.today) + (if (s.refreshing) "  ·  updating…" else ""))
         views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, CompactWidgetProvider::class.java))
+        setVerdict(views, s)
         setupList(ctx, views, s, id)
         if (s.creds != null) views.setOnClickPendingIntent(R.id.graphs, appIntent(ctx, "HOME"))
 
@@ -284,6 +286,13 @@ object WidgetRenderer {
         !s.isToday -> "Updating for today…"
         s.snap.workouts.isEmpty() -> "Rest day · nothing planned"
         else -> null
+    }
+
+    /** "● PUSH / HOLD / BACK OFF / TAPER" in the widget header. */
+    private fun setVerdict(views: RemoteViews, s: State) {
+        val v = if (s.isToday) Verdict.compute(s.snap) else null
+        views.setTextViewText(R.id.verdict, v?.let { "● " + it.call.label.uppercase(Locale.getDefault()) } ?: "")
+        v?.let { views.setTextColor(R.id.verdict, it.call.color) }
     }
 
     /** Short label for a period: 2w, 6w, 3mo, 1y, or Nd for a custom one. */

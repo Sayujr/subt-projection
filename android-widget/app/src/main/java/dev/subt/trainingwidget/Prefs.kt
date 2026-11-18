@@ -32,7 +32,7 @@ object Prefs {
     /** Days of history needed to draw every widget's chosen period. */
     fun historyNeeded(ctx: Context): Int =
         // 120 days minimum so the Race screen can show the 3-month build-up
-        (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + period(ctx, WidgetRenderer.APP_ID) + 120).max()
+        (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + period(ctx, WidgetRenderer.APP_ID) + 180).max()
 
     fun subt(ctx: Context): SubtData? = sp(ctx).getString("subt", null)?.let { SubtData.fromJson(it) }
 
@@ -72,6 +72,31 @@ object Prefs {
     fun saveRaceHistory(ctx: Context, l: List<RaceResult>) = sp(ctx).edit().putString("race_history", RaceResult.listToJson(l, System.currentTimeMillis())).apply()
     fun taperPreset(ctx: Context): Int = sp(ctx).getInt("taper_preset", 1)
     fun setTaperPreset(ctx: Context, i: Int) = sp(ctx).edit().putInt("taper_preset", i).apply()
+
+    // ---- load-balance streak rules
+    /** Fitness must stay within this % of the reference peak (outside tapers). */
+    fun fitnessBand(ctx: Context): Int = sp(ctx).getInt("streak_fit_band", 10)
+    fun setFitnessBand(ctx: Context, v: Int) = sp(ctx).edit().putInt("streak_fit_band", v).apply()
+    /** Fatigue must be at least this fraction of Fitness on a build day (×100). */
+    fun fatigueMin(ctx: Context): Int = sp(ctx).getInt("streak_fat_min", 95)
+    fun setFatigueMin(ctx: Context, v: Int) = sp(ctx).edit().putInt("streak_fat_min", v).apply()
+    /** Days per week that must meet every rule. */
+    fun greyDays(ctx: Context): Int = sp(ctx).getInt("streak_grey_days", 4)
+    fun setGreyDays(ctx: Context, v: Int) = sp(ctx).edit().putInt("streak_grey_days", v).apply()
+
+    // ---- power model
+    /** Marathon power as % of CP (Stryd-style default 88). */
+    fun fmPct(ctx: Context): Int = sp(ctx).getInt("fm_pct_cp", 88)
+    fun setFmPct(ctx: Context, v: Int) = sp(ctx).edit().putInt("fm_pct_cp", v).apply()
+
+    // ---- notifications
+    fun notifyMorning(ctx: Context): Boolean = sp(ctx).getBoolean("notify_morning", true)
+    fun setNotifyMorning(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("notify_morning", on).apply()
+    fun notifyAlerts(ctx: Context): Boolean = sp(ctx).getBoolean("notify_alerts", true)
+    fun setNotifyAlerts(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("notify_alerts", on).apply()
+    /** Remembers which notification was last sent, so each goes out at most once per day / value. */
+    fun lastNotified(ctx: Context, key: String): String? = sp(ctx).getString("notified_$key", null)
+    fun setLastNotified(ctx: Context, key: String, v: String) = sp(ctx).edit().putString("notified_$key", v).apply()
 
     // ---- PBs and race gap
 

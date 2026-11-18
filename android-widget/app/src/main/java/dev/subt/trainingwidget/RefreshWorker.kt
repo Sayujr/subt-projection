@@ -48,6 +48,7 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         }
         Prefs.setRefreshing(ctx, false)
         WidgetRenderer.renderAll(ctx)
+        runCatching { Notifier.run(ctx) }
         Result.success()
     }
 }

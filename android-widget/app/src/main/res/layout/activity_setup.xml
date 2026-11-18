@@ -72,6 +72,28 @@
             android:textColorHint="@color/text_faint" />
 
         <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Notifications"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <CheckBox
+            android:id="@+id/notify_morning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Morning summary: verdict, key session, streak"
+            android:textColor="@color/text" />
+
+        <CheckBox
+            android:id="@+id/notify_alerts"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Alerts: resting-HR spike, new CP, taper off target, weekly streak"
+            android:textColor="@color/text" />
+
+        <TextView
             android:id="@+id/widget_hint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

@@ -40,6 +40,14 @@ class SetupActivity : Activity() {
         val styleGroup = findViewById<RadioGroup>(R.id.style_group)
         val periodGroup = findViewById<RadioGroup>(R.id.period_group)
 
+        findViewById<android.widget.CheckBox>(R.id.notify_morning).apply {
+            isChecked = Prefs.notifyMorning(this@SetupActivity)
+            setOnCheckedChangeListener { _, on -> Prefs.setNotifyMorning(this@SetupActivity, on) }
+        }
+        findViewById<android.widget.CheckBox>(R.id.notify_alerts).apply {
+            isChecked = Prefs.notifyAlerts(this@SetupActivity)
+            setOnCheckedChangeListener { _, on -> Prefs.setNotifyAlerts(this@SetupActivity, on) }
+        }
         val stored = Prefs.credentials(this)
         stored?.let {
             athlete.setText(if (it.athleteId == "0") "" else it.athleteId)

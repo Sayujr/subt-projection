@@ -13,6 +13,7 @@ import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.roundToInt
 
 class AuthException : IOException("intervals.icu rejected the athlete ID / API key")
 
@@ -85,7 +86,16 @@ class IcuApi(private val creds: Credentials) {
 
         // Run aerobic metrics (HR drift, efficiency) over ~90 days
         val runs = activities.filter { it.optString("type").contains("Run", ignoreCase = true) }.map {
+            val zt = it.optJSONArray("icu_zone_times")
+            val zones = if (zt == null) emptyList() else (0 until zt.length()).map { i ->
+                zt.optJSONObject(i)?.optInt("secs") ?: zt.optInt(i)
+            }
             RunMetric(
+                watts = (it.optNum("icu_average_watts") ?: it.optNum("average_watts"))?.takeIf { v -> v > 0 },
+                distanceM = it.optNum("distance")?.takeIf { v -> v > 0 },
+                cp = listOf("icu_pm_cp", "icu_rolling_cp", "icu_pm_ftp_watts", "icu_rolling_ftp", "icu_ftp")
+                    .firstNotNullOfOrNull { k -> it.optNum(k)?.takeIf { v -> v > 50 } },
+                zoneSecs = zones,
                 date = date(it),
                 name = it.optString("name"),
                 seconds = (it.optNum("moving_time") ?: 0.0).toInt(),
@@ -100,6 +110,7 @@ class IcuApi(private val creds: Credentials) {
             .filter { date(it) >= lastMonday.toString() && date(it) < monday.toString() }
             .sumOf { (it.optNum("icu_training_load") ?: 0.0).toInt() }
 
+        runFtp = fetchRunFtp(ath)
         val weekEvents = events.filter { date(it) in monday.toString()..sunday.toString() }
         val weekActivities = activities.filter { date(it) >= monday.toString() }
         val week = merge(weekEvents, weekActivities)
@@ -131,7 +142,8 @@ class IcuApi(private val creds: Credentials) {
         val proj = projections.entries.filter { it.key > todayStr }.sortedBy { it.key }
             .map { Day(it.key, it.value.first, it.value.second) }
         val weight = wellness.objects().sortedBy { it.optString("id") }.mapNotNull { it.optNum("weight")?.takeIf { w -> w > 25 } }.lastOrNull()
-        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight)
+        val curveCp = runCatching { fetchCurveCp(ath) }.getOrNull()
+        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight, runFtp, curveCp)
     }
 
     /** Planned workouts, races and completed activities between [start] and [end] (inclusive), for the app's Week screen. */
@@ -345,6 +357,74 @@ class IcuApi(private val creds: Credentials) {
         }
     }
 
+    /** Running FTP from the athlete's sport settings (used to turn %FTP steps into watts). */
+    private var runFtp: Double? = null
+
+    private fun fetchRunFtp(ath: String): Double? = runCatching {
+        val o = JSONObject(getText("/athlete/$ath", emptyMap()))
+        val ss = o.optJSONArray("sportSettings")?.objects().orEmpty()
+        ss.firstOrNull { s -> s.optJSONArray("types")?.let { t -> (0 until t.length()).any { t.optString(it).contains("Run") } } == true }
+            ?.optNum("ftp")?.takeIf { it > 50 }
+    }.getOrNull()
+
+    /** CP from the 90-day power curve: 2-parameter model from the best 3-min and 12-min powers. */
+    private fun fetchCurveCp(ath: String): Double? {
+        val text = getText("/athlete/$ath/power-curves", mapOf("type" to "Run", "curves" to "90d"))
+        val root = org.json.JSONTokener(text).nextValue()
+        val curves = when (root) {
+            is JSONObject -> root.optJSONArray("list")?.objects() ?: listOf(root)
+            is JSONArray -> root.objects()
+            else -> emptyList()
+        }
+        for (cv in curves) {
+            val secs = cv.optJSONArray("secs") ?: continue
+            val watts = cv.optJSONArray("watts") ?: cv.optJSONArray("values") ?: continue
+            fun at(t: Int): Double? {
+                var bi = -1; var bd = Int.MAX_VALUE
+                for (k in 0 until minOf(secs.length(), watts.length())) {
+                    val dd = abs(secs.optInt(k) - t); if (dd < bd) { bd = dd; bi = k }
+                }
+                return if (bi >= 0 && bd <= t / 10) watts.optDouble(bi).takeIf { !it.isNaN() && it > 50 } else null
+            }
+            val p3 = at(180) ?: continue
+            val p12 = at(720) ?: continue
+            val cp = (p12 * 720 - p3 * 180) / (720 - 180)
+            if (cp in 80.0..700.0) return cp
+        }
+        return null
+    }
+
+    /** Turns an intervals.icu workout_doc into a short line of steps with power targets. */
+    private fun stepsText(doc: JSONObject): String {
+        val ftp = runFtp
+        fun dur(s: Int) = if (s >= 60) "${(s + 30) / 60}′" else "${s}″"
+        fun target(st: JSONObject): String {
+            val p = st.optJSONObject("power") ?: return st.optString("text").takeIf { it.isNotBlank() }?.take(24) ?: "easy"
+            val units = p.optString("units")
+            val lo = p.optNum("start") ?: p.optNum("value")
+            val hi = p.optNum("end") ?: lo
+            if (lo == null) return "easy"
+            fun w(v: Double) = if (units.contains("%") || units.contains("ftp", true)) ftp?.let { (v / 100 * it).roundToInt() } else v.roundToInt()
+            val a = w(lo); val b = w(hi ?: lo)
+            return if (a == null || b == null) "${lo.roundToInt()}–${(hi ?: lo).roundToInt()}% FTP"
+            else if (a == b) "$a W" else "$a–$b W"
+        }
+        fun render(arr: JSONArray?): List<String> = (0 until (arr?.length() ?: 0)).mapNotNull { i ->
+            val st = arr!!.optJSONObject(i) ?: return@mapNotNull null
+            val reps = st.optInt("reps", 0)
+            val inner = st.optJSONArray("steps")
+            if (inner != null && inner.length() > 0) {
+                val body = render(inner).joinToString(" · ")
+                if (reps > 1) "$reps× ($body)" else body
+            } else {
+                val d = st.optInt("duration", 0)
+                val t = target(st)
+                if (d > 0) "${dur(d)} @ $t" else t
+            }
+        }
+        return render(doc.optJSONArray("steps")).joinToString(" · ")
+    }
+
     /** Planned events (marked done when an activity is paired with them) + unplanned completed activities. */
     private fun merge(events: List<JSONObject>, activities: List<JSONObject>): List<Workout> {
         val activityByEvent = activities.mapNotNull { a ->
@@ -369,6 +449,7 @@ class IcuApi(private val creds: Credentials) {
                 },
                 date = date(e),
                 plannedLoad = (e.optNum("icu_training_load") ?: 0.0).toInt(),
+                steps = e.optJSONObject("workout_doc")?.let { stepsText(it) }?.takeIf { it.isNotBlank() },
             )
         }
         for (a in activities) {
