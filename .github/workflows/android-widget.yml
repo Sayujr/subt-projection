@@ -29,24 +29,36 @@ jobs:
       - name: Use the private signing key from secrets (if set)
         env:
           KS: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          PW_SECRET: ${{ secrets.SIGNING_PASSWORD }}
         run: |
           if [ -n "$KS" ]; then
-            # Tolerate spaces / line breaks picked up when pasting the secret
+            # Tolerate spaces / line breaks, and the whole secrets file pasted into one secret
             CLEAN=$(printf '%s' "$KS" | tr -d ' \r\n\t')
-            echo "Keystore secret length after cleanup: ${#CLEAN} characters"
+            PW_FROM_KS=""
+            case "$CLEAN" in *SIGNING_PASSWORD*) PW_FROM_KS="${CLEAN##*SIGNING_PASSWORD}";; esac
+            CLEAN="${CLEAN#SIGNING_KEYSTORE_B64}"
+            CLEAN="${CLEAN%%SIGNING_PASSWORD*}"
+            PW=$(printf '%s' "$PW_SECRET" | tr -d ' \r\n\t')
+            PW="${PW##*SIGNING_PASSWORD}"
+            if [ ${#PW} -ne 32 ] && [ -n "$PW_FROM_KS" ]; then PW="$PW_FROM_KS"; fi
+            echo "::add-mask::$PW"
+            echo "Keystore length ${#CLEAN} characters, password length ${#PW}"
             if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.jks" 2>/dev/null || [ ! -s "$RUNNER_TEMP/release.jks" ]; then
               echo "::error::SIGNING_KEYSTORE_B64 isn't valid base64 (probably cut short when copying). Re-paste it."
               exit 1
             fi
+            if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$PW" >/dev/null 2>&1; then
+              echo "::error::The signing password doesn't open the keystore. Re-paste SIGNING_PASSWORD."
+              exit 1
+            fi
             echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "SIGNING_PASSWORD=$PW" >> "$GITHUB_ENV"
             echo "Signing with the private key from secrets"
           else
             echo "::warning::SIGNING_KEYSTORE_B64 not set, so signing with the key in the repo"
           fi
 
       - name: Build debug APK
-        env:
-          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon assembleDebug
