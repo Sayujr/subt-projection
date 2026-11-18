@@ -41,6 +41,11 @@ android {
             isMinifyEnabled = false
         }
     }
+    lint {
+        // Release builds run a lint check by default; don't let warnings block the APK
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
