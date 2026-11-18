@@ -1293,8 +1293,9 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val st = Streaks.compute(a) ?: return
         val c = card(col)
         label(c, "Load-balance streak")
-        text(c, spans("${st.weekStreak}" to TEXT, " week${if (st.weekStreak == 1) "" else "s"}" to DIM, "   ·   " to FAINT,
-            "${st.monthStreak}" to TEXT, " month${if (st.monthStreak == 1) "" else "s"}" to DIM, "   ·   best ${st.bestWeekStreak} wk" to FAINT), 18f, top = 2)
+        text(c, spans("${st.dayStreak}" to TEXT, " day${if (st.dayStreak == 1) "" else "s"}" to DIM, "   ·   " to FAINT,
+            "${st.weekStreak}" to TEXT, " week${if (st.weekStreak == 1) "" else "s"}" to DIM, "   ·   " to FAINT,
+            "${st.monthStreak}" to TEXT, " month${if (st.monthStreak == 1) "" else "s"}" to DIM), 18f, top = 2)
         st.thisWeek?.let { dayDots(c, it.days, LocalDate.now()) }
     }
 
@@ -1335,21 +1336,24 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         label(top, "Load-balance streaks")
         if (st == null) { text(top, "Needs about two months of Fitness history. Loading…", 14f, DIM, top = 4); return }
         stats3(top, listOf(
+            Triple("Day streak", "${st.dayStreak}" to GOOD, "best ${st.bestDayStreak}"),
             Triple("Week streak", "${st.weekStreak}" to GOOD, "best ${st.bestWeekStreak}"),
-            Triple("Month streak", "${st.monthStreak}" to GOOD, "${st.months.count { it.passed == true }} months passed"),
-            Triple("This week", (st.thisWeek?.avgForm?.let { signed(it.roundToInt()) } ?: "–") to
-                (st.thisWeek?.avgForm?.let { if (it in -10.0..5.0) GOOD else WARN } ?: TEXT), "avg Form so far"),
+            Triple("Month streak", "${st.monthStreak}" to GOOD, "${st.months.count { it.passed == true }} passed"),
         ))
+        text(top, spans("This week so far: " to DIM, (st.thisWeek?.avgForm?.let { "avg Form ${signed(it.roundToInt())}" } ?: "–") to
+            (st.thisWeek?.avgForm?.let { if (it in -10.0..5.0) GOOD else WARN } ?: TEXT)), 13.5f, top = 6)
         st.thisWeek?.let { dayDots(top, it.days, LocalDate.now()) }
 
         // Rules + adjusters
         val rules = card(col)
         label(rules, "Your rules")
         val band = Prefs.fitnessBand(a); val fat = Prefs.fatigueMin(a)
-        text(rules, spans("Week (Mon–Sun) passes when:" to TEXT), 14f, bold = true, top = 6)
+        text(rules, spans("Day streak (relaxed) passes when:" to TEXT), 14f, bold = true, top = 6)
+        text(rules, "• Fitness stays within $band% of your reference peak\n• the 3-day average Form is −15 to +8, so one rest or recovery day is fine but several in a row aren't\n• TT mini-taper, taper and race days pass if the floor holds", 13.5f, DIM, top = 2)
+        text(rules, spans("Week (Mon–Sun) passes when:" to TEXT), 14f, bold = true, top = 12)
         text(rules, "• average Form across the week is in the Grey zone (−10 to +5)\n" +
             "• average Fatigue is at least $fat% of average Fitness\n" +
-            "• you exit the week (Sunday) with Fitness within $band% of your reference peak and Form no lower than −20", 13.5f, DIM, top = 2)
+            "• you exit the week (Sunday) with Fitness within $band% of your reference peak and Form in the Grey zone too (unless Sunday is a TT or race)", 13.5f, DIM, top = 2)
         chipRow(rules, listOf(5, 10, 15, 20).map { "Fitness within $it%" }, listOf(5, 10, 15, 20).indexOf(band)) { Prefs.setFitnessBand(a, listOf(5, 10, 15, 20)[it]); onChange() }
         chipRow(rules, listOf(90, 95, 100, 105).map { "Fatigue ≥ $it%" }, listOf(90, 95, 100, 105).indexOf(fat)) { Prefs.setFatigueMin(a, listOf(90, 95, 100, 105)[it]); onChange() }
         text(rules, spans("Month passes when:" to TEXT), 14f, bold = true, top = 12)
@@ -1357,8 +1361,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         text(rules, spans("Lighter rules:" to TEXT), 14f, bold = true, top = 12)
         text(rules, "• TT mini-taper (2 days before a scheduled TT, the TT day and the day after): left out of the Form and Fatigue averages, but the Fitness floor still applies\n" +
             "• Race taper (A 14 · B 10 · C 5 days): judged only on Fitness staying above the race floor. Race day and the 3 days after aren't judged", 13.5f, DIM, top = 2)
-        text(rules, spans("Day dots: " to FAINT, "● all rules  " to GOOD, "● partly  " to WARN, "● under floor  " to BAD, "● TT mini-taper  " to 0xFF8C9EFF.toInt(), "● race / taper" to 0xFF5EC8FF.toInt()), 11.5f, top = 10)
-        text(rules, "Dots are a day-by-day guide. Pass or fail comes from the weekly averages and how you exit the week.", 11.5f, FAINT, top = 2)
+        text(rules, spans("Day dots: " to FAINT, "● all build rules  " to GOOD, "● day streak OK  " to WARN, "● day streak broken  " to BAD, "● TT mini-taper  " to 0xFF8C9EFF.toInt(), "● race / taper" to 0xFF5EC8FF.toInt()), 11.5f, top = 10)
+        text(rules, "Dots follow the day streak. Week and month results come from averages and how you exit.", 11.5f, FAINT, top = 2)
 
         // Weeks, newest first
         val wc = card(col)

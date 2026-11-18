@@ -62,7 +62,7 @@ object Notifier {
                 val key = s.workouts.filter { it.status != WorkoutStatus.DONE }.maxByOrNull { it.load }
                 val session = key?.let { k -> k.name + (k.steps?.let { " · $it" } ?: "") } ?: "No session planned"
                 val st = Streaks.compute(ctx)
-                val streak = st?.let { " · week streak ${it.weekStreak}" } ?: ""
+                val streak = st?.let { " · streak ${it.dayStreak} d / ${it.weekStreak} wk" } ?: ""
                 post(ctx, DAILY, 1, "${v.call.label}: ${v.headline}", "$session\n${v.reasons.take(3).joinToString(" · ") { it.second }}$streak", "HOME")
             }
         }

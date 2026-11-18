@@ -12,7 +12,9 @@ import java.time.temporal.TemporalAdjusters
  * Week passes when, over its normal days:
  *   • average Form is in the Grey zone (−10…+5)
  *   • average Fatigue ≥ fatMin × average Fitness
- *   • at exit (Sunday, or today for the current week) Fitness ≥ (1 − band) × reference peak and Form ≥ −20
+ *   • at exit (Sunday, or today for the current week) Fitness ≥ (1 − band) × reference peak and Form in the Grey zone
+ * Day streak (relaxed, allows rest / recovery days): Fitness ≥ floor and 3-day average Form −15…+8
+ *   (TT mini-taper / taper / race days pass when the floor holds).
  * Excluded from the averages (Fitness floor still applies):
  *   • TT mini-tapers: 2 days before a scheduled TT, the TT day and the day after
  *   • race tapers (A 14 · B 10 · C 5 days before), race day and the 3 days after
@@ -36,6 +38,7 @@ object Streaks {
     data class Summary(
         val days: List<DayResult>, val weeks: List<WeekResult>, val months: List<MonthResult>,
         val weekStreak: Int, val monthStreak: Int, val bestWeekStreak: Int, val thisWeek: WeekResult?,
+        val dayStreak: Int = 0, val bestDayStreak: Int = 0,
     )
 
     private data class RaceRef(val date: LocalDate, val category: String, val name: String)
@@ -87,10 +90,14 @@ object Streaks {
                 else -> {
                     val fatOk = day.atl >= fatMin * day.ctl
                     val formOk = day.form in -10.0..5.0
+                    // Day streak: 3-day average Form, so a single rest or recovery day doesn't break it
+                    val f3 = series.filter { it.date > d.minusDays(3).toString() && it.date <= d.toString() }.map { it.form }.average()
+                    val dailyOk = floorOk && f3 in -15.0..8.0
                     if (!floorOk) notes += "Fitness below floor"
+                    if (floorOk && !dailyOk) notes += "3-day Form ${f3.toInt()} outside −15…+8"
                     if (!fatOk) notes += "Fatigue low"
                     if (!formOk) notes += "Form outside Grey"
-                    when { !floorOk -> Status.RED; fatOk && formOk -> Status.GREEN; else -> Status.AMBER }
+                    when { !dailyOk -> Status.RED; fatOk && formOk -> Status.GREEN; else -> Status.AMBER }
                 }
             }
             dayResults += DayResult(d, status, notes, day, ref)
@@ -119,9 +126,11 @@ object Streaks {
             val avgAtl = normal.mapNotNull { it.day?.atl }.takeIf { it.isNotEmpty() }?.average()
             val ratio = if (avgCtl != null && avgAtl != null && avgCtl > 0) avgAtl / avgCtl else null
             val exitFloorOk = exitDay.ctl >= floor
-            val exitFormOk = exitDay.form >= -20
+            // Exit Form must be in Grey too, unless the week ends in a TT mini-taper / race window
+            val exitNormal = exit.status == Status.GREEN || exit.status == Status.AMBER || exit.status == Status.RED
+            val exitFormOk = !exitNormal || exitDay.form in -10.0..5.0
             if (!exitFloorOk) reasons += "Exited with Fitness ${exitDay.ctl.toInt()} below floor ${floor.toInt()}"
-            if (!exitFormOk) reasons += "Exited buried (Form ${exitDay.form.toInt()})"
+            if (!exitFormOk) reasons += "Exited with Form ${exitDay.form.toInt()} outside Grey"
             var passed = exitFloorOk && exitFormOk
             if (normal.size >= 3) {
                 if (avgForm != null && avgForm !in -10.0..5.0) { passed = false; reasons += "Average Form ${avgForm.toInt()} outside Grey zone" }
@@ -148,7 +157,14 @@ object Streaks {
                 failed <= 1 && exit >= entry * (if (hadRace) 0.90 else 0.97) && (avgForm == null || avgForm in -12.0..5.0)
             MonthResult(m, ws, passed, avgForm, entry, exit, failed, hadRace)
         }
+        // Day streak (consecutive passing days up to the latest day with data)
+        fun dayPass(r: DayResult) = r.status != Status.RED && r.status != Status.TAPER_MISS
+        val judgedDays = dayResults.filter { it.status != Status.NONE }
+        var dStreak = 0
+        for (r in judgedDays.reversed()) { if (dayPass(r)) dStreak++ else break }
+        var bestD = 0; var runD = 0
+        for (r in judgedDays) { if (dayPass(r)) { runD++; bestD = maxOf(bestD, runD) } else runD = 0 }
         return Summary(dayResults, weeks, months, streak(done.map { it.passed }), streak(months.map { it.passed }), best,
-            weeks.lastOrNull()?.takeIf { !it.complete })
+            weeks.lastOrNull()?.takeIf { !it.complete }, dStreak, bestD)
     }
 }
