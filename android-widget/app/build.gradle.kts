@@ -17,34 +17,27 @@ android {
         versionName = "1.$build"
     }
 
-    // One fixed key for every build, so updates install over the existing app
-    // (keeping placed widgets and settings) instead of needing an uninstall.
-    signingConfigs {
-        create("stable") {
-            // CI decodes the private key from the SIGNING_KEYSTORE_B64 secret; without it, the
-            // older key in the repo is used so builds keep working.
-            val ksPath = System.getenv("SIGNING_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
-            val pw = System.getenv("SIGNING_PASSWORD")?.takeIf { it.isNotBlank() }
-            if (ksPath != null && pw != null) {
+    // One private key for every CI build (from GitHub secrets), so updates install over the existing
+    // app and keep placed widgets and settings. Local builds without it use the normal debug key.
+    val ksPath = System.getenv("SIGNING_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+    val ksPw = System.getenv("SIGNING_PASSWORD")?.takeIf { it.isNotBlank() }
+    if (ksPath != null && ksPw != null) {
+        signingConfigs {
+            create("stable") {
                 storeFile = file(ksPath)
-                storePassword = pw
+                storePassword = ksPw
                 keyAlias = "trainingtoday"
-                keyPassword = pw
-            } else {
-                storeFile = rootProject.file("keystore/training-widget.jks")
-                storePassword = "trainingwidget"
-                keyAlias = "trainingwidget"
-                keyPassword = "trainingwidget"
+                keyPassword = ksPw
             }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("stable")
+            if (ksPath != null && ksPw != null) signingConfig = signingConfigs.getByName("stable")
         }
         release {
-            signingConfig = signingConfigs.getByName("stable")
+            if (ksPath != null && ksPw != null) signingConfig = signingConfigs.getByName("stable")
             isMinifyEnabled = false
         }
     }

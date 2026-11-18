@@ -26,7 +26,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Use the private signing key from secrets (if set)
+      - name: Use the private signing key from secrets
         env:
           KS: ${{ secrets.SIGNING_KEYSTORE_B64 }}
           PW_SECRET: ${{ secrets.SIGNING_PASSWORD }}
@@ -55,7 +55,8 @@ jobs:
             echo "SIGNING_PASSWORD=$PW" >> "$GITHUB_ENV"
             echo "Signing with the private key from secrets"
           else
-            echo "::warning::SIGNING_KEYSTORE_B64 not set, so signing with the key in the repo"
+            echo "::error::SIGNING_KEYSTORE_B64 secret is missing. Not building, because an APK signed with another key wouldn't install as an update."
+            exit 1
           fi
 
       - name: Build debug APK

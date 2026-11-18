@@ -96,5 +96,5 @@ To build locally, open this folder in Android Studio, or run `./gradlew assemble
 
 Builds are signed with a private key kept in two GitHub Actions secrets: `SIGNING_KEYSTORE_B64` (the keystore,
 base64-encoded) and `SIGNING_PASSWORD`. Every build uses that same key and gets a higher version number, so a new APK
-installs as an update and your placed widgets and settings stay. If the secrets are missing, CI falls back to the older
-key in `keystore/`, which is public and due to be removed.
+installs as an update and your placed widgets and settings stay. CI refuses to build without them. Local builds
+without the secrets use the standard Android debug key.
