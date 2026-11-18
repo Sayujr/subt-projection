@@ -1436,6 +1436,48 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         if (runs.size > 12) text(c, "+ ${runs.size - 12} earlier streaks", 11.5f, FAINT, top = 6)
     }
 
+    // ================================================================ Streak calendar (multi-year / year)
+
+    fun streakCalendar(col: LinearLayout, history: List<Day>?, loading: Boolean, error: String?, multiYear: Boolean, year: Int, onRefresh: () -> Unit) {
+        val head = card(col)
+        label(head, if (multiYear) "Streak calendar · multi-year" else "Streak calendar · $year")
+        text(head, when {
+            loading -> "Loading your Fitness history from intervals.icu…"
+            error != null -> "Couldn't load: $error · tap to retry"
+            else -> "Each square is a day, coloured by its streak status. Tap to refresh."
+        }, 12.5f, if (error != null) WARN else FAINT, top = 2).setOnClickListener { onRefresh() }
+        text(head, spans("● all rules  " to GOOD, "● day streak OK  " to WARN, "● broken  " to BAD, "● TT mini-taper  " to 0xFF8C9EFF.toInt(), "● race / taper  " to 0xFF5EC8FF.toInt(), "● no data" to 0xFF2C3240.toInt()), 11.5f, top = 6)
+        val st = Streaks.compute(a, history) ?: return
+        val byDate = st.days.associateBy { it.date }
+        val today = LocalDate.now()
+        val firstYear = st.days.firstOrNull { it.status != Streaks.Status.NONE }?.date?.year ?: today.year
+        fun colorOf(d: LocalDate): Int = when {
+            d.isAfter(today) -> 0xFF1B1F28.toInt()
+            else -> byDate[d]?.let { statusColor(it.status) } ?: 0xFF262B36.toInt()
+        }
+        val years = if (multiYear) (today.year downTo firstYear).toList() else listOf(year)
+        for (y in years) {
+            val c = card(col)
+            text(c, "$y", if (multiYear) 18f else 22f, TEXT, bold = true)
+            val bmp = Charts.yearGrid(y, ::colorOf, chartW(), d)
+            val iv = ImageView(a).apply { setImageBitmap(bmp); adjustViewBounds = true }
+            c.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+            // Year summary
+            val yd = st.days.filter { it.date.year == y && it.status != Streaks.Status.NONE }
+            val green = yd.count { it.status == Streaks.Status.GREEN }
+            val dayOk = yd.count { it.status != Streaks.Status.RED && it.status != Streaks.Status.TAPER_MISS }
+            val wk = st.weeks.filter { it.monday.year == y && it.complete && it.passed != null }
+            val bestDay = st.dayRuns.filter { it.start.year == y || it.end.year == y }.maxOfOrNull { it.length } ?: 0
+            val bestWeek = st.weekRuns.filter { it.start.year == y || it.end.year == y }.maxOfOrNull { it.length } ?: 0
+            if (yd.isEmpty()) text(c, "No Fitness data for $y.", 12.5f, FAINT, top = 4)
+            else text(c, spans(
+                "$green" to GOOD, " all-rules days · " to FAINT, "${(dayOk * 100.0 / yd.size).roundToInt()}%" to TEXT, " day-streak days · " to FAINT,
+                "${wk.count { it.passed == true }}/${wk.size}" to TEXT, " weeks passed · best " to FAINT, "$bestDay d / $bestWeek wk" to TEXT,
+            ), 12f, top = 6)
+        }
+        if (history == null && !loading) text(card(col), "Showing the last 12 months until your full history loads.", 12f, FAINT)
+    }
+
     // ================================================================ Power tab
 
     fun power(col: LinearLayout, view: Int) {

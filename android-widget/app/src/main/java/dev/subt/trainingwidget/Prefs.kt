@@ -98,6 +98,18 @@ object Prefs {
     fun lastNotified(ctx: Context, key: String): String? = sp(ctx).getString("notified_$key", null)
     fun setLastNotified(ctx: Context, key: String, v: String) = sp(ctx).edit().putString("notified_$key", v).apply()
 
+    // ---- multi-year Fitness history for the streak calendar (refreshed daily)
+    fun longHistory(ctx: Context): Pair<Long, List<Day>>? = sp(ctx).getString("long_history", null)?.let {
+        runCatching {
+            val o = org.json.JSONObject(it); val a = o.getJSONArray("d")
+            o.getLong("t") to (0 until a.length()).map { i -> val x = a.getJSONArray(i); Day(x.getString(0), x.getDouble(1), x.getDouble(2)) }
+        }.getOrNull()
+    }
+    fun saveLongHistory(ctx: Context, days: List<Day>) {
+        val a = org.json.JSONArray(); days.forEach { a.put(org.json.JSONArray().put(it.date).put(it.ctl).put(it.atl)) }
+        sp(ctx).edit().putString("long_history", org.json.JSONObject().put("t", System.currentTimeMillis()).put("d", a).toString()).apply()
+    }
+
     // ---- PBs and race gap
 
     fun pbs(ctx: Context): Pbs? = sp(ctx).getString("pbs", null)?.let { Pbs.fromJson(it) }

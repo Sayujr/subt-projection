@@ -879,6 +879,46 @@ object Charts {
         return bmp
     }
 
+    /**
+     * GitHub / Hevy-style year grid: one column per week (Mon-first), one row per weekday,
+     * each square coloured by [colorOf] for that day. Month labels along the top.
+     */
+    fun yearGrid(year: Int, colorOf: (LocalDate) -> Int, w: Int, density: Float, labels: Boolean = true): Bitmap {
+        val first = LocalDate.of(year, 1, 1)
+        val start = first.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+        val last = LocalDate.of(year, 12, 31)
+        val weeks = (java.time.temporal.ChronoUnit.DAYS.between(start, last) / 7 + 1).toInt()
+        val gap = maxOf(1f, w / weeks * 0.14f)
+        val cell = (w - gap * (weeks - 1)) / weeks
+        val top = if (labels) 14f * density else 0f
+        val h = (top + 7 * cell + 6 * gap).toInt() + 2
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        val r = cell * 0.18f
+        var d = start
+        while (!d.isAfter(last)) {
+            if (d.year == year) {
+                val col = (java.time.temporal.ChronoUnit.DAYS.between(start, d) / 7).toInt()
+                val row = d.dayOfWeek.value - 1
+                val x = col * (cell + gap); val y = top + row * (cell + gap)
+                p.color = colorOf(d)
+                c.drawRoundRect(x, y, x + cell, y + cell, r, r, p)
+            }
+            d = d.plusDays(1)
+        }
+        if (labels) {
+            val text = labelPaint(density).apply { textSize = 10f * density; color = 0xFF9AA3B2.toInt() }
+            val f = DateTimeFormatter.ofPattern("MMM", Locale.getDefault())
+            for (m in 1..12) {
+                val md = LocalDate.of(year, m, 1)
+                val col = (java.time.temporal.ChronoUnit.DAYS.between(start, md) / 7).toInt()
+                c.drawText(md.format(f), col * (cell + gap), 10f * density, text)
+            }
+        }
+        return bmp
+    }
+
     private fun signed(v: Int) = if (v > 0) "+$v" else "$v"
 
     private fun shortDate(iso: String): String = try {

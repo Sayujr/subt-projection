@@ -68,6 +68,13 @@ class MainActivity : Activity() {
     private enum class SubtView(val label: String) { PACE("Pace"), ANALYSIS("Analysis"), FORECAST("Sub-3 forecast"), PLAN("Sub-3 plan") }
     private var subtView = SubtView.PACE
     private var powerView = 0
+
+    // Streak calendar
+    private var calendarOpen = false
+    private var calendarMulti = true
+    private var calendarYear = LocalDate.now().year
+    private var histLongLoading = false
+    private var histLongError: String? = null
     private var repsLoading = false
     private var repsError: String? = null
 
@@ -245,7 +252,19 @@ class MainActivity : Activity() {
                 controls.visibility = View.VISIBLE
                 listOf("Dashboard", "Trends", "Zones", "Race model").forEachIndexed { i, l -> chips.addView(chip(l, i == powerView) { powerView = i; show() }) }
             }
-            Tab.STREAKS -> controls.visibility = View.GONE
+            Tab.STREAKS -> {
+                controls.visibility = View.VISIBLE
+                if (!calendarOpen) chips.addView(chip("▦ Calendar", false) { calendarOpen = true; show() })
+                else {
+                    chips.addView(chip("‹ Streaks", false) { calendarOpen = false; show() })
+                    chips.addView(chip("Multi-year", calendarMulti) { calendarMulti = true; show() })
+                    chips.addView(chip("Year", !calendarMulti) { calendarMulti = false; show() })
+                    if (!calendarMulti) {
+                        chips.addView(chip("‹ ${calendarYear - 1}", false) { calendarYear--; show() })
+                        if (calendarYear < LocalDate.now().year) chips.addView(chip("${calendarYear + 1} ›", false) { calendarYear++; show() })
+                    }
+                }
+            }
         }
     }
 
@@ -263,6 +282,23 @@ class MainActivity : Activity() {
                 histLoading = false
                 r.onSuccess { Prefs.saveRaceHistory(this, it) }.onFailure { histError = it.message ?: it.javaClass.simpleName }
                 if (tab == Tab.RACE) drawContent()
+            }
+        }.start()
+    }
+
+    /** Multi-year Fitness history for the calendar: loaded only when the calendar is opened, cached for a day. */
+    private fun loadLongHistory(force: Boolean) {
+        val creds = Prefs.credentials(this) ?: return
+        val cached = Prefs.longHistory(this)
+        if (histLongLoading) return
+        if (!force && cached != null && System.currentTimeMillis() - cached.first < 24 * 3600_000L) return
+        histLongLoading = true; histLongError = null
+        Thread {
+            val r = runCatching { IcuApi(creds).fetchFitnessHistory(LocalDate.now().minusYears(5).withDayOfYear(1).minusDays(130)) }
+            runOnUiThread {
+                histLongLoading = false
+                r.onSuccess { Prefs.saveLongHistory(this, it) }.onFailure { histLongError = it.message ?: it.javaClass.simpleName }
+                if (tab == Tab.STREAKS && calendarOpen) drawContent()
             }
         }.start()
     }
@@ -550,7 +586,13 @@ class MainActivity : Activity() {
                     screens.weekChecklist(col)
                     screens.streakLine(col)
                 }, full)
-                Tab.STREAKS -> content.addView(scrollPage("streaks") { AppScreens(this, wDp) { drawContent() }.streaks(it) }, full)
+                Tab.STREAKS -> if (calendarOpen) {
+                    loadLongHistory(force = false)
+                    content.addView(scrollPage("cal") {
+                        AppScreens(this, wDp) { drawContent() }.streakCalendar(it, Prefs.longHistory(this)?.second, histLongLoading, histLongError,
+                            calendarMulti, calendarYear) { loadLongHistory(force = true); drawContent() }
+                    }, full)
+                } else content.addView(scrollPage("streaks") { AppScreens(this, wDp) { drawContent() }.streaks(it) }, full)
                 Tab.POWER -> content.addView(scrollPage("power$powerView") { AppScreens(this, wDp) { drawContent() }.power(it, powerView) }, full)
                 Tab.RACE -> {
                     loadHistory(force = false)

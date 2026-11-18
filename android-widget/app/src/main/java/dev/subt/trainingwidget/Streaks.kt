@@ -66,11 +66,14 @@ object Streaks {
     private data class RaceRef(val date: LocalDate, val category: String, val name: String)
     private val TT = Regex("(\\bTT\\b|time ?trial|parkrun)", RegexOption.IGNORE_CASE)
 
-    fun compute(ctx: Context): Summary? {
+    /** [longSeries]: optional multi-year Fitness history (for the calendar view); defaults to the cached 12 months. */
+    fun compute(ctx: Context, longSeries: List<Day>? = null): Summary? {
         val s = Prefs.snapshot(ctx) ?: return null
         val band = Prefs.fitnessBand(ctx) / 100.0
         val fatMin = Prefs.fatigueMin(ctx) / 100.0
-        val series = s.days.sortedBy { it.date }
+        // Merge long history with the fresh snapshot (snapshot wins on overlapping days)
+        val series = if (longSeries == null) s.days.sortedBy { it.date } else
+            (longSeries.associateBy { it.date } + s.days.associateBy { it.date }).values.sortedBy { it.date }
         if (series.size < 30) return null
         val races = (Prefs.raceHistory(ctx)?.second.orEmpty().map { RaceRef(LocalDate.parse(it.date), it.category, it.name) } +
             s.races.map { RaceRef(LocalDate.parse(it.date), it.category, it.name) }).distinctBy { it.date }
@@ -80,7 +83,15 @@ object Streaks {
             .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.filter { it !in raceDates }.toSet()
 
         val byDate = series.associateBy { it.date }
-        fun peak(d: LocalDate, days: Long) = series.filter { it.date > d.minusDays(days).toString() && it.date <= d.toString() }.maxOfOrNull { it.ctl }
+        val idx = series.withIndex().associate { it.value.date to it.index }
+        // Peak Fitness over the last [days] days ending at d (walks back from d's index: fast on long histories)
+        fun peak(d: LocalDate, days: Long): Double? {
+            val i = idx[d.toString()] ?: return null
+            val lo = d.minusDays(days).toString()
+            var k = i; var m = Double.NEGATIVE_INFINITY
+            while (k >= 0 && series[k].date > lo) { if (series[k].ctl > m) m = series[k].ctl; k-- }
+            return m.takeIf { it.isFinite() }
+        }
 
         val start = LocalDate.parse(series.first().date).plusDays(60)
         val today = LocalDate.now()
@@ -113,7 +124,7 @@ object Streaks {
                     val fatOk = day.atl >= fatMin * day.ctl
                     val formOk = day.form in -10.0..5.0
                     // Day streak: 3-day average Form, so a single rest or recovery day doesn't break it
-                    val f3 = series.filter { it.date > d.minusDays(3).toString() && it.date <= d.toString() }.map { it.form }.average()
+                    val f3 = (idx[d.toString()]!!).let { i -> (maxOf(0, i - 2)..i).map { series[it].form } }.average()
                     val dailyOk = floorOk && f3 in -15.0..8.0
                     if (!floorOk) notes += "Fitness below floor"
                     if (floorOk && !dailyOk) notes += "3-day Form ${f3.toInt()} outside −15…+8"

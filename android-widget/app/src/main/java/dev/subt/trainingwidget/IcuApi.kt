@@ -307,6 +307,17 @@ class IcuApi(private val creds: Credentials) {
         }
     }
 
+    /** Fitness / Fatigue history from [oldest] to today (for the multi-year calendar). */
+    fun fetchFitnessHistory(oldest: LocalDate, today: LocalDate = LocalDate.now()): List<Day> {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        return getArray("/athlete/$ath/wellness", mapOf("oldest" to oldest.toString(), "newest" to today.toString()))
+            .objects().mapNotNull { o ->
+                val c = o.optNum("ctl") ?: return@mapNotNull null
+                val a = o.optNum("atl") ?: return@mapNotNull null
+                Day(o.optString("id"), c, a)
+            }.sortedBy { it.date }
+    }
+
     /** Sets one wellness field for a day in intervals.icu (used to correct an obviously wrong sleep value). */
     fun updateWellness(date: String, fields: JSONObject) {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
