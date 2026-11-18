@@ -64,7 +64,9 @@ object Streaks {
     }
 
     private data class RaceRef(val date: LocalDate, val category: String, val name: String)
-    private val TT = Regex("(\\bTT\\b|time ?trial|parkrun)", RegexOption.IGNORE_CASE)
+    /** Names that mark a TT / race / CP test: "race", "TT", "time trial", "parkrun", "CP" (but not "race pace"). */
+    val TT = Regex("(\\bTT\\b|time ?trial|parkrun|\\bCP\\b|\\brace\\b(?!\\s*-?\\s*pace))", RegexOption.IGNORE_CASE)
+    fun isTtName(name: String) = TT.containsMatchIn(name)
 
     /** [longSeries]: optional multi-year Fitness history (for the calendar view); defaults to the cached 12 months. */
     fun compute(ctx: Context, longSeries: List<Day>? = null): Summary? {
@@ -79,7 +81,8 @@ object Streaks {
             s.races.map { RaceRef(LocalDate.parse(it.date), it.category, it.name) }).distinctBy { it.date }
         val raceDates = races.map { it.date }.toSet()
         // Scheduled / done time trials (not races) → mini-taper windows
-        val ttDates = (s.week.filter { TT.containsMatchIn(it.name) }.map { it.date } + s.runs.filter { TT.containsMatchIn(it.name) }.map { it.date })
+        val ttDates = (s.week.filter { isTtName(it.name) }.map { it.date } + s.runs.filter { isTtName(it.name) }.map { it.date } +
+            Prefs.ttDates(ctx)?.second.orEmpty())
             .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.filter { it !in raceDates }.toSet()
 
         val byDate = series.associateBy { it.date }

@@ -294,11 +294,15 @@ class MainActivity : Activity() {
         if (!force && cached != null && System.currentTimeMillis() - cached.first < 24 * 3600_000L) return
         histLongLoading = true; histLongError = null
         Thread {
-            val r = runCatching { IcuApi(creds).fetchFitnessHistory(LocalDate.now().minusYears(5).withDayOfYear(1).minusDays(130)) }
+            val from = LocalDate.now().minusYears(5).withDayOfYear(1).minusDays(130)
+            val api = IcuApi(creds)
+            val r = runCatching { api.fetchFitnessHistory(from) }
+            val tts = runCatching { api.fetchTtDates(from) }
             runOnUiThread {
                 histLongLoading = false
                 r.onSuccess { Prefs.saveLongHistory(this, it) }.onFailure { histLongError = it.message ?: it.javaClass.simpleName }
-                if (tab == Tab.STREAKS && calendarOpen) drawContent()
+                tts.onSuccess { Prefs.saveTtDates(this, it) }
+                if (tab == Tab.STREAKS) drawContent()
             }
         }.start()
     }
@@ -586,7 +590,7 @@ class MainActivity : Activity() {
                     screens.weekChecklist(col)
                     screens.streakLine(col)
                 }, full)
-                Tab.STREAKS -> if (calendarOpen) {
+                Tab.STREAKS -> if (calendarOpen || run { loadLongHistory(force = false); false }) {
                     loadLongHistory(force = false)
                     content.addView(scrollPage("cal") {
                         AppScreens(this, wDp) { drawContent() }.streakCalendar(it, Prefs.longHistory(this)?.second, histLongLoading, histLongError,

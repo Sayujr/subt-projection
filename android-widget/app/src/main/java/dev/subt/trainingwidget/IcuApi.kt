@@ -307,6 +307,22 @@ class IcuApi(private val creds: Credentials) {
         }
     }
 
+    /** Dates of activities whose name marks a TT / race / CP test, from [oldest] to today (fetched a year at a time). */
+    fun fetchTtDates(oldest: LocalDate, today: LocalDate = LocalDate.now()): List<String> {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val out = mutableListOf<String>()
+        var from = oldest
+        while (!from.isAfter(today)) {
+            val to = minOf(from.plusYears(1).minusDays(1), today)
+            runCatching {
+                getArray("/athlete/$ath/activities", mapOf("oldest" to from.toString(), "newest" to to.plusDays(1).toString()))
+                    .objects().filter { Streaks.isTtName(it.optString("name")) }.forEach { out += date(it) }
+            }
+            from = to.plusDays(1)
+        }
+        return out.distinct().sorted()
+    }
+
     /** Fitness / Fatigue history from [oldest] to today (for the multi-year calendar). */
     fun fetchFitnessHistory(oldest: LocalDate, today: LocalDate = LocalDate.now()): List<Day> {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")

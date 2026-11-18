@@ -110,6 +110,12 @@ object Prefs {
         sp(ctx).edit().putString("long_history", org.json.JSONObject().put("t", System.currentTimeMillis()).put("d", a).toString()).apply()
     }
 
+    fun ttDates(ctx: Context): Pair<Long, List<String>>? = sp(ctx).getString("tt_dates", null)?.let {
+        runCatching { val o = org.json.JSONObject(it); val a = o.getJSONArray("d"); o.getLong("t") to (0 until a.length()).map { i -> a.getString(i) } }.getOrNull()
+    }
+    fun saveTtDates(ctx: Context, d: List<String>) =
+        sp(ctx).edit().putString("tt_dates", org.json.JSONObject().put("t", System.currentTimeMillis()).put("d", org.json.JSONArray(d)).toString()).apply()
+
     // ---- PBs and race gap
 
     fun pbs(ctx: Context): Pbs? = sp(ctx).getString("pbs", null)?.let { Pbs.fromJson(it) }
