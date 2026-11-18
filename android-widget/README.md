@@ -1,14 +1,29 @@
 # Training Today: Android widget for intervals.icu
 
-![Widget previews (sample data): full, full large, trends, workouts](preview.png)
+![Widget previews (sample data): Full, Full with Fitness+Fatigue / Form, Full large, Trends, Compact, Workouts](preview.png)
 
-Three widgets that share one intervals.icu connection. You pick them from the widget picker:
+Four widgets that share one intervals.icu connection. You pick them from the widget picker:
 
 | Widget | Default size | What it shows |
 |---|---|---|
-| **Training Today · Full** | 4×3 (resize from about 4×2 up) | Today's workouts above three tiles for Fitness, Fatigue and Form, each with its own trend line. At about 4×4 or bigger it switches to a large layout: up to 8 workouts above one big combined chart (like Trends) with date and value labels. It lists more workouts as you make it taller. |
-| **Training Today · Trends** | 4×2 (3×2 and up) | One chart only: Fitness (filled blue) and Fatigue (purple) on top, Form underneath on its own scale with zone colouring, and today's three numbers above. Faint lines mark each week. |
-| **Training Today · Workouts** | 4×1 (any size) | A compact list. At 1 row tall you see only the top workout, and you scroll for the rest. Workouts still to do come first, then completed ones. `+2 ↓` tells you how many more there are. |
+| **Training Today · Full** | 4×3 | Today's workouts with graphs underneath. Make it taller to list more workouts. |
+| **Training Today · Trends** | 4×2 | Graphs only, with today's numbers. |
+| **Training Today · Compact** | 4×2 | A one-row workout strip you can scroll, with the trend chart underneath. Workouts still to do come first. |
+| **Training Today · Workouts** | 4×1 | A compact list you can scroll. At 1 row tall you see only the top workout. `+2 ↓` tells you how many more there are. |
+
+### Per-widget settings
+
+Long-press a widget and tap the **pencil (Settings)**. You can choose:
+
+- **Graphs**
+  - **Automatic** (the default): Full shows three graphs, and all-in-one at about 4×4 or bigger. Trends and Compact show all-in-one.
+  - **Three separate graphs**
+  - **Fitness + Fatigue together, Form separate**
+  - **All three in one chart:** Fitness and Fatigue on top, zone-coloured Form below. When the chart is tall enough it adds date and value labels.
+- **Time period shown:** 2 weeks, 4 weeks, **6 weeks (default)**, 3 months, 6 months or 1 year.
+  The 7-day change and today's numbers stay the same whatever period you choose.
+
+Each widget keeps its own settings, so you can place two Trends widgets, for example one showing 6 weeks and one showing 1 year.
 
 **Workouts:** `○` planned, `★` race, `✓` done. Each row shows duration and training load.
 
@@ -26,7 +41,7 @@ or tap charts to open the fitness page.
 1. On your phone, open the **Releases** page of this repo and download `training-widget.apk` from
    *Training Today widget (latest build)*.
 2. Open the file. Allow your browser or file manager to install unknown apps when Android asks.
-3. Long-press your home screen, choose **Widgets** > **Training Today**, and drag out the widget you want: Full, Trends or Workouts.
+3. Long-press your home screen, choose **Widgets** > **Training Today**, and drag out the widget you want: Full, Trends, Compact or Workouts.
    You can add several, and they all share the same login.
 4. Enter your **Athlete ID** and **API key**. You can find both on intervals.icu under **Settings** > **Developer Settings**.
    Tap **Test and save**.
@@ -38,5 +53,9 @@ The key is stored only on the phone and is sent only to `intervals.icu`.
 GitHub Actions (`.github/workflows/android-widget.yml`) builds the APK on every push that changes `android-widget/`.
 To build locally, open this folder in Android Studio, or run `./gradlew assembleDebug`.
 
-Builds are signed with a debug key, and each CI run generates a new one. If Android refuses to install an update over
-an older copy, uninstall the old app first.
+Every build is signed with the same key, `keystore/training-widget.jks`, and gets a higher version number, so a new APK
+installs as an update. Your placed widgets and settings stay in place.
+
+The repository is public, so anyone can read this key. It stops being a protection only if you install an APK from
+somewhere other than this repo's release page. For stronger protection, move the keystore and its password into GitHub
+Actions secrets.

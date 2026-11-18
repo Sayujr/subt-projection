@@ -128,23 +128,84 @@ object Charts {
         return bmp
     }
 
+    /** Grid spacing in days for the chart length: weekly up to ~2 months, fortnightly, then monthly. */
+    private fun gridStep(n: Int) = when {
+        n <= 60 -> 7
+        n <= 130 -> 14
+        else -> 30
+    }
+
+    private fun labelPaint(density: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = LABEL
+        textSize = 9f * density
+    }
+
+    /** Vertical grid lines counting back from today; dates along the bottom when [labels]. */
+    private fun drawGrid(c: Canvas, f: Frame, days: List<Day>, chartBottom: Float, h: Int, w: Int, density: Float, labels: Boolean) {
+        val grid = Paint().apply { color = GRID; strokeWidth = 1f }
+        val text = labelPaint(density)
+        val step = gridStep(days.size)
+        var lastLeft = Float.MAX_VALUE
+        var i = days.lastIndex - step
+        while (i > 0) {
+            val x = f.x(i)
+            c.drawLine(x, 0f, x, chartBottom, grid)
+            if (labels) {
+                val label = shortDate(days[i].date)
+                val tw = text.measureText(label)
+                val left = x - tw / 2
+                // walking right-to-left: skip labels that would collide with the previous one or the edges
+                if (left > 0 && x + tw / 2 < w && x + tw / 2 + 4f * density < lastLeft) {
+                    c.drawText(label, left, h - 2f * density, text)
+                    lastLeft = left
+                }
+            }
+            i -= step
+        }
+    }
+
+    /** Fitness (filled) + Fatigue (line) on a shared scale inside [r]. */
+    private fun drawFitFat(c: Canvas, r: RectF, days: List<Day>, density: Float, bg: Int, labels: Boolean): Frame {
+        val ctl = days.map { it.ctl }
+        val atl = days.map { it.atl }
+        val f = Frame(r, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
+        drawFilledLine(c, f, ctl, FormColors.FITNESS, density, bg)
+        c.drawPath(pathOf(f, atl), stroke(FormColors.FATIGUE, density, 1.5f))
+        dot(c, f.x(atl.lastIndex), f.y(atl.last()), FormColors.FATIGUE, density, bg)
+        if (labels) {
+            val text = labelPaint(density)
+            c.drawText("${max(ctl.max(), atl.max()).roundToInt()}", r.left + 2f * density, r.top + 9f * density, text)
+            c.drawText("${min(ctl.min(), atl.min()).roundToInt()}", r.left + 2f * density, r.bottom - 2f * density, text)
+        }
+        return f
+    }
+
+    /** Fitness and Fatigue together in one chart (used when Form is shown separately). */
+    fun fitFat(days: List<Day>, w: Int, h: Int, density: Float, bg: Int, labels: Boolean = false): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        if (days.size < 2) return bmp
+        val c = Canvas(bmp)
+        val axisH = if (labels) 13f * density else 0f
+        val r = RectF(0f, 0f, w.toFloat(), h - axisH)
+        val ctl = days.map { it.ctl }
+        val atl = days.map { it.atl }
+        val gridFrame = Frame(r, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
+        drawGrid(c, gridFrame, days, r.bottom, h, w, density, labels)
+        drawFitFat(c, r, days, density, bg, labels)
+        return bmp
+    }
+
     /**
      * All three in one: Fitness (filled blue) and Fatigue (purple) share the top panel,
      * Form with its zone colouring sits underneath on its own scale.
-     * With [labels], weekly date ticks run along the bottom and the panels get value labels.
+     * With [labels], date ticks run along the bottom and the panels get value labels.
      */
     fun combined(days: List<Day>, w: Int, h: Int, density: Float, bg: Int, labels: Boolean = false): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         if (days.size < 2) return bmp
         val c = Canvas(bmp)
-        val ctl = days.map { it.ctl }
-        val atl = days.map { it.atl }
         val form = days.map { it.form }
 
-        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = LABEL
-            textSize = 9f * density
-        }
         val axisH = if (labels) 13f * density else 0f
         val chartH = h - axisH
         val gap = 6f * density
@@ -152,38 +213,17 @@ object Charts {
         val top = RectF(0f, 0f, w.toFloat(), topH)
         val bottom = RectF(0f, topH + gap, w.toFloat(), chartH)
 
-        val ft = Frame(top, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
-
-        // Weekly grid lines counting back from today, with dates underneath
-        val grid = Paint().apply { color = GRID; strokeWidth = 1f }
-        var i = days.lastIndex - 7
-        while (i > 0) {
-            val x = ft.x(i)
-            c.drawLine(x, 0f, x, chartH, grid)
-            if (labels) {
-                val label = shortDate(days[i].date)
-                val tw = text.measureText(label)
-                if (x - tw / 2 > 0 && x + tw / 2 < w) c.drawText(label, x - tw / 2, h - 2f * density, text)
-            }
-            i -= 7
-        }
-
-        drawFilledLine(c, ft, ctl, FormColors.FITNESS, density, bg)
-        c.drawPath(pathOf(ft, atl), stroke(FormColors.FATIGUE, density, 1.5f))
-        dot(c, ft.x(atl.lastIndex), ft.y(atl.last()), FormColors.FATIGUE, density, bg)
-
+        val ctl = days.map { it.ctl }
+        val atl = days.map { it.atl }
+        val gridFrame = Frame(top, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
+        drawGrid(c, gridFrame, days, chartH, h, w, density, labels)
+        drawFitFat(c, top, days, density, bg, labels)
         drawForm(c, bottom, form, density, bg)
 
         if (labels) {
-            // Range of the Fitness/Fatigue panel, and the Form panel's extremes
-            val hiV = max(ctl.max(), atl.max()).roundToInt()
-            val loV = min(ctl.min(), atl.min()).roundToInt()
-            c.drawText("$hiV", 2f * density, top.top + 9f * density, text)
-            c.drawText("$loV", 2f * density, top.bottom - 2f * density, text)
-            val fHi = form.max().roundToInt()
-            val fLo = form.min().roundToInt()
-            c.drawText(signed(fHi), 2f * density, bottom.top + 9f * density, text)
-            c.drawText(signed(fLo), 2f * density, bottom.bottom - 2f * density, text)
+            val text = labelPaint(density)
+            c.drawText(signed(form.max().roundToInt()), 2f * density, bottom.top + 9f * density, text)
+            c.drawText(signed(form.min().roundToInt()), 2f * density, bottom.bottom - 2f * density, text)
         }
         return bmp
     }

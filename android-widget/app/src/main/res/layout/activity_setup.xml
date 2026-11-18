@@ -72,6 +72,63 @@
             android:textColorHint="@color/text_faint" />
 
         <TextView
+            android:id="@+id/widget_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:lineSpacingExtra="3dp"
+            android:text="To change a widget\'s graph style or time period, long-press the widget and tap the pencil (Settings)."
+            android:textColor="@color/text_faint"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/widget_section"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:fontFamily="sans-serif-medium"
+                android:text="This widget"
+                android:textColor="@color/text"
+                android:textSize="18sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Graphs"
+                android:textColor="@color/text_dim"
+                android:textSize="13sp" />
+
+            <RadioGroup
+                android:id="@+id/style_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Time period shown"
+                android:textColor="@color/text_dim"
+                android:textSize="13sp" />
+
+            <RadioGroup
+                android:id="@+id/period_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
+        </LinearLayout>
+
+        <TextView
             android:id="@+id/status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -87,7 +144,7 @@
             android:layout_marginTop="12dp"
             android:background="@drawable/button_bg"
             android:fontFamily="sans-serif-medium"
-            android:text="Test and save"
+            android:text="Save"
             android:textAllCaps="false"
             android:textColor="#FF0B1220"
             android:textSize="16sp" />

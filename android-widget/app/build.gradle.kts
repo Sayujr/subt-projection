@@ -11,12 +11,29 @@ android {
         applicationId = "dev.subt.trainingwidget"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // CI run number, so every build is a newer version that installs over the last one
+        val build = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        versionCode = build
+        versionName = "1.$build"
+    }
+
+    // One fixed key for every build, so updates install over the existing app
+    // (keeping placed widgets and settings) instead of needing an uninstall.
+    signingConfigs {
+        create("stable") {
+            storeFile = rootProject.file("keystore/training-widget.jks")
+            storePassword = "trainingwidget"
+            keyAlias = "trainingwidget"
+            keyPassword = "trainingwidget"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("stable")
+        }
         release {
+            signingConfig = signingConfigs.getByName("stable")
             isMinifyEnabled = false
         }
     }

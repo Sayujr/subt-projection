@@ -81,3 +81,22 @@ enum class FormZone(val label: String, val lower: Double, val upper: Double, val
         fun of(form: Double): FormZone = entries.first { form < it.upper }
     }
 }
+
+/** How a widget lays out its Fitness / Fatigue / Form graphs. AUTO keeps each widget's original look. */
+enum class GraphStyle { AUTO, THREE, TWO, ONE }
+
+/** Selectable graph time periods (days). 42 is the default. */
+object Periods {
+    const val DEFAULT = 42
+    val ALL = listOf(14, 28, 42, 90, 180, 365)
+
+    fun label(days: Int): String = when (days) {
+        14 -> "2 weeks"
+        28 -> "4 weeks"
+        42 -> "6 weeks"
+        90 -> "3 months"
+        180 -> "6 months"
+        365 -> "1 year"
+        else -> "$days days"
+    }
+}

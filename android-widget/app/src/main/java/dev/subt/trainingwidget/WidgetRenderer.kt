@@ -37,11 +37,14 @@ object WidgetRenderer {
         val isToday get() = snap?.today == today.toString()
     }
 
+    private enum class OneVariant { TILE, PLAIN, SLIM }
+
     // ---------------------------------------------------------------- all widgets
 
     private val providers = listOf(
         TrainingWidgetProvider::class.java,
         TrendWidgetProvider::class.java,
+        CompactWidgetProvider::class.java,
         WorkoutsWidgetProvider::class.java,
     )
 
@@ -50,13 +53,18 @@ object WidgetRenderer {
         return providers.flatMap { mgr.getAppWidgetIds(ComponentName(ctx, it)).toList() }
     }
 
+    private fun ids(ctx: Context, mgr: AppWidgetManager, cls: Class<*>) = mgr.getAppWidgetIds(ComponentName(ctx, cls))
+
     fun renderAll(ctx: Context) {
         val mgr = AppWidgetManager.getInstance(ctx)
-        mgr.getAppWidgetIds(ComponentName(ctx, TrainingWidgetProvider::class.java)).forEach { renderFull(ctx, mgr, it) }
-        mgr.getAppWidgetIds(ComponentName(ctx, TrendWidgetProvider::class.java)).forEach { renderTrend(ctx, mgr, it) }
-        val listIds = mgr.getAppWidgetIds(ComponentName(ctx, WorkoutsWidgetProvider::class.java))
-        listIds.forEach { renderWorkouts(ctx, mgr, it) }
-        if (listIds.isNotEmpty()) mgr.notifyAppWidgetViewDataChanged(listIds, R.id.workout_list)
+        ids(ctx, mgr, TrainingWidgetProvider::class.java).forEach { renderFull(ctx, mgr, it) }
+        ids(ctx, mgr, TrendWidgetProvider::class.java).forEach { renderTrend(ctx, mgr, it) }
+        val compact = ids(ctx, mgr, CompactWidgetProvider::class.java)
+        compact.forEach { renderCompact(ctx, mgr, it) }
+        val list = ids(ctx, mgr, WorkoutsWidgetProvider::class.java)
+        list.forEach { renderWorkouts(ctx, mgr, it) }
+        val withList = compact + list
+        if (withList.isNotEmpty()) mgr.notifyAppWidgetViewDataChanged(withList, R.id.workout_list)
     }
 
     private fun sizeDp(mgr: AppWidgetManager, id: Int, defW: Int, defH: Int): Pair<Int, Int> {
@@ -66,13 +74,20 @@ object WidgetRenderer {
         return w to h
     }
 
-    // ---------------------------------------------------------------- full widget
+    /** What AUTO means for each widget: the look each one shipped with. */
+    fun autoStyleDescription(providerClass: String?): String = when (providerClass) {
+        TrainingWidgetProvider::class.java.name -> "Three graphs; all in one at 4×4 and bigger"
+        else -> "All in one chart"
+    }
+
+    // ---------------------------------------------------------------- Full: workouts + graphs
 
     fun renderFull(ctx: Context, mgr: AppWidgetManager, id: Int) {
         val s = State(ctx)
-        val (widthDp, heightDp) = sizeDp(mgr, id, 300, 200)
+        val (widthDp, heightDp) = sizeDp(mgr, id, 300, 250)
         val large = heightDp >= 360 // roughly 4×4 and up
-        val views = RemoteViews(ctx.packageName, if (large) R.layout.widget_training_large else R.layout.widget_training)
+        val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) (if (large) GraphStyle.ONE else GraphStyle.THREE) else it }
+        val views = RemoteViews(ctx.packageName, R.layout.widget_full)
 
         views.setTextViewText(R.id.title, titleText(s.today))
         views.setTextViewText(R.id.updated, updatedText(ctx, s))
@@ -81,15 +96,17 @@ object WidgetRenderer {
             views.setOnClickPendingIntent(R.id.root, setupIntent(ctx))
         } else {
             views.setOnClickPendingIntent(R.id.workouts, browser(ctx, 11, CALENDAR_URL))
-            views.setOnClickPendingIntent(R.id.metrics, browser(ctx, 12, FITNESS_URL))
+            views.setOnClickPendingIntent(R.id.graphs, browser(ctx, 12, FITNESS_URL))
         }
 
-        // Workouts. Small layout: rows fill the space above the tiles (~22dp each).
-        // Large layout: up to ~40% of the height, the combined chart takes the rest.
+        // Height left after padding (24), header (28) and margins (14), shared by workout rows (22dp each) and graphs
+        val available = heightDp - 66
+        val minGraphs = if (style == GraphStyle.ONE) 130 else 92
+        val rowsCap = if (large) (heightDp * 0.4 / 22).toInt() else 12
+        val maxRows = minOf((available - minGraphs) / 22, rowsCap).coerceIn(1, 12)
+
         views.removeAllViews(R.id.workouts)
-        val maxRows = if (large) (heightDp * 0.4 / 22).toInt().coerceIn(2, 8)
-        else ((heightDp - 150) / 22).coerceIn(1, 12)
-        var rowsShown = 1
+        var rows = 1
         val msg = workoutMessage(s)
         if (msg != null) {
             views.addView(R.id.workouts, message(ctx, msg))
@@ -98,77 +115,73 @@ object WidgetRenderer {
             val shown = if (list.size > maxRows) list.take(maxRows - 1) else list
             shown.forEach { views.addView(R.id.workouts, row(ctx, it)) }
             if (shown.size < list.size) views.addView(R.id.workouts, message(ctx, "+${list.size - shown.size} more"))
-            rowsShown = minOf(list.size, maxRows)
+            rows = minOf(list.size, maxRows)
         }
 
-        val days = s.snap?.days.orEmpty()
-        if (days.isNotEmpty()) {
-            val density = ctx.resources.displayMetrics.density
-            setNumbers(views, days)
-            if (large) {
-                // padding 24, header 28, rows, margins 14, tile padding 20, numbers 46, chart margin 6
-                val chartHdp = (heightDp - 138 - rowsShown * 22).coerceAtLeast(60)
-                val wPx = ((widthDp - 44).coerceAtLeast(60) * density).roundToInt()
-                val hPx = (chartHdp * density).roundToInt()
-                views.setImageViewBitmap(
-                    R.id.trend_chart,
-                    Charts.combined(days, wPx, hPx, density, TILE_BG, labels = chartHdp >= 110)
-                )
-            } else {
-                val chartWdp = ((widthDp - 24 - 12) / 3 - 18).coerceAtLeast(40)
-                val wPx = (chartWdp * density).roundToInt()
-                val hPx = (34 * density).roundToInt()
-                views.setImageViewBitmap(R.id.ctl_chart, Charts.line(days.map { it.ctl }, FormColors.FITNESS, wPx, hPx, density))
-                views.setImageViewBitmap(R.id.atl_chart, Charts.line(days.map { it.atl }, FormColors.FATIGUE, wPx, hPx, density))
-                views.setImageViewBitmap(R.id.form_chart, Charts.form(days.map { it.form }, wPx, hPx, density))
-            }
-        }
+        views.removeAllViews(R.id.graphs)
+        views.addView(
+            R.id.graphs,
+            graphs(ctx, s, style, OneVariant.TILE, widthDp - 24, available - rows * 22, Prefs.period(ctx, id))
+        )
         mgr.updateAppWidget(id, views)
     }
 
-    // ---------------------------------------------------------------- trends-only widget
+    // ---------------------------------------------------------------- Trends: graphs only
 
     fun renderTrend(ctx: Context, mgr: AppWidgetManager, id: Int) {
         val s = State(ctx)
         val (widthDp, heightDp) = sizeDp(mgr, id, 300, 140)
+        val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) GraphStyle.ONE else it }
+        val period = Prefs.period(ctx, id)
         val views = RemoteViews(ctx.packageName, R.layout.widget_trend)
 
         views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, TrendWidgetProvider::class.java))
         views.setOnClickPendingIntent(R.id.root, if (s.creds == null) setupIntent(ctx) else browser(ctx, 13, FITNESS_URL))
         views.setTextViewText(
             R.id.updated,
-            if (s.creds == null) "Tap to connect intervals.icu" else "42 days · ${updatedText(ctx, s)}"
+            if (s.creds == null) "Tap to connect intervals.icu" else "${Periods.label(period)} · ${updatedText(ctx, s)}"
         )
-
-        val days = s.snap?.days.orEmpty()
-        if (days.isNotEmpty()) {
-            setNumbers(views, days)
-            val density = ctx.resources.displayMetrics.density
-            val wPx = ((widthDp - 24).coerceAtLeast(60) * density).roundToInt()
-            // padding 24 + numbers ~42 + footer ~14 + margin 6
-            val chartHdp = (heightDp - 86).coerceAtLeast(30)
-            val hPx = (chartHdp * density).roundToInt()
-            views.setImageViewBitmap(
-                R.id.trend_chart,
-                Charts.combined(days, wPx, hPx, density, WIDGET_BG, labels = chartHdp >= 110)
-            )
-        }
+        views.removeAllViews(R.id.graphs)
+        views.addView(R.id.graphs, graphs(ctx, s, style, OneVariant.PLAIN, widthDp - 24, heightDp - 42, period))
         mgr.updateAppWidget(id, views)
     }
 
-    // ---------------------------------------------------------------- workouts-only (scrolling) widget
+    // ---------------------------------------------------------------- Compact: scrolling workout strip + graphs
+
+    fun renderCompact(ctx: Context, mgr: AppWidgetManager, id: Int) {
+        val s = State(ctx)
+        val (widthDp, heightDp) = sizeDp(mgr, id, 300, 150)
+        val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) GraphStyle.ONE else it }
+        val views = RemoteViews(ctx.packageName, R.layout.widget_compact)
+
+        views.setTextViewText(R.id.title, titleText(s.today) + (if (s.refreshing) "  ·  updating…" else ""))
+        views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, CompactWidgetProvider::class.java))
+        setupList(ctx, views, s, id)
+        if (s.creds != null) views.setOnClickPendingIntent(R.id.graphs, browser(ctx, 16, FITNESS_URL))
+
+        // padding 18, header 18, list 26, margin 6
+        views.removeAllViews(R.id.graphs)
+        views.addView(R.id.graphs, graphs(ctx, s, style, OneVariant.SLIM, widthDp - 22, heightDp - 68, Prefs.period(ctx, id)))
+        mgr.updateAppWidget(id, views)
+    }
+
+    // ---------------------------------------------------------------- Workouts: scrolling list only
 
     fun renderWorkouts(ctx: Context, mgr: AppWidgetManager, id: Int) {
         val s = State(ctx)
         val views = RemoteViews(ctx.packageName, R.layout.widget_workouts)
         views.setTextViewText(R.id.title, titleText(s.today) + (if (s.refreshing) "  ·  updating…" else ""))
         views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, WorkoutsWidgetProvider::class.java))
+        setupList(ctx, views, s, id)
+        mgr.updateAppWidget(id, views)
+    }
 
+    /** Wires the scrolling workout list used by the Compact and Workouts widgets. */
+    private fun setupList(ctx: Context, views: RemoteViews, s: State, id: Int) {
         val count = if (workoutMessage(s) == null) s.snap!!.workouts.size else 0
         views.setTextViewText(R.id.more, if (count > 1) "+${count - 1} ↓" else "")
 
-        val svc = Intent(ctx, WorkoutListService::class.java)
-            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+        val svc = Intent(ctx, WorkoutListService::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
         svc.data = Uri.parse(svc.toUri(Intent.URI_INTENT_SCHEME))
         @Suppress("DEPRECATION")
         views.setRemoteAdapter(R.id.workout_list, svc)
@@ -182,7 +195,6 @@ object WidgetRenderer {
             views.setOnClickPendingIntent(R.id.workout_empty, browser(ctx, 14, CALENDAR_URL))
             views.setPendingIntentTemplate(R.id.workout_list, browser(ctx, 15, CALENDAR_URL))
         }
-        mgr.updateAppWidget(id, views)
     }
 
     /** Items for the scrolling list: still-to-do first, then completed. */
@@ -190,6 +202,62 @@ object WidgetRenderer {
         val s = State(ctx)
         if (workoutMessage(s) != null) return emptyList()
         return s.snap!!.workouts.sortedBy { it.status == WorkoutStatus.DONE }
+    }
+
+    // ---------------------------------------------------------------- graphs block
+
+    /**
+     * Builds the graphs block for [style] sized to roughly [wDp] × [hDp].
+     * Bitmaps are drawn at the estimated size; ImageViews stretch them to the exact space.
+     */
+    private fun graphs(
+        ctx: Context, s: State, style: GraphStyle, variant: OneVariant, wDp: Int, hDp: Int, period: Int,
+    ): RemoteViews {
+        val layout = when (style) {
+            GraphStyle.THREE -> R.layout.graphs_three
+            GraphStyle.TWO -> R.layout.graphs_two
+            else -> when (variant) {
+                OneVariant.TILE -> R.layout.graphs_one_tile
+                OneVariant.PLAIN -> R.layout.graphs_one_plain
+                OneVariant.SLIM -> R.layout.graphs_one_slim
+            }
+        }
+        val rv = RemoteViews(ctx.packageName, layout)
+        val all = s.snap?.days.orEmpty()
+        if (all.isEmpty()) return rv
+        setNumbers(rv, all)
+
+        val days = all.takeLast(period)
+        val d = ctx.resources.displayMetrics.density
+        fun px(dp: Int) = (dp.coerceAtLeast(20) * d).roundToInt()
+
+        when (style) {
+            GraphStyle.THREE -> {
+                val w = px((wDp - 12) / 3 - 18)
+                val h = px(hDp - 58)
+                rv.setImageViewBitmap(R.id.ctl_chart, Charts.line(days.map { it.ctl }, FormColors.FITNESS, w, h, d))
+                rv.setImageViewBitmap(R.id.atl_chart, Charts.line(days.map { it.atl }, FormColors.FATIGUE, w, h, d))
+                rv.setImageViewBitmap(R.id.form_chart, Charts.form(days.map { it.form }, w, h, d))
+            }
+            GraphStyle.TWO -> {
+                val hDpChart = hDp - 58
+                val h = px(hDpChart)
+                rv.setImageViewBitmap(
+                    R.id.ff_chart,
+                    Charts.fitFat(days, px((wDp - 6) * 2 / 3 - 18), h, d, TILE_BG, labels = hDpChart >= 90)
+                )
+                rv.setImageViewBitmap(R.id.form_chart, Charts.form(days.map { it.form }, px((wDp - 6) / 3 - 18), h, d))
+            }
+            else -> {
+                val (cw, ch, bg) = when (variant) {
+                    OneVariant.TILE -> Triple(wDp - 20, hDp - 72, TILE_BG)
+                    OneVariant.PLAIN -> Triple(wDp, hDp - 48, WIDGET_BG)
+                    OneVariant.SLIM -> Triple(wDp, hDp - 38, WIDGET_BG)
+                }
+                rv.setImageViewBitmap(R.id.trend_chart, Charts.combined(days, px(cw), px(ch), d, bg, labels = ch >= 110))
+            }
+        }
+        return rv
     }
 
     // ---------------------------------------------------------------- shared pieces
@@ -204,6 +272,7 @@ object WidgetRenderer {
     }
 
     private fun setNumbers(views: RemoteViews, days: List<Day>) {
+        // Numbers and 7-day change always use the full history, whatever period the chart shows
         val last = days.last()
         val weekAgo = days.getOrNull(days.size - 8)
         views.setTextViewText(R.id.ctl_value, last.ctl.roundToInt().toString())

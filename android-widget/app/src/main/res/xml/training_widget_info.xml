@@ -8,7 +8,7 @@
     android:targetCellHeight="3"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="0"
-    android:initialLayout="@layout/widget_training"
+    android:initialLayout="@layout/widget_full"
     android:previewImage="@drawable/preview_full"
     android:configure="dev.subt.trainingwidget.SetupActivity"
     android:widgetFeatures="reconfigurable|configuration_optional"

@@ -25,6 +25,10 @@ abstract class BaseWidgetProvider : AppWidgetProvider() {
         render(ctx, mgr, id) // re-draw charts / pick layout for the new size
     }
 
+    override fun onDeleted(ctx: Context, ids: IntArray) {
+        ids.forEach { Prefs.deleteWidget(ctx, it) }
+    }
+
     override fun onEnabled(ctx: Context) = Refresh.schedulePeriodic(ctx)
 
     override fun onDisabled(ctx: Context) {
@@ -54,6 +58,16 @@ class TrainingWidgetProvider : BaseWidgetProvider() {
 /** One combined chart of all three metrics with today's numbers. */
 class TrendWidgetProvider : BaseWidgetProvider() {
     override fun render(ctx: Context, mgr: AppWidgetManager, id: Int) = WidgetRenderer.renderTrend(ctx, mgr, id)
+}
+
+/** Today's workouts as a one-row scrolling strip, with the graphs underneath. */
+class CompactWidgetProvider : BaseWidgetProvider() {
+    override fun render(ctx: Context, mgr: AppWidgetManager, id: Int) = WidgetRenderer.renderCompact(ctx, mgr, id)
+
+    override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
+        super.onUpdate(ctx, mgr, ids)
+        mgr.notifyAppWidgetViewDataChanged(ids, R.id.workout_list)
+    }
 }
 
 /** Compact, scrollable list of today's workouts. */

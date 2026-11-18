@@ -21,7 +21,8 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val creds = Prefs.credentials(ctx)
         if (creds != null) {
             try {
-                Prefs.saveSnapshot(ctx, IcuApi(creds).fetchSnapshot())
+                val history = Prefs.historyNeeded(ctx)
+                Prefs.saveSnapshot(ctx, IcuApi(creds).fetchSnapshot(historyDays = history.toLong()), history)
             } catch (e: AuthException) {
                 Prefs.setError(ctx, "check API key")
             } catch (e: Exception) {
