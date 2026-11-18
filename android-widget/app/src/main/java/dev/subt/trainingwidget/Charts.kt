@@ -680,13 +680,15 @@ object Charts {
     fun raceBuild(
         days: List<Day>, todayIndex: Int, marks: List<Pair<Int, String>>, peakIndex: Int,
         guardrail: Double?, fatigueTarget: Double?, w: Int, h: Int, density: Float, bg: Int,
+        /** Race-morning point (end of the day before the race): marked with dots. */
+        eveIndex: Int? = null,
     ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         if (days.size < 2) return bmp
         val c = Canvas(bmp)
         val text = labelPaint(density).apply { textSize = 10f * density }
         val leftPad = 28f * density
-        val axisH = 15f * density
+        val axisH = 27f * density   // two rows of checkpoint labels
         val gap = 8f * density
         val chartH = h - axisH
         val topR = RectF(leftPad, 14f * density, w.toFloat() - 6f * density, (chartH - gap) * 0.68f)
@@ -725,11 +727,18 @@ object Charts {
             style = Paint.Style.STROKE; strokeWidth = 1f * density; color = 0x669AA3B2
             pathEffect = DashPathEffect(floatArrayOf(3f * density, 3f * density), 0f)
         }
+        var lastRight = -1f
         for ((i, label) in marks) {
             val xx = f.x(i)
-            c.drawLine(xx, topR.top - 2f * density, xx, chartH, markP)
-            val tw = text.measureText(label)
-            c.drawText(label, (xx - tw / 2).coerceIn(leftPad, w - tw), h - 2f * density, text)
+            val isRace = label.startsWith("race")
+            c.drawLine(xx, topR.top - 2f * density, xx, chartH, if (isRace) Paint(markP).apply { color = 0xCCFFC53D.toInt(); pathEffect = null } else markP)
+            val p = if (isRace) Paint(text).apply { color = 0xFFFFC53D.toInt(); isFakeBoldText = true } else text
+            val tw = p.measureText(label)
+            val x0 = (xx - tw / 2).coerceIn(leftPad, w - tw)
+            // Second row when it would overlap the previous label
+            val row2 = x0 < lastRight + 4f * density
+            c.drawText(label, x0, if (row2) h - 2f * density else h - 14f * density, p)
+            if (!row2) lastRight = x0 + tw
         }
         // Today marker
         if (todayIndex in days.indices) {
@@ -757,7 +766,9 @@ object Charts {
             val s = "peak ${ctl[peakIndex].roundToInt()}"
             c.drawText(s, (f.x(peakIndex) - lbl.measureText(s) / 2).coerceIn(leftPad, w - lbl.measureText(s)), f.y(ctl[peakIndex]) - 6f * density, lbl)
         }
-        dot(c, f.x(days.lastIndex), f.y(ctl.last()), FormColors.FITNESS, density, bg)
+        val ei = eveIndex?.takeIf { it in days.indices } ?: days.lastIndex
+        dot(c, f.x(ei), f.y(atl[ei]), FormColors.FATIGUE, density, bg)
+        dot(c, f.x(ei), f.y(ctl[ei]), FormColors.FITNESS, density, bg)
         // Form panel
         drawForm(c, botR, days.map { it.form }, density, bg)
         c.drawText("Form", 0f, botR.centerY() + 3.5f * density, text)

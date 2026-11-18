@@ -220,17 +220,24 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val todayIdx = window.indexOfLast { it.date <= today.toString() }
 
         fun idxFor(dd: LocalDate) = window.indexOfFirst { it.date == dd.toString() }
+        // Chart runs through race day itself; the race-morning values (end of the day before) get dots
+        val chartDays = series.filter { it.date >= start && it.date <= rd.toString() }
+        fun cIdx(dd: LocalDate) = chartDays.indexOfFirst { it.date == dd.toString() }
         val cps = listOf(
-            "12 wk" to rd.minusWeeks(12), "3 wk" to rd.minusWeeks(3), "1 wk" to rd.minusWeeks(1), "race" to eve,
-        ).mapNotNull { (l, dd) -> idxFor(dd).takeIf { it >= 0 }?.let { it to l } }
+            "12 wk" to rd.minusWeeks(12), "3 wk" to rd.minusWeeks(3), "1 wk" to rd.minusWeeks(1),
+            "race ${rd.format(dm)}" to rd,
+        ).mapNotNull { (l, dd) -> cIdx(dd).takeIf { it >= 0 }?.let { it to l } }
+        val chartToday = chartDays.indexOfLast { it.date <= today.toString() }
+        val chartPeak = chartDays.indexOfFirst { it.date == peak.date }
 
         // Build-up chart
         val cc = card(col)
         label(cc, "Fitness build-up · last 3 months")
-        image(cc, Charts.raceBuild(window, todayIdx, cps, peakIdx, floor, fatTarget, chartW(), dp(230), d, TILE), 230)
+        image(cc, Charts.raceBuild(chartDays, chartToday, cps, chartPeak, floor, fatTarget, chartW(), dp(240), d, TILE,
+            eveIndex = cIdx(eve).takeIf { it >= 0 }), 240)
         text(cc, spans(
             "━ Fitness " to FormColors.FITNESS, "(solid = done, dashed = planned)   " to FAINT,
-            "━ Fatigue   " to FormColors.FATIGUE, "┅ fatigue target · fitness floor" to DIM,
+            "━ Fatigue   " to FormColors.FATIGUE, "┅ fatigue target · fitness floor   " to DIM, "● race morning" to TEXT,
         ), 11f, top = 6)
         if (!hasEve) text(cc, "Your plan is projected only 12 weeks ahead, so race-day values appear once the race is within 12 weeks.", 12f, WARN, top = 6)
 
