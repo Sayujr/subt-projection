@@ -308,19 +308,44 @@ class IcuApi(private val creds: Credentials) {
     }
 
     /** Dates of activities whose name marks a TT / race / CP test, from [oldest] to today (fetched a year at a time). */
-    fun fetchTtDates(oldest: LocalDate, today: LocalDate = LocalDate.now()): List<String> {
+    fun fetchTtDates(oldest: LocalDate, today: LocalDate = LocalDate.now()): List<String> = fetchActivityIndex(oldest, today).first
+
+    /** TT / race / CP-test dates plus actual load per day, from [oldest] to today (a year at a time). */
+    fun fetchActivityIndex(oldest: LocalDate, today: LocalDate = LocalDate.now()): Pair<List<String>, Map<String, Int>> {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
-        val out = mutableListOf<String>()
+        val tts = mutableListOf<String>()
+        val loads = mutableMapOf<String, Int>()
         var from = oldest
         while (!from.isAfter(today)) {
             val to = minOf(from.plusYears(1).minusDays(1), today)
             runCatching {
                 getArray("/athlete/$ath/activities", mapOf("oldest" to from.toString(), "newest" to to.plusDays(1).toString()))
-                    .objects().filter { Streaks.isTtName(it.optString("name")) }.forEach { out += date(it) }
+                    .objects().forEach {
+                        val d = date(it)
+                        if (Streaks.isTtName(it.optString("name"))) tts += d
+                        loads[d] = (loads[d] ?: 0) + (it.optNum("icu_training_load") ?: 0.0).toInt()
+                    }
             }
             from = to.plusDays(1)
         }
-        return out.distinct().sorted()
+        return tts.distinct().sorted() to loads
+    }
+
+    /** Planned load per day (WORKOUT and race events) from [oldest] to [until]. */
+    fun fetchPlannedLoads(oldest: LocalDate, until: LocalDate = LocalDate.now().plusDays(7)): Map<String, Int> {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val out = mutableMapOf<String, Int>()
+        var from = oldest
+        while (!from.isAfter(until)) {
+            val to = minOf(from.plusMonths(6).minusDays(1), until)
+            runCatching {
+                getArray("/athlete/$ath/events", mapOf("oldest" to from.toString(), "newest" to to.plusDays(1).toString()))
+                    .objects().filter { val c = it.optString("category"); c == "WORKOUT" || c.startsWith("RACE") }
+                    .forEach { val d = date(it); out[d] = (out[d] ?: 0) + (it.optNum("icu_training_load") ?: 0.0).toInt() }
+            }
+            from = to.plusDays(1)
+        }
+        return out
     }
 
     /** Fitness / Fatigue history from [oldest] to today (for the multi-year calendar). */

@@ -1349,9 +1349,23 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         st.thisWeek?.let { dayDots(top, it.days, LocalDate.now()) }
         text(top, "Day streak ${st.dayStreak} · best ${st.bestDayStreak}", 12f, FAINT, top = 6)
 
+        // Calibrate (up front)
+        val cal = card(col)
+        label(cal, "Calibrate")
+        val band = Prefs.fitnessBand(a); val fat = Prefs.fatigueMin(a); val tol = Prefs.planTolerance(a)
+        text(cal, "Fitness floor: stay within this % of your reference peak", 12.5f, FAINT, top = 4)
+        chipRow(cal, listOf(5, 10, 15, 20).map { "$it%" }, listOf(5, 10, 15, 20).indexOf(band)) { Prefs.setFitnessBand(a, listOf(5, 10, 15, 20)[it]); onChange() }
+        text(cal, "Fatigue: weekly average at least this % of Fitness", 12.5f, FAINT, top = 8)
+        chipRow(cal, listOf(90, 95, 100, 105).map { "$it%" }, listOf(90, 95, 100, 105).indexOf(fat)) { Prefs.setFatigueMin(a, listOf(90, 95, 100, 105)[it]); onChange() }
+        text(cal, "On-plan weeks count (build blocks): actual load within ± of planned", 12.5f, FAINT, top = 8)
+        chipRow(cal, listOf(0, 10, 15, 20).map { if (it == 0) "Off" else "±$it%" }, listOf(0, 10, 15, 20).indexOf(tol)) { Prefs.setPlanTolerance(a, listOf(0, 10, 15, 20)[it]); onChange() }
+        if (Prefs.loadIndex(a) == null) text(cal, "Loading your planned vs actual load history…", 11.5f, FAINT, top = 4)
+
         streakInsights(col, st)
-        streakHistory(col, "Week streaks", st.weekRuns, st.weeks.firstOrNull()?.monday, "weeks")
-        streakHistory(col, "Month streaks", st.monthRuns, st.months.firstOrNull()?.month, "months")
+        streakHistory(col, "Week streaks", st.weekRuns, st.weeks.firstOrNull()?.monday, "weeks",
+            periods = st.weeks.filter { it.complete }.map { Triple(it.monday, it.monday.plusDays(6), it.passed) })
+        streakHistory(col, "Month streaks", st.monthRuns, st.months.firstOrNull()?.month, "months",
+            periods = st.months.filter { it.passed != null }.map { Triple(it.month, it.month.plusMonths(1).minusDays(1), it.passed) })
 
         // Week by week (collapsed)
         val wc = collapsible(col, "Week by week")
@@ -1371,6 +1385,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 w.avgRatio?.let { "Fatigue ${(it * 100).roundToInt()}% of Fitness" },
                 if (w.exitCtl != null && w.floor != null) "exit Fitness ${w.exitCtl.roundToInt()} (floor ${w.floor.roundToInt()})" else null,
                 w.exitForm?.let { "exit Form ${signed(it.roundToInt())}" },
+                if (w.planned != null && w.actual != null && w.planned > 0) "load ${w.actual}/${w.planned} planned (${(w.actual * 100 / w.planned)}%)" else null,
             )
             text(wc, facts.joinToString(" · "), 11.5f, FAINT, top = 2)
             if (w.reasons.isNotEmpty() && w.passed == false) text(wc, w.reasons.joinToString(" · "), 11.5f, WARN, top = 1)
@@ -1387,6 +1402,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 if (m.entryCtl != null && m.exitCtl != null) "Fitness ${m.entryCtl.roundToInt()} → ${m.exitCtl.roundToInt()} (${if (m.exitCtl >= m.entryCtl) "+" else "−"}${abs1((m.exitCtl / m.entryCtl - 1) * 100).roundToInt()}%)" else null,
                 "${m.failedWeeks} week${if (m.failedWeeks == 1) "" else "s"} failed",
                 if (m.hadRace) "race month" else null,
+                if (m.onPlan) "on plan" else null,
             )
             text(mc, parts.joinToString(" · "), 11.5f, FAINT, top = 0)
         }
@@ -1395,16 +1411,14 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         streakHistory(dc, "Day streaks", st.dayRuns, st.days.firstOrNull()?.date, "days", inCard = false)
 
         // Rules & settings (collapsed)
-        val rules = collapsible(col, "Rules & settings")
-        val band = Prefs.fitnessBand(a); val fat = Prefs.fatigueMin(a)
+        val rules = collapsible(col, "Rules")
         text(rules, spans("Week (Mon–Sun) passes when:" to TEXT), 14f, bold = true, top = 8)
         text(rules, "• average Form across the week is in the Grey zone (−10 to +5)\n" +
             "• average Fatigue is at least $fat% of average Fitness\n" +
             "• you exit the week (Sunday) with Fitness within $band% of your reference peak and Form in the Grey zone (unless Sunday is a TT or race)", 13.5f, DIM, top = 2)
-        chipRow(rules, listOf(5, 10, 15, 20).map { "Fitness within $it%" }, listOf(5, 10, 15, 20).indexOf(band)) { Prefs.setFitnessBand(a, listOf(5, 10, 15, 20)[it]); onChange() }
-        chipRow(rules, listOf(90, 95, 100, 105).map { "Fatigue ≥ $it%" }, listOf(90, 95, 100, 105).indexOf(fat)) { Prefs.setFatigueMin(a, listOf(90, 95, 100, 105)[it]); onChange() }
+        text(rules, "• or it was run on plan: actual load within ±$tol% of planned, average Form no deeper than −30 and exit Fitness above the floor. That lets deliberate build weeks count", 13.5f, DIM, top = 2)
         text(rules, spans("Month passes when:" to TEXT), 14f, bold = true, top = 12)
-        text(rules, "• average Form is −12 to +5\n• exit Fitness is at least 97% of entry (90% in a race month)\n• no more than one week failed", 13.5f, DIM, top = 2)
+        text(rules, "• average Form is −12 to +5, or down to −30 if the month's load was on plan (a build month)\n• exit Fitness is at least 97% of entry (90% in a race month)\n• no more than one week failed", 13.5f, DIM, top = 2)
         text(rules, spans("Day streak (relaxed) passes when:" to TEXT), 14f, bold = true, top = 12)
         text(rules, "• Fitness stays within $band% of your reference peak\n• the 3-day average Form is −15 to +8, so one rest or recovery day is fine\n• TT, taper and race days pass if the floor holds", 13.5f, DIM, top = 2)
         text(rules, spans("Lighter rules:" to TEXT), 14f, bold = true, top = 12)
@@ -1439,6 +1453,9 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 bullet(c, DIM, "Your best was ${best.length} weeks (${best.start.format(dm)} – ${best.end.format(dm)} ${best.end.year}). You're ${st.bestWeekStreak - st.weekStreak} away from matching it.")
             }
         }
+
+        val onPlanWeeks = done.count { it.kind == "on-plan build week" }
+        if (onPlanWeeks > 0) bullet(c, 0xFF5EC8FF.toInt(), "$onPlanWeeks week${if (onPlanWeeks == 1) "" else "s"} passed on plan: Form deliberately below Grey in a build, with load within ±${Prefs.planTolerance(a)}% of planned.")
 
         // 2) Pattern / reflection
         text(c, "Pattern", 14f, TEXT, bold = true, top = 12)
@@ -1489,12 +1506,13 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         actions.forEach { (col2, t) -> bullet(c, col2, t) }
     }
 
-    private fun streakHistory(col: LinearLayout, title: String, runs: List<Streaks.Run>, from: LocalDate?, unit: String, inCard: Boolean = true) {
+    private fun streakHistory(col: LinearLayout, title: String, runs: List<Streaks.Run>, from: LocalDate?, unit: String, inCard: Boolean = true,
+        periods: List<Triple<LocalDate, LocalDate, Boolean?>> = emptyList()) {
         val c = if (inCard) card(col) else col
         if (inCard) label(c, "History · $title")
         if (runs.isEmpty() || from == null) { text(c, "No completed $unit yet.", 13.5f, DIM, top = 4); return }
         val today = LocalDate.now()
-        image(c, Charts.streakTimeline(runs, from, today, "$unit · green = streak, red = broken", chartW(), dp(64), d), 64)
+        image(c, Charts.streakTimeline(runs, from, today, "$unit · green streak · red failed · blue race/taper", chartW(), dp(64), d, periods), 64)
         val current = runs.lastOrNull()?.takeIf { it.brokenOn == null }?.length ?: 0
         val longest = runs.maxBy { it.length }
         val avg = runs.filter { it.brokenOn != null }.map { it.length }.takeIf { it.isNotEmpty() }?.average()

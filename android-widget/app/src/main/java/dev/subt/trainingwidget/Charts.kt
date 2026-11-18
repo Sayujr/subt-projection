@@ -847,14 +847,24 @@ object Charts {
     }
 
     /** Streaks on a time line: green bars for each run (labelled with its length when there's room), red ticks where one broke. */
-    fun streakTimeline(runs: List<Streaks.Run>, start: LocalDate, end: LocalDate, unit: String, w: Int, h: Int, density: Float): Bitmap {
+    fun streakTimeline(
+        runs: List<Streaks.Run>, start: LocalDate, end: LocalDate, unit: String, w: Int, h: Int, density: Float,
+        /** Every period (start, end, passed?) so failed and not-judged ones are coloured too, not left blank. */
+        periods: List<Triple<LocalDate, LocalDate, Boolean?>> = emptyList(),
+    ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val text = labelPaint(density).apply { textSize = 10f * density }
         val span = java.time.temporal.ChronoUnit.DAYS.between(start, end).toFloat().coerceAtLeast(1f)
         fun x(d: LocalDate) = (java.time.temporal.ChronoUnit.DAYS.between(start, d) / span * (w - 4f * density) + 2f * density)
         val laneTop = 16f * density; val laneBottom = h - 18f * density
-        c.drawRoundRect(0f, laneTop, w.toFloat(), laneBottom, 4f * density, 4f * density, Paint().apply { color = 0xFF2C3240.toInt() })
+        c.drawRoundRect(0f, laneTop, w.toFloat(), laneBottom, 4f * density, 4f * density, Paint().apply { color = 0xFF262B36.toInt() })
+        val failP = Paint().apply { color = 0x66FF7A7A }
+        val skipP = Paint().apply { color = 0x665EC8FF }
+        for ((ps, pe, ok) in periods) {
+            if (ok == true) continue
+            c.drawRect(x(ps), laneTop, maxOf(x(pe.plusDays(1)), x(ps) + 1f), laneBottom, if (ok == null) skipP else failP)
+        }
         val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC3DD68C.toInt() }
         val live = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3DD68C.toInt() }
         val brk = Paint().apply { color = 0xFFFF7A7A.toInt(); strokeWidth = 2f * density }

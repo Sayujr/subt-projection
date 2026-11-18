@@ -30,10 +30,14 @@ object Streaks {
         val monday: LocalDate, val days: List<DayResult>, val passed: Boolean?, val green: Int, val complete: Boolean,
         val avgForm: Double?, val avgRatio: Double?, val exitCtl: Double?, val exitForm: Double?, val floor: Double?,
         val kind: String, val reasons: List<String>,
-    )
+        val planned: Int? = null, val actual: Int? = null,
+    ) {
+        val adherence: Double? get() = if (planned != null && actual != null && planned > 0) actual.toDouble() / planned else null
+    }
     data class MonthResult(
         val month: LocalDate, val weeks: List<WeekResult>, val passed: Boolean?,
         val avgForm: Double?, val entryCtl: Double?, val exitCtl: Double?, val failedWeeks: Int, val hadRace: Boolean,
+        val onPlan: Boolean = false,
     )
     /** One streak: first and last passing period, its length, and what broke it (null while it's still going). */
     data class Run(val start: LocalDate, val end: LocalDate, val length: Int, val brokenOn: LocalDate?, val brokenBy: String?)
@@ -140,6 +144,22 @@ object Streaks {
             d = d.plusDays(1)
         }
 
+        // ---- Planned vs actual load (from the Streaks tab's load index; this week from the snapshot)
+        val tol = Prefs.planTolerance(ctx) / 100.0
+        val li = Prefs.loadIndex(ctx)
+        val actualByDay = (li?.first.orEmpty()).toMutableMap()
+        val plannedByDay = (li?.second.orEmpty()).toMutableMap()
+        s.week.groupBy { it.date }.forEach { (dd, ws) ->
+            actualByDay[dd] = ws.filter { it.status == WorkoutStatus.DONE }.sumOf { it.load }
+            plannedByDay[dd] = ws.sumOf { if (it.status == WorkoutStatus.DONE) it.plannedLoad else it.load }
+        }
+        fun loads(from: LocalDate, to: LocalDate): Pair<Int?, Int?> {
+            if (li == null && from.isBefore(today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)))) return null to null
+            var p = 0; var a = 0; var dd = from
+            while (!dd.isAfter(to)) { p += plannedByDay[dd.toString()] ?: 0; a += actualByDay[dd.toString()] ?: 0; dd = dd.plusDays(1) }
+            return p to a
+        }
+
         // ---- Weeks
         val weeks = dayResults.groupBy { it.date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)) }.toSortedMap().map { (mon, ds) ->
             val complete = mon.plusDays(6).isBefore(today)
@@ -172,8 +192,16 @@ object Streaks {
                 if (avgForm != null && avgForm !in -10.0..5.0) { passed = false; reasons += "Average Form ${avgForm.toInt()} outside Grey zone" }
                 if (ratio != null && ratio < fatMin) { passed = false; reasons += "Average Fatigue ${(ratio * 100).toInt()}% of Fitness" }
             }
-            val kind = if (ds.any { it.status == Status.MINI }) "TT mini-taper week" else "build week"
-            WeekResult(mon, ds, passed, green, complete, avgForm, ratio, exitDay.ctl, exitDay.form, floor, kind, reasons)
+            var kind = if (ds.any { it.status == Status.MINI }) "TT mini-taper week" else "build week"
+            // Plan adherence: a week run as planned counts, even if Form was deliberately below Grey (a build block)
+            val (pl, ac) = loads(mon, minOf(mon.plusDays(6), today))
+            if (!passed && tol > 0 && pl != null && ac != null && pl >= 50 && ac.toDouble() / pl in (1 - tol)..(1 + tol) &&
+                exitFloorOk && (avgForm == null || avgForm >= -30)) {
+                passed = true
+                kind = "on-plan build week"
+                reasons.add(0, "Passed on plan: load ${ac} vs ${pl} planned")
+            }
+            WeekResult(mon, ds, passed, green, complete, avgForm, ratio, exitDay.ctl, exitDay.form, floor, kind, reasons, pl, ac)
         }
         val done = weeks.filter { it.complete }
         fun streak(list: List<Boolean?>): Int { var n = 0; for (p in list.reversed()) { if (p == null) continue; if (p) n++ else break }; return n }
@@ -189,9 +217,13 @@ object Streaks {
             val hadRace = races.any { it.date.withDayOfMonth(1) == m }
             val failed = ws.count { it.complete && it.passed == false }
             val complete = m.plusMonths(1).minusDays(1).isBefore(today)
+            val (mp, ma) = loads(m, minOf(m.plusMonths(1).minusDays(1), today))
+            val onPlan = tol > 0 && mp != null && ma != null && mp >= 200 && ma.toDouble() / mp in (1 - tol)..(1 + tol)
+            // A month run on plan may sit deliberately below Grey (build); it still mustn't hit the high-risk zone
+            val formOk = avgForm == null || avgForm in -12.0..5.0 || (onPlan && avgForm >= -30)
             val passed = if (!complete || entry == null || exit == null) null else
-                failed <= 1 && exit >= entry * (if (hadRace) 0.90 else 0.97) && (avgForm == null || avgForm in -12.0..5.0)
-            MonthResult(m, ws, passed, avgForm, entry, exit, failed, hadRace)
+                failed <= 1 && exit >= entry * (if (hadRace) 0.90 else 0.97) && formOk
+            MonthResult(m, ws, passed, avgForm, entry, exit, failed, hadRace, onPlan)
         }
         // Day streak (consecutive passing days up to the latest day with data)
         fun dayPass(r: DayResult) = r.status != Status.RED && r.status != Status.TAPER_MISS

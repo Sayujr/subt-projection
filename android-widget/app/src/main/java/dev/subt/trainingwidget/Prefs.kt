@@ -110,6 +110,20 @@ object Prefs {
         sp(ctx).edit().putString("long_history", org.json.JSONObject().put("t", System.currentTimeMillis()).put("d", a).toString()).apply()
     }
 
+    /** Daily actual and planned load (for plan-adherence streak rules). */
+    fun loadIndex(ctx: Context): Pair<Map<String, Int>, Map<String, Int>>? = sp(ctx).getString("load_index", null)?.let {
+        runCatching {
+            val o = org.json.JSONObject(it)
+            fun m(k: String) = o.getJSONObject(k).let { j -> j.keys().asSequence().associateWith { key -> j.getInt(key) } }
+            m("a") to m("p")
+        }.getOrNull()
+    }
+    fun saveLoadIndex(ctx: Context, actual: Map<String, Int>, planned: Map<String, Int>) =
+        sp(ctx).edit().putString("load_index", org.json.JSONObject().put("a", org.json.JSONObject(actual as Map<*, *>)).put("p", org.json.JSONObject(planned as Map<*, *>)).toString()).apply()
+    /** Plan-adherence tolerance in % (0 = off): a week on plan within this counts as passed. */
+    fun planTolerance(ctx: Context): Int = sp(ctx).getInt("plan_tolerance", 15)
+    fun setPlanTolerance(ctx: Context, v: Int) = sp(ctx).edit().putInt("plan_tolerance", v).apply()
+
     fun ttDates(ctx: Context): Pair<Long, List<String>>? = sp(ctx).getString("tt_dates", null)?.let {
         runCatching { val o = org.json.JSONObject(it); val a = o.getJSONArray("d"); o.getLong("t") to (0 until a.length()).map { i -> a.getString(i) } }.getOrNull()
     }

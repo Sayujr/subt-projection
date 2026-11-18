@@ -297,11 +297,14 @@ class MainActivity : Activity() {
             val from = LocalDate.now().minusYears(5).withDayOfYear(1).minusDays(130)
             val api = IcuApi(creds)
             val r = runCatching { api.fetchFitnessHistory(from) }
-            val tts = runCatching { api.fetchTtDates(from) }
+            val index = runCatching { api.fetchActivityIndex(from) }
+            val planned = runCatching { api.fetchPlannedLoads(LocalDate.now().minusYears(2)) }
+            val tts = index.map { it.first }
             runOnUiThread {
                 histLongLoading = false
                 r.onSuccess { Prefs.saveLongHistory(this, it) }.onFailure { histLongError = it.message ?: it.javaClass.simpleName }
                 tts.onSuccess { Prefs.saveTtDates(this, it) }
+                if (index.isSuccess && planned.isSuccess) Prefs.saveLoadIndex(this, index.getOrThrow().second, planned.getOrThrow())
                 if (tab == Tab.STREAKS) drawContent()
             }
         }.start()
