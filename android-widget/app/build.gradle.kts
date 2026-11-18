@@ -21,10 +21,21 @@ android {
     // (keeping placed widgets and settings) instead of needing an uninstall.
     signingConfigs {
         create("stable") {
-            storeFile = rootProject.file("keystore/training-widget.jks")
-            storePassword = "trainingwidget"
-            keyAlias = "trainingwidget"
-            keyPassword = "trainingwidget"
+            // CI decodes the private key from the SIGNING_KEYSTORE_B64 secret; without it, the
+            // older key in the repo is used so builds keep working.
+            val ksPath = System.getenv("SIGNING_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+            val pw = System.getenv("SIGNING_PASSWORD")?.takeIf { it.isNotBlank() }
+            if (ksPath != null && pw != null) {
+                storeFile = file(ksPath)
+                storePassword = pw
+                keyAlias = "trainingtoday"
+                keyPassword = pw
+            } else {
+                storeFile = rootProject.file("keystore/training-widget.jks")
+                storePassword = "trainingwidget"
+                keyAlias = "trainingwidget"
+                keyPassword = "trainingwidget"
+            }
         }
     }
 

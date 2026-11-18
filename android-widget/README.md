@@ -94,9 +94,7 @@ The key is stored only on the phone and is sent only to `intervals.icu`.
 GitHub Actions (`.github/workflows/android-widget.yml`) builds the APK on every push that changes `android-widget/`.
 To build locally, open this folder in Android Studio, or run `./gradlew assembleDebug`.
 
-Every build is signed with the same key, `keystore/training-widget.jks`, and gets a higher version number, so a new APK
-installs as an update. Your placed widgets and settings stay in place.
-
-The repository is public, so anyone can read this key. It stops being a protection only if you install an APK from
-somewhere other than this repo's release page. For stronger protection, move the keystore and its password into GitHub
-Actions secrets.
+Builds are signed with a private key kept in two GitHub Actions secrets: `SIGNING_KEYSTORE_B64` (the keystore,
+base64-encoded) and `SIGNING_PASSWORD`. Every build uses that same key and gets a higher version number, so a new APK
+installs as an update and your placed widgets and settings stay. If the secrets are missing, CI falls back to the older
+key in `keystore/`, which is public and due to be removed.
