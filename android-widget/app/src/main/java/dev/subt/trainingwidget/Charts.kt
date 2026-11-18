@@ -22,6 +22,7 @@ object Charts {
     private const val GRID = 0x339AA3B2
     private const val LABEL = 0xFF6B7386.toInt()
     const val SUBT = 0xFFFF9F5A.toInt()
+    private const val LEFT_LABELS = 24f
     const val FITNESS_COLOR = 0xFF4EA1FF.toInt()
 
     /** Maps data to a rectangle on the canvas. */
@@ -84,7 +85,7 @@ object Charts {
         dot(c, f.x(values.lastIndex), f.y(values.last()), color, density, bg)
     }
 
-    private fun drawForm(c: Canvas, r: RectF, values: List<Double>, density: Float, bg: Int) {
+    private fun drawForm(c: Canvas, r: RectF, values: List<Double>, density: Float, bg: Int, labels: Boolean = false): Frame {
         val f = Frame(r, values.size, 4f * density, min(values.min(), 0.0), max(values.max(), 0.0))
         val band = Paint()
         for (z in FormZone.entries) {
@@ -109,6 +110,58 @@ object Charts {
             )
         }
         dot(c, f.x(values.lastIndex), f.y(values.last()), FormZone.of(values.last()).color, density, bg)
+        if (labels) {
+            // Zone boundaries as dotted lines with their values, zone names at the right edge
+            val text = labelPaint(density)
+            val dotted = dottedPaint(density)
+            for (t in listOf(-30.0, -10.0, 5.0, 25.0)) {
+                if (t <= f.lo || t >= f.hi) continue
+                c.drawLine(r.left, f.y(t), r.right, f.y(t), dotted)
+                c.drawText(if (t > 0) "+${t.toInt()}" else "${t.toInt()}", 0f, f.y(t) + 3.5f * density, text)
+            }
+            c.drawText("0", 0f, f.y(0.0) + 3.5f * density, text)
+            val name = labelPaint(density).apply { textSize = 8.5f * density }
+            for (z in FormZone.entries) {
+                val top = f.y(min(z.upper, f.hi)).coerceIn(r.top, r.bottom)
+                val bottom = f.y(max(z.lower, f.lo)).coerceIn(r.top, r.bottom)
+                if (bottom - top < 11f * density) continue
+                name.color = withAlpha(z.color, 0xAA)
+                val tw = name.measureText(z.label)
+                c.drawText(z.label, r.right - tw - 3f * density, (top + bottom) / 2 + 3f * density, name)
+            }
+        }
+        return f
+    }
+
+    private fun dottedPaint(density: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1f * density
+        color = 0x449AA3B2
+        pathEffect = DashPathEffect(floatArrayOf(1.5f * density, 3f * density), 0f)
+    }
+
+    /** A "nice" gridline step (1, 2, 5 × 10ⁿ) giving about [target] lines over [range]. */
+    private fun niceStep(range: Double, target: Int = 4): Double {
+        val raw = range / target
+        val mag = Math.pow(10.0, Math.floor(Math.log10(raw)))
+        val n = raw / mag
+        return mag * when { n < 1.5 -> 1.0; n < 3 -> 2.0; n < 7 -> 5.0; else -> 10.0 }
+    }
+
+    /** Dotted horizontal gridlines with value labels in the left margin. */
+    private fun drawValueGrid(c: Canvas, f: Frame, r: RectF, density: Float) {
+        val text = labelPaint(density)
+        val dotted = dottedPaint(density)
+        val step = niceStep(f.hi - f.lo)
+        var v = Math.ceil(f.lo / step) * step
+        while (v <= f.hi) {
+            val y = f.y(v)
+            if (y > r.top + 4f * density && y < r.bottom - 2f * density) {
+                c.drawLine(r.left, y, r.right, y, dotted)
+                c.drawText(v.roundToInt().toString(), 0f, y + 3.5f * density, text)
+            }
+            v += step
+        }
     }
 
     /** Single line with gradient fill (Fitness or Fatigue tile). */
@@ -187,12 +240,13 @@ object Charts {
         if (days.size < 2) return bmp
         val c = Canvas(bmp)
         val axisH = if (labels) 13f * density else 0f
-        val r = RectF(0f, 0f, w.toFloat(), h - axisH)
+        val r = RectF(if (labels) LEFT_LABELS * density else 0f, 0f, w.toFloat(), h - axisH)
         val ctl = days.map { it.ctl }
         val atl = days.map { it.atl }
         val gridFrame = Frame(r, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
+        if (labels) drawValueGrid(c, gridFrame, r, density)
         drawGrid(c, gridFrame, days, r.bottom, h, w, density, labels)
-        drawFitFat(c, r, days, density, bg, labels)
+        drawFitFat(c, r, days, density, bg, labels = false)
         return bmp
     }
 
@@ -201,32 +255,47 @@ object Charts {
      * Form with its zone colouring sits underneath on its own scale.
      * With [labels], date ticks run along the bottom and the panels get value labels.
      */
-    fun combined(days: List<Day>, w: Int, h: Int, density: Float, bg: Int, labels: Boolean = false): Bitmap {
+    fun combined(
+        days: List<Day>, w: Int, h: Int, density: Float, bg: Int, labels: Boolean = false, highlight: Int? = null,
+    ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         if (days.size < 2) return bmp
         val c = Canvas(bmp)
         val form = days.map { it.form }
 
+        val left = if (labels) LEFT_LABELS * density else 0f
         val axisH = if (labels) 13f * density else 0f
         val chartH = h - axisH
         val gap = 6f * density
         val topH = (chartH - gap) * 0.6f
-        val top = RectF(0f, 0f, w.toFloat(), topH)
-        val bottom = RectF(0f, topH + gap, w.toFloat(), chartH)
+        val top = RectF(left, 0f, w.toFloat(), topH)
+        val bottom = RectF(left, topH + gap, w.toFloat(), chartH)
 
         val ctl = days.map { it.ctl }
         val atl = days.map { it.atl }
-        val gridFrame = Frame(top, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
-        drawGrid(c, gridFrame, days, chartH, h, w, density, labels)
-        drawFitFat(c, top, days, density, bg, labels)
-        drawForm(c, bottom, form, density, bg)
+        val ft = Frame(top, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
+        if (labels) drawValueGrid(c, ft, top, density)
+        drawGrid(c, ft, days, chartH, h, w, density, labels)
+        drawFitFat(c, top, days, density, bg, labels = false)
+        val fb = drawForm(c, bottom, form, density, bg, labels)
 
-        if (labels) {
-            val text = labelPaint(density)
-            c.drawText(signed(form.max().roundToInt()), 2f * density, bottom.top + 9f * density, text)
-            c.drawText(signed(form.min().roundToInt()), 2f * density, bottom.bottom - 2f * density, text)
+        if (highlight != null && highlight in days.indices) {
+            val x = ft.x(highlight)
+            val line = Paint().apply { color = 0x99FFFFFF.toInt(); strokeWidth = 1.2f * density }
+            c.drawLine(x, 0f, x, chartH, line)
+            dot(c, x, ft.y(ctl[highlight]), FormColors.FITNESS, density, bg)
+            dot(c, x, ft.y(atl[highlight]), FormColors.FATIGUE, density, bg)
+            dot(c, x, fb.y(form[highlight]), FormZone.of(form[highlight]).color, density, bg)
         }
         return bmp
+    }
+
+    /** Which day a touch at [x] (in bitmap pixels) falls on, matching [combined]'s layout. */
+    fun combinedIndexAt(x: Float, n: Int, w: Int, density: Float, labels: Boolean): Int {
+        val left = if (labels) LEFT_LABELS * density else 0f
+        val pad = 4f * density
+        val span = (w - left - 2 * pad) / max(1, n - 1)
+        return ((x - left - pad) / span).roundToInt().coerceIn(0, n - 1)
     }
 
     // ---------------------------------------------------------------- week bars
@@ -259,22 +328,23 @@ object Charts {
         }
         val t = today.toString()
         val n = bucketStarts.size
-        val done = IntArray(n); val missed = IntArray(n); val todo = IntArray(n)
+        val done = IntArray(n); val missed = IntArray(n); val todo = IntArray(n); val planned = IntArray(n)
         for (wk in items) for (i in 0 until n) if (inBucket(i, wk.date)) {
             when {
                 wk.status == WorkoutStatus.DONE -> done[i] += wk.load
                 wk.date < t -> missed[i] += wk.load
                 else -> todo[i] += wk.load
             }
+            planned[i] += if (wk.status == WorkoutStatus.DONE) wk.plannedLoad else wk.load
             break
         }
         val max = (0 until n).maxOfOrNull { done[it] + missed[it] + todo[it] }?.coerceAtLeast(50) ?: 50
 
         val label = labelPaint(density).apply { textSize = 10f * density }
-        val number = labelPaint(density).apply { textSize = 10f * density; color = 0xFF9AA3B2.toInt() }
         val colW = w / n.toFloat()
         val showNumbers = colW >= 22f * density
-        val topPad = if (showNumbers) 14f * density else 4f * density
+        val markH = 9f * density
+        val topPad = if (showNumbers) 15f * density + markH else 4f * density
         val bottomPad = 15f * density
         val barW = colW * (if (n <= 7) 0.56f else 0.7f)
         val chartH = h - topPad - bottomPad
@@ -284,11 +354,30 @@ object Charts {
             style = Paint.Style.STROKE; strokeWidth = 1.2f * density; color = 0x889AA3B2.toInt()
             pathEffect = DashPathEffect(floatArrayOf(3f * density, 2f * density), 0f)
         }
+        val doneT = labelPaint(density).apply { textSize = 10.5f * density; color = 0xFF3DD68C.toInt(); isFakeBoldText = true }
+        val missT = labelPaint(density).apply { textSize = 9.5f * density; color = 0xFF9AA3B2.toInt() }
+        val todoT = labelPaint(density).apply { textSize = 10f * density; color = 0xFFFFC53D.toInt() }
+        val todoInT = labelPaint(density).apply { textSize = 9.5f * density; color = 0xFF161A22.toInt(); isFakeBoldText = true }
         val todayBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1AFFFFFF }
         val base = Paint().apply { color = GRID; strokeWidth = 1f }
         c.drawLine(0f, topPad + chartH, w.toFloat(), topPad + chartH, base)
 
-        // Label every k-th bar so labels never collide
+        /** ✓ = on plan (±10 %), chevron up = more than planned, chevron down = less. No arrow stems. */
+        fun mark(cx: Float, y: Float, kind: Int) {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE; strokeWidth = 1.8f * density; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+                color = when (kind) { 0 -> 0xFF3DD68C.toInt(); 1 -> 0xFF4EA1FF.toInt(); else -> 0xFFFF7A7A.toInt() }
+            }
+            val s2 = 3.5f * density
+            val path = Path()
+            when (kind) {
+                0 -> { path.moveTo(cx - s2, y); path.lineTo(cx - s2 / 3, y + s2 * 0.8f); path.lineTo(cx + s2 * 1.1f, y - s2 * 0.7f) }
+                1 -> { path.moveTo(cx - s2, y + s2 / 2); path.lineTo(cx, y - s2 / 2); path.lineTo(cx + s2, y + s2 / 2) }
+                else -> { path.moveTo(cx - s2, y - s2 / 2); path.lineTo(cx, y + s2 / 2); path.lineTo(cx + s2, y - s2 / 2) }
+            }
+            c.drawPath(path, p)
+        }
+
         val sample = if (daily && n <= 7) "Wed" else if (daily) "30" else "30 Nov"
         val k = maxOf(1, kotlin.math.ceil((label.measureText(sample) + 6f * density) / colW).toInt())
         val r = (if (n <= 14) 3f else 1.5f) * density
@@ -297,19 +386,58 @@ object Charts {
             val left = cx - barW / 2
             val right = cx + barW / 2
             val isToday = inBucket(i, t)
+            val bucketEnd = bucketStarts[i].plusDays(len).toString()
+            val finished = bucketEnd < t || (isToday && todo[i] == 0 && done[i] > 0)
             if (isToday) c.drawRoundRect(colW * i + 1f, 0f, colW * (i + 1) - 1f, h.toFloat(), 6f * density, 6f * density, todayBg)
             var y = topPad + chartH
-            fun seg(v: Int, p: Paint) {
-                if (v <= 0) return
+            fun seg(v: Int, p: Paint): Pair<Float, Float>? {
+                if (v <= 0) return null
                 val bh = chartH * v / max
                 c.drawRoundRect(left, y - bh, right, y, r, r, p)
+                val span = y - bh to y
                 y -= bh
+                return span
             }
-            seg(done[i], doneP); seg(missed[i], missP); seg(todo[i], planP)
-            val total = done[i] + missed[i] + todo[i]
-            if (showNumbers && total > 0) {
-                val s = total.toString()
-                c.drawText(s, cx - number.measureText(s) / 2, y - 3f * density, number)
+            seg(done[i], doneP)
+            val missSpan = seg(missed[i], missP)
+            val todoSpan = seg(todo[i], planP)
+            if (showNumbers) {
+                // Numbers inside the dashed (missed) and amber (to do) boxes when they fit
+                fun inside(span: Pair<Float, Float>?, v: Int, p: Paint): Boolean {
+                    if (span == null) return false
+                    if (span.second - span.first < 12f * density) return false
+                    val s = v.toString()
+                    c.drawText(s, cx - p.measureText(s) / 2, (span.first + span.second) / 2 + 3.5f * density, p)
+                    return true
+                }
+                val missIn = inside(missSpan, missed[i], missT)
+                val todoIn = inside(todoSpan, todo[i], todoInT)
+                // Above the bar: done in green; if nothing done yet, what's still planned in amber
+                var labelY = y - 3f * density
+                if (done[i] > 0) {
+                    val s = done[i].toString()
+                    c.drawText(s, cx - doneT.measureText(s) / 2, labelY, doneT)
+                    labelY -= 11f * density
+                } else if (todo[i] > 0 && !todoIn) {
+                    val s = todo[i].toString()
+                    c.drawText(s, cx - todoT.measureText(s) / 2, labelY, todoT)
+                    labelY -= 11f * density
+                }
+                if (!missIn && missed[i] > 0 && done[i] == 0) {
+                    val s = missed[i].toString()
+                    c.drawText(s, cx - missT.measureText(s) / 2, labelY, missT)
+                    labelY -= 11f * density
+                }
+                // Plan comparison mark
+                if (finished && (planned[i] > 0 || done[i] > 0)) {
+                    val kind = when {
+                        planned[i] == 0 -> 1
+                        done[i] > planned[i] * 1.1 -> 1
+                        done[i] < planned[i] * 0.9 -> 2
+                        else -> 0
+                    }
+                    mark(cx, labelY - markH / 2 + 2f * density, kind)
+                }
             }
             if (i % k == 0 || isToday) {
                 val d = bucketStarts[i]

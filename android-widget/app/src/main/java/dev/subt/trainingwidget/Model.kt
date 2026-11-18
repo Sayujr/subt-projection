@@ -26,6 +26,8 @@ data class Workout(
     val status: WorkoutStatus,
     /** Local date yyyy-MM-dd. */
     val date: String = "",
+    /** Load the plan had for this session (0 for unplanned activities). */
+    val plannedLoad: Int = 0,
 )
 
 /** An upcoming race from the intervals.icu calendar, with projected race-day Fitness / Fatigue when known. */
@@ -70,6 +72,8 @@ data class Snapshot(
     val proj: List<Day> = emptyList(),
     /** Runs over the last ~90 days with HR drift / efficiency. */
     val runs: List<RunMetric> = emptyList(),
+    /** Latest body weight recorded in intervals.icu wellness, kg. */
+    val weight: Double? = null,
 ) {
     fun toJson(): String = JSONObject().apply {
         put("fetchedAt", fetchedAt)
@@ -85,6 +89,7 @@ data class Snapshot(
         put("workouts", workoutsJson(workouts))
         put("week", workoutsJson(week))
         put("lastWeekLoad", lastWeekLoad)
+        putOpt("weight", weight)
         put("proj", JSONArray().apply { proj.forEach { put(JSONObject().put("d", it.date).put("c", it.ctl).put("a", it.atl)) } })
         put("runs", JSONArray().apply {
             runs.forEach {
@@ -110,7 +115,7 @@ data class Snapshot(
                 put(
                     JSONObject()
                         .put("n", it.name).put("t", it.type).put("s", it.seconds)
-                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date)
+                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date).put("pl", it.plannedLoad)
                 )
             }
         }
@@ -120,7 +125,7 @@ data class Snapshot(
                 val x = a.getJSONObject(it)
                 Workout(
                     x.getString("n"), x.getString("t"), x.getInt("s"), x.getInt("l"),
-                    x.getDouble("m"), WorkoutStatus.valueOf(x.getString("st")), x.optString("d"),
+                    x.getDouble("m"), WorkoutStatus.valueOf(x.getString("st")), x.optString("d"), x.optInt("pl"),
                 )
             }
 
@@ -157,6 +162,7 @@ data class Snapshot(
                         x.optNullableDouble("dc"), x.optNullableDouble("ef"), x.optNullableDouble("ph"),
                     )
                 },
+                weight = o.optNullableDouble("weight"),
                 races = if (r == null) emptyList() else (0 until r.length()).map {
                     val x = r.getJSONObject(it)
                     Race(
@@ -165,6 +171,49 @@ data class Snapshot(
                     )
                 },
             )
+        } catch (e: Exception) {
+            null
+        }
+    }
+}
+
+/** One SubT rep (lap) from an intervals.icu activity. */
+data class SubtRep(
+    val activityId: String,
+    val date: String,
+    val activityName: String,
+    val index: Int,
+    val seconds: Int,
+    /** min/km */
+    val pace: Double,
+    val avgHr: Double,
+    val maxHr: Double,
+    val watts: Double?,
+) {
+    /** Metres per minute per heartbeat. */
+    val efficiency: Double get() = (1000.0 / pace) / avgHr
+
+    companion object {
+        fun listToJson(list: List<SubtRep>, fetchedAt: Long): String = JSONObject().put("t", fetchedAt).put("r", JSONArray().apply {
+            list.forEach {
+                put(
+                    JSONObject().put("a", it.activityId).put("d", it.date).put("n", it.activityName).put("i", it.index)
+                        .put("s", it.seconds).put("p", it.pace).put("h", it.avgHr).put("m", it.maxHr).putOpt("w", it.watts)
+                )
+            }
+        }).toString()
+
+        fun listFromJson(s: String): Pair<Long, List<SubtRep>>? = try {
+            val o = JSONObject(s)
+            val a = o.getJSONArray("r")
+            o.getLong("t") to (0 until a.length()).map {
+                val x = a.getJSONObject(it)
+                SubtRep(
+                    x.getString("a"), x.getString("d"), x.optString("n"), x.getInt("i"), x.getInt("s"),
+                    x.getDouble("p"), x.getDouble("h"), x.getDouble("m"),
+                    if (x.has("w") && !x.isNull("w")) x.getDouble("w") else null,
+                )
+            }
         } catch (e: Exception) {
             null
         }

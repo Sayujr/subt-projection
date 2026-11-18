@@ -59,6 +59,12 @@ class MainActivity : Activity() {
     private var rangeError: String? = null
     private var raceIndex = 0
 
+    // SubT sub-screens
+    private enum class SubtView(val label: String) { PACE("Pace"), ANALYSIS("Analysis"), FORECAST("Sub-3 forecast"), PLAN("Sub-3 plan") }
+    private var subtView = SubtView.PACE
+    private var repsLoading = false
+    private var repsError: String? = null
+
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "snapshot") rangeCache.clear()
         if (key == "snapshot" || key == "subt" || key == "refreshing_since" || key == "error") {
@@ -219,8 +225,39 @@ class MainActivity : Activity() {
                     chips.addView(chip("Taper drop $lo–$hi%", drop == lo to hi) { Prefs.setTaperDrop(this, lo, hi); show() })
                 }
             }
-            else -> controls.visibility = View.GONE
+            Tab.SUBT -> {
+                controls.visibility = View.VISIBLE
+                for (v in SubtView.entries) chips.addView(chip(v.label, v == subtView) { subtView = v; show() })
+            }
         }
+    }
+
+    private fun loadReps(force: Boolean) {
+        val creds = Prefs.credentials(this) ?: run { repsError = "Connect intervals.icu in ⚙ settings"; return }
+        val cached = Prefs.subtReps(this)
+        if (repsLoading) return
+        if (!force && cached != null && System.currentTimeMillis() - cached.first < 6 * 3600_000L) return
+        repsLoading = true
+        repsError = null
+        Thread {
+            val r = runCatching { IcuApi(creds).fetchSubtReps() }
+            runOnUiThread {
+                repsLoading = false
+                r.onSuccess { Prefs.saveSubtReps(this, it) }.onFailure { repsError = it.message ?: it.javaClass.simpleName }
+                if (tab == Tab.SUBT && subtView == SubtView.ANALYSIS) drawContent()
+            }
+        }.start()
+    }
+
+    /** Scrollable page; keeps the scroll position when the same screen is redrawn. */
+    private fun scrollPage(key: String, fill: (LinearLayout) -> Unit): ScrollView {
+        val prev = (content.getChildAt(0) as? ScrollView)?.takeIf { it.tag == key }?.scrollY ?: 0
+        val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false; tag = key }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(16)) }
+        sv.addView(col)
+        fill(col)
+        if (prev > 0) sv.post { sv.scrollTo(0, prev) }
+        return sv
     }
 
     private fun setAppPeriod(days: Int) {
@@ -326,6 +363,13 @@ class MainActivity : Activity() {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(6), dp(4), dp(12)) }
         scroll.addView(list)
         col.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        list.addView(TextView(this).apply {
+            text = "Green = load done (number on top). Dashed grey = planned but missed (number inside). Amber = still planned.  " +
+                "✓ on plan (±10%) · ˄ more than planned · ˅ less than planned"
+            setTextColor(0xFF6B7386.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setPadding(dp(4), dp(2), dp(4), dp(4))
+        })
         when {
             creds == null -> list.addView(note("Connect intervals.icu in ⚙ settings"))
             items == null && rangeError != null -> list.addView(note("Couldn't load: $rangeError"))
@@ -390,6 +434,44 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Press and drag on the Today chart to read any day: the numbers above switch to that day's
+     * Fitness, Fatigue and Form and a crosshair marks it. Releasing returns to today.
+     */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun enableScrub(root: View) {
+        val iv = root.findViewById<android.widget.ImageView>(R.id.trend_chart) ?: return
+        val period = Prefs.period(this, WidgetRenderer.APP_ID)
+        val days = Prefs.snapshot(this)?.days?.takeLast(period) ?: return
+        if (days.size < 2) return
+        val d = resources.displayMetrics.density
+        val ctlV = root.findViewById<TextView>(R.id.ctl_value); val ctlD = root.findViewById<TextView>(R.id.ctl_delta)
+        val atlV = root.findViewById<TextView>(R.id.atl_value); val atlD = root.findViewById<TextView>(R.id.atl_delta)
+        val formV = root.findViewById<TextView>(R.id.form_value); val formZ = root.findViewById<TextView>(R.id.form_zone)
+        val df = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+        iv.setOnTouchListener { v, e ->
+            val labels = v.height / d >= 110
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_MOVE -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                    val i = Charts.combinedIndexAt(e.x, days.size, v.width, d, labels)
+                    val day = days[i]
+                    iv.setImageBitmap(Charts.combined(days, v.width, v.height, d, WidgetRenderer.TILE_BG, labels, highlight = i))
+                    val z = FormZone.of(day.form)
+                    ctlV?.text = day.ctl.roundToInt().toString()
+                    ctlD?.text = runCatching { LocalDate.parse(day.date).format(df) }.getOrDefault(day.date)
+                    ctlD?.setTextColor(0xFFF2F4F8.toInt())
+                    atlV?.text = day.atl.roundToInt().toString(); atlD?.text = ""
+                    formV?.text = (if (day.form > 0) "+" else "") + day.form.roundToInt(); formV?.setTextColor(z.color)
+                    formZ?.text = z.label; formZ?.setTextColor(z.color)
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { drawContent(); true }
+                else -> true
+            }
+        }
+    }
+
     private fun drawContent() {
         val d = resources.displayMetrics.density
         val wDp = ((content.width - content.paddingLeft - content.paddingRight) / d).roundToInt()
@@ -401,13 +483,29 @@ class MainActivity : Activity() {
             drawWeek(wDp, hDp); return
         }
         val full = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        // Build SubT sub-screens before clearing, so the scroll position can be kept
+        val subtPage: View? = if (tab == Tab.SUBT && subtView != SubtView.PACE) {
+            val screens = AppScreens(this, wDp) { drawContent() }
+            when (subtView) {
+                SubtView.ANALYSIS -> {
+                    loadReps(force = false)
+                    val cached = Prefs.subtReps(this)
+                    scrollPage("analysis") { screens.subtAnalysis(it, cached?.second, cached?.first, repsLoading, repsError) { loadReps(force = true); drawContent() } }
+                }
+                SubtView.FORECAST -> scrollPage("forecast") { screens.sub3Forecast(it) }
+                else -> scrollPage("plan") { screens.sub3Plan(it) }
+            }
+        } else null
         content.removeAllViews()
         try {
             when (tab) {
-                Tab.HOME -> applyInto(content, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true), ViewGroup.LayoutParams.MATCH_PARENT)
+                Tab.HOME -> {
+                    applyInto(content, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true), ViewGroup.LayoutParams.MATCH_PARENT)
+                    content.getChildAt(0)?.let { enableScrub(it) }
+                }
                 Tab.RACE -> content.addView(AppScreens(this, wDp).race(raceIndex), full)
                 Tab.RECOVERY -> content.addView(AppScreens(this, wDp).recovery(Prefs.period(this, WidgetRenderer.APP_ID)), full)
-                else -> {
+                Tab.SUBT -> if (subtPage != null) content.addView(subtPage, full) else {
                     // SubT: the widget card at a comfortable height, then the goal projection below
                     val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
                     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }

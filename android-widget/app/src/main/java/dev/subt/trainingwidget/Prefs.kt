@@ -59,6 +59,24 @@ object Prefs {
 
     fun setTaperDrop(ctx: Context, lo: Int, hi: Int) = sp(ctx).edit().putString("taper_drop", "$lo-$hi").apply()
 
+    // ---- marathon / weight planning
+
+    /** User-entered weight overrides the intervals.icu value. */
+    fun weightOverride(ctx: Context): Double? = sp(ctx).getFloat("weight_kg", 0f).takeIf { it > 0 }?.toDouble()
+    fun setWeightOverride(ctx: Context, kg: Double?) = sp(ctx).edit().putFloat("weight_kg", (kg ?: 0.0).toFloat()).apply()
+    fun goalWeight(ctx: Context): Double? = sp(ctx).getFloat("goal_kg", 0f).takeIf { it > 0 }?.toDouble()
+    fun setGoalWeight(ctx: Context, kg: Double) = sp(ctx).edit().putFloat("goal_kg", kg.toFloat()).apply()
+    fun weightPlan(ctx: Context): Int = sp(ctx).getInt("weight_plan", 3) // Stable
+    fun setWeightPlan(ctx: Context, i: Int) = sp(ctx).edit().putInt("weight_plan", i).apply()
+    fun marathonDate(ctx: Context): String? = sp(ctx).getString("marathon_date", null)
+    fun setMarathonDate(ctx: Context, d: String) = sp(ctx).edit().putString("marathon_date", d).apply()
+    fun marathonTarget(ctx: Context): Int = sp(ctx).getInt("marathon_target", SubtModel.SUB3.toInt())
+    fun setMarathonTarget(ctx: Context, sec: Int) = sp(ctx).edit().putInt("marathon_target", sec).apply()
+
+    fun subtReps(ctx: Context): Pair<Long, List<SubtRep>>? = sp(ctx).getString("subt_reps", null)?.let { SubtRep.listFromJson(it) }
+    fun saveSubtReps(ctx: Context, reps: List<SubtRep>) =
+        sp(ctx).edit().putString("subt_reps", SubtRep.listToJson(reps, System.currentTimeMillis())).apply()
+
     // ---- per-widget settings
 
     fun style(ctx: Context, id: Int): GraphStyle =

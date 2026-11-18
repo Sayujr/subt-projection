@@ -238,7 +238,7 @@ object WidgetRenderer {
         val rv = RemoteViews(ctx.packageName, layout)
         val all = s.snap?.days.orEmpty()
         if (all.isEmpty()) return rv
-        setNumbers(rv, all)
+        setNumbers(rv, all, period)
 
         val days = all.takeLast(period)
         val d = ctx.resources.displayMetrics.density
@@ -284,14 +284,21 @@ object WidgetRenderer {
         else -> null
     }
 
-    private fun setNumbers(views: RemoteViews, days: List<Day>) {
-        // Numbers and 7-day change always use the full history, whatever period the chart shows
+    /** Short label for a period: 2w, 6w, 3mo, 1y, or Nd for a custom one. */
+    internal fun periodShort(days: Int) = when (days) {
+        14 -> "2w"; 28 -> "4w"; 42 -> "6w"; 90 -> "3mo"; 180 -> "6mo"; 365 -> "1y"
+        else -> if (days % 7 == 0) "${days / 7}w" else "${days}d"
+    }
+
+    private fun setNumbers(views: RemoteViews, days: List<Day>, period: Int) {
+        // Change over the period the chart shows (first day of the window → today)
         val last = days.last()
-        val weekAgo = days.getOrNull(days.size - 8)
+        val ref = days.getOrNull(days.size - period) ?: days.first()
+        val lbl = periodShort(minOf(period, days.size))
         views.setTextViewText(R.id.ctl_value, last.ctl.roundToInt().toString())
-        setDelta(views, R.id.ctl_delta, weekAgo?.let { last.ctl - it.ctl }, upColor = UP, downColor = DOWN)
+        setDelta(views, R.id.ctl_delta, last.ctl - ref.ctl, upColor = UP, downColor = DOWN, label = lbl)
         views.setTextViewText(R.id.atl_value, last.atl.roundToInt().toString())
-        setDelta(views, R.id.atl_delta, weekAgo?.let { last.atl - it.atl }, upColor = DIM, downColor = DIM)
+        setDelta(views, R.id.atl_delta, last.atl - ref.atl, upColor = DIM, downColor = DIM, label = lbl)
         val zone = FormZone.of(last.form)
         views.setTextViewText(R.id.form_value, last.form.roundToInt().toString())
         views.setTextColor(R.id.form_value, zone.color)
@@ -312,7 +319,7 @@ object WidgetRenderer {
         else -> ""
     }
 
-    internal fun setDelta(views: RemoteViews, viewId: Int, delta: Double?, upColor: Int, downColor: Int) {
+    internal fun setDelta(views: RemoteViews, viewId: Int, delta: Double?, upColor: Int, downColor: Int, label: String = "7d") {
         if (delta == null) {
             views.setTextViewText(viewId, ""); return
         }
@@ -322,7 +329,7 @@ object WidgetRenderer {
             rounded < 0 -> "▼${fmt1(abs(rounded))}"
             else -> "＝"
         }
-        views.setTextViewText(viewId, "$text 7d")
+        views.setTextViewText(viewId, "$text $label")
         views.setTextColor(viewId, if (rounded > 0) upColor else if (rounded < 0) downColor else DIM)
     }
 

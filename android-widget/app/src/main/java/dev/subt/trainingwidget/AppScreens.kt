@@ -1,6 +1,11 @@
 package dev.subt.trainingwidget
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.app.DatePickerDialog
+import android.text.InputType
+import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.graphics.Bitmap
 import android.graphics.Typeface
 import android.text.SpannableStringBuilder
@@ -22,7 +27,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /** Detailed in-app screens (Race, Recovery, SubT) built from normal views so they can scroll. */
-class AppScreens(private val a: Activity, private val wDp: Int) {
+class AppScreens(private val a: Activity, private val wDp: Int, private val onChange: () -> Unit = {}) {
 
     private val d = a.resources.displayMetrics.density
     private fun dp(v: Int) = (v * d).roundToInt()
@@ -571,4 +576,433 @@ class AppScreens(private val a: Activity, private val wDp: Int) {
         }
         text(c, "Same model as your projection page: Daniels VDOT, 11% race gap, rates per month of −12 s/km while rebuilding to 4:32, then −2 (realistic; fast −3, slow −1) down to 4:00. Overrides you set on the page aren't visible here.", 12f, FAINT, top = 8)
     }
+
+    // ---------------------------------------------------------------- shared controls
+
+    private fun chipRow(parent: LinearLayout, items: List<String>, selected: Int, onPick: (Int) -> Unit) {
+        val hs = HorizontalScrollView(a).apply { isHorizontalScrollBarEnabled = false }
+        val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+        items.forEachIndexed { i, t ->
+            r.addView(TextView(a).apply {
+                text = t
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setTextColor(if (i == selected) TEXT else DIM)
+                setBackgroundResource(if (i == selected) R.drawable.chip_on else R.drawable.chip_off)
+                setPadding(dp(12), dp(6), dp(12), dp(6))
+                setOnClickListener { onPick(i) }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) })
+        }
+        hs.addView(r)
+        parent.addView(hs)
+    }
+
+    private fun askNumber(title: String, current: Double?, onValue: (Double?) -> Unit) {
+        val et = EditText(a).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(current?.let { String.format(Locale.US, "%.1f", it) } ?: "")
+            setTextColor(TEXT)
+        }
+        AlertDialog.Builder(a).setTitle(title).setView(et)
+            .setPositiveButton("Save") { _, _ -> onValue(et.text.toString().replace(',', '.').toDoubleOrNull()); onChange() }
+            .setNeutralButton("Clear") { _, _ -> onValue(null); onChange() }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private val my = DateTimeFormatter.ofPattern("MMM yy", loc)
+    private fun monthLabel(m: Int) = LocalDate.now().withDayOfMonth(1).plusMonths(m.toLong()).format(my)
+    private fun t(sec: Double) = SubtModel.time(sec)
+
+    /** Weight inputs: current (override or intervals.icu), goal floor and selected plan. */
+    private data class WeightIn(val w0: Double?, val fromIcu: Boolean, val goal: Double, val plan: SubtModel.WeightPlan, val planIndex: Int)
+
+    private fun weightIn(): WeightIn {
+        val icu = Prefs.snapshot(a)?.weight
+        val ov = Prefs.weightOverride(a)
+        val w0 = ov ?: icu
+        val goal = Prefs.goalWeight(a) ?: (w0?.minus(5) ?: 0.0)
+        val i = Prefs.weightPlan(a).coerceIn(0, SubtModel.WEIGHT_PLANS.lastIndex)
+        return WeightIn(w0, ov == null && icu != null, goal, SubtModel.WEIGHT_PLANS[i], i)
+    }
+
+    private fun weightCard(col: LinearLayout, cur: Double, need: Double) {
+        val w = weightIn()
+        val c = card(col)
+        label(c, "Body weight scenario")
+        if (w.w0 == null) {
+            text(c, "No weight found in intervals.icu. Tap to enter yours so the weight scenarios work.", 14f, DIM, top = 4)
+                .setOnClickListener { askNumber("Your weight (kg)", null) { Prefs.setWeightOverride(a, it) } }
+            return
+        }
+        val now = text(c, spans("Now ${fmt1(w.w0)} kg" to TEXT, (if (w.fromIcu) "  (intervals.icu) · edit" else "  (entered) · edit") to FAINT), 15f, top = 4)
+        now.setOnClickListener { askNumber("Your weight (kg)", w.w0) { Prefs.setWeightOverride(a, it) } }
+        val g = text(c, spans("Goal / floor ${fmt1(w.goal)} kg" to TEXT, "  · edit (losing stops here)" to FAINT), 15f, top = 2)
+        g.setOnClickListener { askNumber("Goal weight (kg)", w.goal) { v -> if (v != null) Prefs.setGoalWeight(a, v) } }
+        chipRow(c, SubtModel.WEIGHT_PLANS.map { it.label }, w.planIndex) { Prefs.setWeightPlan(a, it); onChange() }
+
+        row(c, listOf("PLAN" to FAINT, "IN 6 MO" to FAINT, "IN 12 MO" to FAINT, "SUBT 12 MO" to FAINT, "SUB-3" to FAINT), header = true,
+            weights = listOf(1.5f, 1f, 1f, 1.1f, 1.1f))
+        divider(c)
+        for ((i, p) in SubtModel.WEIGHT_PLANS.withIndex()) {
+            val path = SubtModel.pathWithWeight(cur, SubtModel.REAL, 72, w.w0, p.kgPerWeek, w.goal)
+            val eta = SubtModel.arrival(path, need)
+            val sel = i == w.planIndex
+            row(c, listOf(
+                p.label to (if (sel) TEXT else DIM),
+                "${fmt1(SubtModel.weightAt(w.w0, p.kgPerWeek, 6.0, w.goal))} kg" to DIM,
+                "${fmt1(SubtModel.weightAt(w.w0, p.kgPerWeek, 12.0, w.goal))} kg" to DIM,
+                Charts.paceText(path[12]) to Charts.SUBT,
+                (eta?.let { monthLabel(it) } ?: ">6 yr") to (if (sel) GOOD else DIM),
+            ), weights = listOf(1.5f, 1f, 1f, 1.1f, 1.1f))
+        }
+        text(c, "Assumes fat-only change: about 0.7% faster per 1% of body weight lost (roughly 2–3 s/km per kg), the usual rule of thumb. " +
+            "Losing more than about 0.5 kg/week while training hard risks low energy availability (RED-S), injury and lost fitness, so fuel your key sessions.", 12f, FAINT, top = 8)
+    }
+
+    private data class SubtNow(val months: List<SubtMonth>, val cur: Double)
+
+    private fun subtNow(col: LinearLayout): SubtNow? {
+        val sub = Prefs.subt(a)
+        val months = sub?.months.orEmpty().filter { !it.outlier }
+        val cur = months.lastOrNull()?.pace
+        if (cur == null) { text(card(col), "Loading SubT data…", 16f); return null }
+        return SubtNow(months, cur)
+    }
+
+    // ---------------------------------------------------------------- Sub-3 forecast
+
+    fun sub3Forecast(col: LinearLayout) {
+        val sn = subtNow(col) ?: return
+        val cur = sn.cur
+        val w = weightIn()
+        val need = SubtModel.requiredSubt(3, SubtModel.SUB3)
+        val real = SubtModel.pathWithWeight(cur, SubtModel.REAL, 72, w.w0, w.plan.kgPerWeek, w.goal)
+        val fast = SubtModel.pathWithWeight(cur, SubtModel.FAST, 72, w.w0, w.plan.kgPerWeek, w.goal)
+        val slow = SubtModel.pathWithWeight(cur, SubtModel.SLOW, 72, w.w0, w.plan.kgPerWeek, w.goal)
+        val eR = SubtModel.arrival(real, need); val eF = SubtModel.arrival(fast, need); val eS = SubtModel.arrival(slow, need)
+
+        val h = card(col)
+        label(h, "Sub-3 marathon forecast · weight: ${w.plan.label.lowercase(loc)}")
+        text(h, spans((eR?.let { monthLabel(it) } ?: "Beyond 6 years") to GOOD, "  realistic" to DIM), 26f, bold = true, top = 4)
+        text(h, spans("Fast ${eF?.let { monthLabel(it) } ?: ">6 yr"}" to TEXT, "  ·  " to FAINT, "Slow ${eS?.let { monthLabel(it) } ?: ">6 yr"}" to TEXT), 15f, top = 2)
+        stats3(h, listOf(
+            Triple("SubT now", Charts.paceText(cur) to Charts.SUBT, "/km"),
+            Triple("Sub-3 needs", Charts.paceText(need) to TEXT, "SubT /km"),
+            Triple("Gap", "${((cur - need) * 60).roundToInt()} s" to WARN, "per km to find"),
+        ))
+        text(h, spans(
+            "Sub-3 equivalents: " to DIM, "5K ${t(SubtModel.fiveK(need))} · HM ${t(SubtModel.half(need))}" to TEXT,
+        ), 14f, top = 10)
+        Charts.subtTrendPerMonth(sn.months)?.takeIf { it < 0 }?.let { slope ->
+            val months = ((cur - need) / -slope).roundToInt()
+            text(h, spans(
+                "If your last-6-month trend (${(slope * 60).roundToInt()} s/km/mo) simply continued: " to DIM, monthLabel(months) to TEXT,
+                ". That's optimistic, because gains slow as you get fitter, which the model allows for." to FAINT,
+            ), 13f, top = 8)
+        }
+
+        // Chart
+        val horizon = ((eS ?: eR ?: 48) + 4).coerceIn(12, 72)
+        val c = card(col)
+        label(c, "SubT path to sub-3")
+        val fmGoals = listOf(3 * 3600 + 30 * 60.0 to "3:30 FM", 3 * 3600 + 15 * 60.0 to "3:15 FM", SubtModel.SUB3 to "Sub-3")
+            .map { (sec, n) -> n to SubtModel.requiredSubt(3, sec) }
+        image(c, Charts.subtProjection(sn.months.takeLast(12), real.take(horizon + 1), fast.take(horizon + 1), slow.take(horizon + 1), fmGoals,
+            chartW(), dp(230), d, TILE), 230)
+        text(c, spans("━ history  " to Charts.SUBT, "┅ realistic  " to Charts.SUBT, "▇ fast–slow  " to FAINT, "┄ marathon goal paces" to WARN), 11f, top = 6)
+
+        // Month-by-month expectations
+        val tb = card(col)
+        label(tb, "What to expect each month (realistic)")
+        row(tb, listOf("MONTH" to FAINT, "SUBT" to FAINT, "5K" to FAINT, "HM" to FAINT, "FM" to FAINT), header = true, weights = listOf(1f, 0.9f, 1f, 1.2f, 1.2f))
+        divider(tb)
+        val last = minOf(real.lastIndex, (eR ?: 36) + 3)
+        val step = if (last > 30) 3 else 1
+        var shownSub3 = false
+        for (m in 0..last step step) {
+            val p = real[m]
+            val fm = SubtModel.full(p)
+            val hit = fm < SubtModel.SUB3 + 1
+            val first = hit && !shownSub3
+            if (hit) shownSub3 = true
+            row(tb, listOf(
+                monthLabel(m) to (if (first) GOOD else DIM),
+                Charts.paceText(p) to Charts.SUBT,
+                t(SubtModel.fiveK(p)) to TEXT,
+                t(SubtModel.half(p)) to TEXT,
+                t(fm) to (if (hit) GOOD else TEXT),
+            ), weights = listOf(1f, 0.9f, 1f, 1.2f, 1.2f))
+        }
+        text(tb, "These are the race times your SubT supports each month, using Daniels VDOT plus your 11% race-readiness gap. A 5K at or under the time shown means you're on or ahead of the curve.", 12f, FAINT, top = 8)
+
+        weightCard(col, cur, need)
+    }
+
+    // ---------------------------------------------------------------- Sub-3 plan (work back from a date)
+
+    private fun defaultMarathonDate(): LocalDate {
+        val today = LocalDate.now()
+        val year = if (today.monthValue >= 11) today.year + 1 else today.year
+        return LocalDate.of(year, 11, 1).with(java.time.temporal.TemporalAdjusters.firstInMonth(java.time.DayOfWeek.SUNDAY))
+    }
+
+    fun sub3Plan(col: LinearLayout) {
+        val sn = subtNow(col) ?: return
+        val cur = sn.cur
+        val w = weightIn()
+        val today = LocalDate.now()
+        val race = Prefs.marathonDate(a)?.let { date(it) } ?: defaultMarathonDate()
+        val target = Prefs.marathonTarget(a).toDouble()
+        val months = ChronoUnit.DAYS.between(today, race) / 30.44
+        val need = SubtModel.requiredSubt(3, target)
+
+        // Controls
+        val ctl = card(col)
+        label(ctl, "Target")
+        val targets = listOf(SubtModel.SUB3.toInt(), 3 * 3600 + 5 * 60, 3 * 3600 + 10 * 60, 3 * 3600 + 15 * 60, 3 * 3600 + 30 * 60)
+        chipRow(ctl, targets.map { if (it == SubtModel.SUB3.toInt()) "Sub-3" else t(it.toDouble()).dropLast(3) }, targets.indexOf(target.toInt())) {
+            Prefs.setMarathonTarget(a, targets[it]); onChange()
+        }
+        val dt = text(ctl, spans("Race date: " to DIM, race.format(edm) + " ${race.year}" to TEXT, "  · change" to FAINT), 15f, top = 8)
+        dt.setOnClickListener {
+            DatePickerDialog(a, { _, y, m, dd -> Prefs.setMarathonDate(a, LocalDate.of(y, m + 1, dd).toString()); onChange() },
+                race.year, race.monthValue - 1, race.dayOfMonth).apply { datePicker.minDate = System.currentTimeMillis() + 30L * 86400000 }.show()
+        }
+
+        if (months < 1) { text(ctl, "Pick a date at least a month away.", 14f, WARN, top = 6); return }
+
+        // Weight contribution
+        val wRace = w.w0?.let { SubtModel.weightAt(it, w.plan.kgPerWeek, months, w.goal) }
+        val factor = if (w.w0 != null && wRace != null) SubtModel.weightFactor(w.w0, wRace) else 1.0
+        val needAtCurrentWeight = need / factor
+        val fromWeight = (needAtCurrentWeight - need) * 60
+        val fromTraining = (cur - needAtCurrentWeight) * 60
+        val perMonth = fromTraining / months
+
+        // Feasibility vs the model
+        val mInt = months.roundToInt().coerceAtLeast(1)
+        val realAt = SubtModel.path(cur, SubtModel.REAL, mInt)[mInt]
+        val fastAt = SubtModel.path(cur, SubtModel.FAST, mInt)[mInt]
+        val (verdict, vc) = when {
+            cur <= needAtCurrentWeight -> "Already there" to GOOD
+            realAt <= needAtCurrentWeight -> "On track with realistic progress" to GOOD
+            fastAt <= needAtCurrentWeight -> "Stretch: needs fast-rate progress" to WARN
+            else -> "Unlikely by this date" to BAD
+        }
+        val h = card(col)
+        label(h, "${t(target)} marathon on ${race.format(dm)} ${race.year} · in ${fmt1(months)} months")
+        text(h, verdict, 22f, vc, bold = true, top = 4)
+        stats3(h, listOf(
+            Triple("SubT now", Charts.paceText(cur) to Charts.SUBT, "/km"),
+            Triple("Race-day SubT", Charts.paceText(need) to TEXT, "needed /km"),
+            Triple("Per month", "${String.format(loc, "%.1f", perMonth)} s" to (if (perMonth <= 2.2) GOOD else if (perMonth <= 3.2) WARN else BAD), "from training"),
+        ))
+        text(h, spans(
+            "Gap ${((cur - need) * 60).roundToInt()} s/km = " to DIM,
+            "${fromWeight.roundToInt()} s from weight (${w.plan.label.lowercase(loc)}${wRace?.let { ", ${fmt1(it)} kg on race day" } ?: ""})" to TEXT,
+            " + " to DIM, "${fromTraining.roundToInt()} s from training" to TEXT,
+        ), 14f, top = 10)
+        text(h, "For reference, the model expects about −2 s/km per month at your level (fast −3, slow −1), slowing to −1.2 below 4:00.", 12f, FAINT, top = 6)
+        if (verdict == "Unlikely by this date") {
+            val path = SubtModel.pathWithWeight(cur, SubtModel.REAL, 72, w.w0, w.plan.kgPerWeek, w.goal)
+            SubtModel.arrival(path, need)?.let { text(h, "Earliest realistic month for this target: ${monthLabel(it)}.", 14f, WARN, top = 6) }
+        }
+
+        // Monthly targets
+        val tb = card(col)
+        label(tb, "Monthly checkpoints to stay on track")
+        row(tb, listOf("MONTH" to FAINT, "SUBT" to FAINT, "5K" to FAINT, "HM" to FAINT, "WEIGHT" to FAINT), header = true, weights = listOf(1f, 0.9f, 1f, 1.2f, 1f))
+        divider(tb)
+        val steps = (0..mInt).toList()
+        for (m in steps) {
+            val frac = (m / months).coerceAtMost(1.0)
+            val trainPace = cur - (cur - needAtCurrentWeight) * frac
+            val wm = w.w0?.let { SubtModel.weightAt(it, w.plan.kgPerWeek, m.toDouble(), w.goal) }
+            val p = if (w.w0 != null && wm != null) trainPace * SubtModel.weightFactor(w.w0, wm) else trainPace
+            val isRace = m == mInt
+            row(tb, listOf(
+                (if (isRace) "Race" else monthLabel(m)) to (if (isRace) GOOD else DIM),
+                Charts.paceText(p) to Charts.SUBT,
+                t(SubtModel.fiveK(p)) to TEXT,
+                t(SubtModel.half(p)) to TEXT,
+                (wm?.let { "${fmt1(it)}" } ?: "–") to DIM,
+            ), weights = listOf(1f, 0.9f, 1f, 1.2f, 1f))
+        }
+        text(tb, "SubT = the median pace your SubT reps should average that month (HR kept under your 172 ceiling). " +
+            "5K and HM are the race times that SubT supports. Run a 5K or a hard parkrun every 4–6 weeks: matching the 5K column means you're on schedule.", 12f, FAINT, top = 8)
+
+        val g = card(col)
+        label(g, "How to train for it")
+        bullet(g, FormColors.FITNESS, "SubT sessions 2–3 a week (e.g. 3×10 min, 5×6 min or 10×3 min) at this month's SubT pace, at least 48 h apart, with everything else easy.")
+        bullet(g, FormColors.FITNESS, "Volume builds the marathon. Grow weekly load by roughly 5–8% at most, using the Week screen, with a lighter week every 3–4 weeks.")
+        bullet(g, FormColors.FITNESS, "From 12–16 weeks out, add marathon-pace work (${t(target / 42.195).let { it }}/km) inside long runs. The SubT plan keeps the engine growing.")
+        bullet(g, WARN, "Re-check monthly: if your SubT median falls behind the table for two months, move the date or the target rather than forcing pace.")
+
+        weightCard(col, cur, need)
+    }
+
+    // ---------------------------------------------------------------- SubT analysis
+
+    fun subtAnalysis(col: LinearLayout, reps: List<SubtRep>?, fetchedAt: Long?, loading: Boolean, error: String?, onRefresh: () -> Unit) {
+        val top = card(col)
+        label(top, "SubT analysis · last 5 weeks")
+        val status = when {
+            loading -> "Loading SubT laps from intervals.icu (one request per run, so this takes a few seconds)…"
+            error != null -> "Couldn't load: $error"
+            fetchedAt != null -> "Updated ${android.text.format.DateFormat.getTimeFormat(a).format(java.util.Date(fetchedAt))} · tap to refresh"
+            else -> "Tap to load"
+        }
+        text(top, status, 13f, if (error != null) WARN else FAINT, top = 2).setOnClickListener { onRefresh() }
+        text(top, "Laps count as SubT with your projection page's filter: average HR over 160, max HR up to 172, 1.5–15 min long.", 12f, FAINT, top = 4)
+        if (reps == null) return
+        if (reps.isEmpty()) { text(top, "No SubT laps found in the last 5 weeks.", 15f, DIM, top = 8); return }
+
+        val sessions = reps.groupBy { it.activityId }.values.sortedBy { it.first().date }
+        val latest = sessions.last().sortedBy { it.index }
+        val allPaces = reps.map { it.pace }.sorted()
+        val medPace = allPaces[allPaces.size / 2]
+        val allHr = reps.map { it.avgHr }.sorted()
+        val medHr = allHr[allHr.size / 2]
+
+        // ---- Latest session
+        val ls = card(col)
+        val ld = date(latest.first().date)
+        label(ls, "Latest session · ${ld?.format(edm) ?: latest.first().date}")
+        text(ls, latest.first().activityName, 17f, bold = true, top = 2)
+        val totalMin = latest.sumOf { it.seconds } / 60.0
+        val avgPace = latest.sumOf { it.pace * it.seconds } / latest.sumOf { it.seconds }
+        val avgHr = latest.sumOf { it.avgHr * it.seconds } / latest.sumOf { it.seconds }
+        stats3(ls, listOf(
+            Triple("SubT time", "${totalMin.roundToInt()}′" to TEXT, "${latest.size} reps"),
+            Triple("Avg pace", Charts.paceText(avgPace) to Charts.SUBT, "5-wk median ${Charts.paceText(medPace)}"),
+            Triple("Avg HR", "${avgHr.roundToInt()}" to 0xFFFF7A90.toInt(), "5-wk median ${medHr.roundToInt()}"),
+        ))
+        val hasW = latest.any { it.watts != null }
+        val cols = mutableListOf("#" to FAINT, "TIME" to FAINT, "PACE" to FAINT, "HR" to FAINT, "MAX" to FAINT)
+        if (hasW) cols += "W" to FAINT
+        cols += "M/BEAT" to FAINT
+        row(ls, cols, header = true, weights = List(cols.size) { if (it == 0) 0.5f else 1f })
+        divider(ls)
+        for (r in latest) {
+            val cells = mutableListOf<Pair<CharSequence, Int>>(
+                "${r.index}" to FAINT, "%d:%02d".format(r.seconds / 60, r.seconds % 60) to DIM,
+                Charts.paceText(r.pace) to Charts.SUBT, "${r.avgHr.roundToInt()}" to TEXT,
+                "${r.maxHr.roundToInt()}" to (if (r.maxHr >= 171) WARN else DIM),
+            )
+            if (hasW) cells += (r.watts?.roundToInt()?.toString() ?: "–") to DIM
+            cells += String.format(loc, "%.2f", r.efficiency) to DIM
+            row(ls, cells, weights = List(cells.size) { if (it == 0) 0.5f else 1f })
+        }
+        text(ls, "M/BEAT = metres per minute per heartbeat (speed ÷ HR). Higher means more speed for the same cardiac effort.", 12f, FAINT, top = 6)
+
+        val notes = card(col)
+        label(notes, "Coach notes · this session")
+        val first = latest.first(); val lastR = latest.last()
+        val hrRise = lastR.avgHr - first.avgHr
+        val paceChange = (lastR.pace / first.pace - 1) * 100   // + = slower
+        val (pm, psd) = stats(latest.map { it.pace })
+        val cv = psd / pm * 100
+        val peak = latest.maxOf { it.maxHr }
+        when {
+            totalMin < 20 -> bullet(notes, WARN, "Short SubT dose (${totalMin.roundToInt()} min). Sub-threshold sessions usually accumulate about 25–40 min (3×10, 5×6 or 10×3 min) to give a real training stimulus.")
+            totalMin > 45 -> bullet(notes, WARN, "Big dose (${totalMin.roundToInt()} min of SubT). Make the next day genuinely easy.")
+            else -> bullet(notes, GOOD, "${totalMin.roundToInt()} min at SubT, a solid dose in the usual 25–40 min range.")
+        }
+        if (latest.size >= 2) when {
+            hrRise > 6 && paceChange > -1 -> bullet(notes, WARN, "HR crept up ${hrRise.roundToInt()} bpm from first to last rep without faster running. That's cardiac drift from heat, dehydration, fatigue or a pace a touch too hot. Start 2–3 s/km slower next time.")
+            paceChange < -2 && hrRise > 4 -> bullet(notes, DIM, "You sped up ${fmt1(-paceChange)}% through the session and HR rose with it. Fine if you planned to, but SubT works best kept even and controlled.")
+            hrRise <= 3 && abs1(paceChange) <= 1.5 -> bullet(notes, GOOD, "HR stayed within ${hrRise.roundToInt().coerceAtLeast(0)} bpm across reps at a steady pace. That's well-controlled sub-threshold work.")
+            else -> bullet(notes, DIM, "HR ${if (hrRise >= 0) "+" else ""}${hrRise.roundToInt()} bpm and pace ${if (paceChange >= 0) "+" else ""}${fmt1(paceChange)}% first to last rep. A normal amount of drift.")
+        }
+        if (peak >= 171) bullet(notes, WARN, "Peak HR reached ${peak.roundToInt()}, right at your 172 ceiling. Sub-threshold should sit below lactate threshold, so ease off slightly to keep lactate controlled.")
+        if (latest.size >= 3) {
+            if (cv < 1.5) bullet(notes, GOOD, "Even pacing: reps within ±${fmt1(cv)}%.")
+            else if (cv > 3) bullet(notes, WARN, "Uneven pacing (±${fmt1(cv)}%). Aim for reps within 2–3 s/km of each other.")
+        }
+        val faster = avgPace < medPace - 0.01
+        val lowerHr = avgHr <= medHr + 1
+        if (faster && lowerHr) bullet(notes, GOOD, "Faster than your 5-week median (${Charts.paceText(medPace)}) at the same or lower HR, a sign of adaptation.")
+        else if (!faster && avgHr > medHr + 3) bullet(notes, WARN, "Slower than usual at a higher HR. You may be tired; check the Recovery tab before the next hard day.")
+
+        // ---- 5 weeks trends
+        val start = LocalDate.now().minusDays(35)
+        val today = LocalDate.now()
+        val tr = card(col)
+        label(tr, "Trends · every SubT rep, last 5 weeks")
+        val weeks = 5.0
+        val mins = reps.sumOf { it.seconds } / 60.0
+        stats3(tr, listOf(
+            Triple("Sessions", "${sessions.size}" to TEXT, String.format(loc, "%.1f / week", sessions.size / weeks)),
+            Triple("SubT time", "${mins.roundToInt()}′" to TEXT, "${(mins / weeks).roundToInt()}′ / week"),
+            Triple("Reps", "${reps.size}" to TEXT, "median ${Charts.paceText(medPace)}"),
+        ))
+        fun pts(f: (SubtRep) -> Double?) = reps.mapNotNull { r -> f(r)?.let { v -> date(r.date)?.let { it to v } } }
+        fun slopePerMonth(p: List<Pair<LocalDate, Double>>): Double? {
+            if (p.size < 4) return null
+            val xs = p.map { it.first.toEpochDay().toDouble() }; val ys = p.map { it.second }
+            val mx = xs.average(); val myy = ys.average()
+            val den = xs.sumOf { (it - mx) * (it - mx) }
+            if (den == 0.0) return null
+            return xs.indices.sumOf { (xs[it] - mx) * (ys[it] - myy) } / den * 30
+        }
+        val paceP = pts { it.pace }
+        label(tr, "Pace per rep").apply { setPadding(0, dp(12), 0, 0) }
+        image(tr, Charts.timeChart(paceP, start, today, Charts.SUBT, chartW(), dp(140), d, TILE, scatter = true, invert = true,
+            fmt = { Charts.paceText(it) }), 140)
+        slopePerMonth(paceP)?.let { sl ->
+            val sec = (sl * 60)
+            text(tr, if (sec < -0.5) "Getting faster: ${fmt1(-sec)} s/km per month." else if (sec > 0.5) "Getting slower: ${fmt1(sec)} s/km per month. Check fatigue, heat or terrain." else "Pace steady.", 13f, if (sec < -0.5) GOOD else if (sec > 0.5) WARN else DIM, top = 4)
+        }
+        val hrP = pts { it.avgHr }
+        label(tr, "Heart rate per rep").apply { setPadding(0, dp(12), 0, 0) }
+        image(tr, Charts.timeChart(hrP, start, today, 0xFFFF7A90.toInt(), chartW(), dp(140), d, TILE, scatter = true, threshold = 172.0,
+            fmt = { it.roundToInt().toString() }), 140)
+        text(tr, "Dashed line = your 172 bpm ceiling.", 12f, FAINT, top = 4)
+        val effP = pts { it.efficiency }
+        label(tr, "Speed per heartbeat (efficiency)").apply { setPadding(0, dp(12), 0, 0) }
+        image(tr, Charts.timeChart(effP, start, today, GOOD, chartW(), dp(140), d, TILE, scatter = true,
+            fmt = { String.format(loc, "%.2f", it) }), 140)
+        slopePerMonth(effP)?.let { sl ->
+            val pct = sl / effP.map { it.second }.average() * 100
+            text(tr, "${if (pct >= 0) "+" else ""}${fmt1(pct)}% per month. " + when {
+                pct >= 1 -> "More speed for the same HR: your SubT engine is improving."
+                pct <= -1.5 -> "Less speed per beat: often accumulated fatigue, heat or illness."
+                else -> "Holding steady."
+            }, 13f, if (pct >= 1) GOOD else if (pct <= -1.5) WARN else DIM, top = 4)
+        }
+        val powerP = pts { r -> r.watts?.let { it / r.avgHr } }
+        if (powerP.size >= 4) {
+            label(tr, "Power : HR per rep").apply { setPadding(0, dp(12), 0, 0) }
+            image(tr, Charts.timeChart(powerP, start, today, FormColors.FITNESS, chartW(), dp(140), d, TILE, scatter = true,
+                fmt = { String.format(loc, "%.2f", it) }), 140)
+            slopePerMonth(powerP)?.let { sl ->
+                val pct = sl / powerP.map { it.second }.average() * 100
+                text(tr, "${if (pct >= 0) "+" else ""}${fmt1(pct)}% per month in watts per beat. Unlike pace, power ignores wind and hills, so this is the cleaner signal.", 13f, if (pct >= 0) GOOD else WARN, top = 4)
+            }
+        }
+
+        // ---- Program notes
+        val pn = card(col)
+        label(pn, "Coach notes · last 5 weeks")
+        val perWeek = sessions.size / weeks
+        when {
+            perWeek < 1.5 -> bullet(pn, WARN, "${String.format(loc, "%.1f", perWeek)} SubT sessions a week. Most sub-threshold programmes use 2–3 a week, which is what drives the steady monthly gains the projection assumes.")
+            perWeek > 3.5 -> bullet(pn, WARN, "${String.format(loc, "%.1f", perWeek)} SubT sessions a week is a lot. Make sure the rest stays truly easy.")
+            else -> bullet(pn, GOOD, "${String.format(loc, "%.1f", perWeek)} SubT sessions a week, right in the 2–3 range.")
+        }
+        val dates = sessions.mapNotNull { date(it.first().date) }
+        val tight = dates.zipWithNext().count { (x, y) -> ChronoUnit.DAYS.between(x, y) < 2 }
+        if (tight > 0) bullet(pn, WARN, "$tight time(s) SubT sessions were on back-to-back days. Leave at least 48 h between them so each one gets absorbed.")
+        val capHits = reps.count { it.maxHr >= 171 }
+        if (capHits > reps.size / 4) bullet(pn, WARN, "$capHits of ${reps.size} reps touched 171–172 bpm. SubT is being run a little hot, and a few s/km slower would keep it sub-threshold.")
+        else bullet(pn, GOOD, "Only $capHits of ${reps.size} reps reached the top of your HR ceiling, so intensity is well controlled.")
+
+        val why = card(col)
+        label(why, "Why these matter")
+        text(why, "• Sub-threshold training (the \"Norwegian singles\" approach) keeps reps just under lactate threshold. You can accumulate more quality time with less fatigue than at or above threshold, then repeat it 2–3 times a week.\n" +
+            "• Cardiac drift: at a steady pace, rising HR reflects heat, dehydration and fatigue, a long-established exercise-physiology finding. Over a whole run, under about 5% decoupling is a common guide (Friel).\n" +
+            "• Daniels' threshold (T) pace is \"comfortably hard\", roughly what you could hold for about an hour. SubT sits a little slower.\n" +
+            "• More speed per heartbeat at the same effort over weeks is one of the clearest signs aerobic fitness is improving.", 13f, DIM, top = 4)
+    }
+
+    private fun abs1(v: Double) = if (v < 0) -v else v
 }

@@ -128,7 +128,8 @@ class IcuApi(private val creds: Credentials) {
 
         val proj = projections.entries.filter { it.key > todayStr }.sortedBy { it.key }
             .map { Day(it.key, it.value.first, it.value.second) }
-        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs)
+        val weight = wellness.objects().sortedBy { it.optString("id") }.mapNotNull { it.optNum("weight")?.takeIf { w -> w > 25 } }.lastOrNull()
+        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight)
     }
 
     /** Planned workouts, races and completed activities between [start] and [end] (inclusive), for the app's Week screen. */
@@ -146,6 +147,63 @@ class IcuApi(private val creds: Credentials) {
             "/athlete/$ath/activities", mapOf("oldest" to s, "newest" to end.plusDays(1).toString()),
         ).objects().filter { date(it) in s..e }.sortedBy { it.optString("start_date_local") }
         return merge(events, activities)
+    }
+
+    /**
+     * SubT reps from runs in the last [daysBack] days, using the same lap filter as the projection
+     * page (refresh_data.py): avg HR > 160, max HR ≤ 172, 1.5–15 min, pace 3:30–9:00 /km.
+     */
+    fun fetchSubtReps(daysBack: Long = 35, today: LocalDate = LocalDate.now()): List<SubtRep> {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val runs = getArray(
+            "/athlete/$ath/activities",
+            mapOf("oldest" to today.minusDays(daysBack).toString(), "newest" to today.plusDays(1).toString()),
+        ).objects().filter { it.optString("type").contains("Run", ignoreCase = true) }
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
+        try {
+            val futures = runs.map { act ->
+                pool.submit<List<SubtRep>> {
+                    val id = act.optString("id")
+                    val o = runCatching { getObject("/activity/${URLEncoder.encode(id, "UTF-8")}/intervals") }.getOrNull()
+                        ?: return@submit emptyList()
+                    val ivs = o.optJSONArray("icu_intervals")?.objects().orEmpty()
+                    ivs.mapIndexedNotNull { i, iv ->
+                        val hr = iv.optNum("average_heartrate") ?: return@mapIndexedNotNull null
+                        val mx = iv.optNum("max_heartrate") ?: return@mapIndexedNotNull null
+                        val el = iv.optNum("elapsed_time") ?: return@mapIndexedNotNull null
+                        val sp = iv.optNum("average_speed") ?: return@mapIndexedNotNull null
+                        if (sp <= 0 || hr <= 0 || el <= 0) return@mapIndexedNotNull null
+                        val pace = (1000 / sp) / 60
+                        val min = el / 60
+                        if (pace !in 3.5..9.0 || hr <= 160 || mx > 172 || min !in 1.5..15.0) return@mapIndexedNotNull null
+                        SubtRep(
+                            id, date(act), act.optString("name"), i + 1, el.toInt(), pace, hr, mx,
+                            (iv.optNum("average_watts") ?: iv.optNum("weighted_average_watts"))?.takeIf { it > 0 },
+                        )
+                    }
+                }
+            }
+            return futures.flatMap { it.get() }.sortedWith(compareBy({ it.date }, { it.activityId }, { it.index }))
+        } finally {
+            pool.shutdown()
+        }
+    }
+
+    private fun getObject(path: String): JSONObject {
+        val conn = URL("$BASE$path").openConnection() as HttpURLConnection
+        try {
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 25_000
+            val token = Base64.encodeToString("API_KEY:${creds.apiKey}".toByteArray(), Base64.NO_WRAP)
+            conn.setRequestProperty("Authorization", "Basic $token")
+            conn.setRequestProperty("Accept", "application/json")
+            val code = conn.responseCode
+            if (code == 401 || code == 403) throw AuthException()
+            if (code !in 200..299) throw IOException("intervals.icu returned HTTP $code")
+            return JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        } finally {
+            conn.disconnect()
+        }
     }
 
     /** Planned events (marked done when an activity is paired with them) + unplanned completed activities. */
@@ -171,6 +229,7 @@ class IcuApi(private val creds: Credentials) {
                     else -> WorkoutStatus.PLANNED
                 },
                 date = date(e),
+                plannedLoad = (e.optNum("icu_training_load") ?: 0.0).toInt(),
             )
         }
         for (a in activities) {

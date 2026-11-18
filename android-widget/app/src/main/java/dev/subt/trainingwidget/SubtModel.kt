@@ -48,18 +48,50 @@ object SubtModel {
     fun half(subt: Double) = interp(subt, 2) * (1 + GAP)
     fun full(subt: Double) = interp(subt, 3) * (1 + GAP)
 
-    fun requiredSubtFor5k(targetSec: Double): Double {
+    fun requiredSubtFor5k(targetSec: Double): Double = requiredSubt(1, targetSec)
+
+    /** SubT pace needed for a race time; [idx] 1 = 5K, 2 = HM, 3 = FM. */
+    fun requiredSubt(idx: Int, targetSec: Double): Double {
         val t = targetSec / (1 + GAP)
-        val s = VDOT.sortedBy { it[1] }
-        if (t <= s.first()[1]) return s.first()[0]
-        if (t >= s.last()[1]) return s.last()[0]
+        val s = VDOT.sortedBy { it[idx] }
+        if (t <= s.first()[idx]) return s.first()[0]
+        if (t >= s.last()[idx]) return s.last()[0]
         for (i in 0 until s.size - 1) {
-            if (s[i][1] <= t && t < s[i + 1][1]) {
-                val f = (t - s[i][1]) / (s[i + 1][1] - s[i][1])
+            if (s[i][idx] <= t && t < s[i + 1][idx]) {
+                val f = (t - s[i][idx]) / (s[i + 1][idx] - s[i][idx])
                 return s[i][0] + f * (s[i + 1][0] - s[i][0])
             }
         }
         return s.last()[0]
+    }
+
+    // ---- body weight
+
+    /**
+     * Pace scales with body mass to this power for fat-only weight change: about 0.7 % faster per 1 %
+     * of body weight lost, roughly 2–3 s/km per kg at these paces (the common rule of thumb).
+     */
+    const val WEIGHT_EXP = 0.7
+
+    data class WeightPlan(val label: String, val kgPerWeek: Double)
+    val WEIGHT_PLANS = listOf(
+        WeightPlan("Lose 1 kg/wk", -1.0), WeightPlan("Lose 0.5 kg/wk", -0.5), WeightPlan("Lose 0.1 kg/wk", -0.1),
+        WeightPlan("Stable", 0.0), WeightPlan("Gain 0.1 kg/wk", 0.1),
+    )
+
+    /** Body weight after [months] on a plan, stopping at [goal] when losing (and capped at +8 kg when gaining). */
+    fun weightAt(w0: Double, kgPerWeek: Double, months: Double, goal: Double): Double {
+        val w = w0 + kgPerWeek * months * 4.345
+        return if (kgPerWeek < 0) maxOf(w, minOf(goal, w0)) else minOf(w, w0 + 8)
+    }
+
+    fun weightFactor(w0: Double, w: Double) = Math.pow(w / w0, WEIGHT_EXP)
+
+    /** Training-model path with the weight plan applied month by month. */
+    fun pathWithWeight(start: Double, r: Rates, months: Int, w0: Double?, kgPerWeek: Double, goal: Double): List<Double> {
+        val base = path(start, r, months)
+        if (w0 == null || kgPerWeek == 0.0) return base
+        return base.mapIndexed { m, p -> maxOf(FLOOR, p * weightFactor(w0, weightAt(w0, kgPerWeek, m.toDouble(), goal))) }
     }
 
     /** Monthly SubT pace path from [start], index = months from now. */
@@ -78,6 +110,9 @@ object SubtModel {
         }
         return out
     }
+
+    /** Sub-3 marathon (2:59:59). */
+    const val SUB3 = 2 * 3600 + 59 * 60 + 59.0
 
     fun arrival(path: List<Double>, target: Double): Int? = path.indexOfFirst { it <= target }.takeIf { it >= 0 }
 

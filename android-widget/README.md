@@ -14,6 +14,20 @@ Tapping a widget on your home screen opens the app on that widget's screen. Insi
   It shows a bar per day, or a bar per week for long ranges, with Done, To do and Missed totals and the average per week.
   Underneath is a scrolling list of every session, grouped by day (✓ done, ○ planned, ★ race, ✕ missed).
 - **Today and Recovery screens:** period chips (2 weeks to 1 year) or **Custom…** to pick a start date.
+- **Today chart:** press and drag to read any day. The numbers switch to that day's Fitness, Fatigue and Form, and a crosshair marks it.
+  Dotted gridlines label the values, and the Form panel shows its zone boundaries and names. The change shown next to each number covers the selected period.
+- **Week bars:** green is the load done, with the number on top. Dashed grey is planned but missed, with the number inside. Amber is still planned.
+  Above each finished day, ✓ means on plan (±10%), ˄ more than planned and ˅ less than planned.
+- **Race:** a 3-month Fitness build-up chart. Peak, 12-week, 3-week, 1-week and race-day checkpoints show Fitness, Fatigue, Form and % of peak.
+  Race day means the morning, which is the end of the day before. It also shows the taper target (drop from peak, set with chips), Form and Fatigue targets, and coach notes.
+- **Recovery:** a readiness summary, then resting HR, HRV and sleep against your normal range, HR drift, Power:HR or efficiency, and SubT heart rate.
+- **SubT tab** has four screens:
+  - **Pace:** monthly pace and 5K goal ETAs.
+  - **Analysis:** your latest SubT session rep by rep, plus pace, HR, efficiency and power trends for every rep over 5 weeks, with coach notes.
+  - **Sub-3 forecast:** when SubT gets you to a sub-3 marathon, plus the 5K, HM and FM you can expect each month.
+  - **Sub-3 plan:** pick a race date and target, and see the SubT, 5K and HM checkpoints you need each month.
+
+  The forecast and plan include a body-weight scenario (−1, −0.5, −0.1 kg/week, stable, or +0.1 kg/week) that feeds every projection.
 
 ![App home (sample data)](preview-app.png)
 
