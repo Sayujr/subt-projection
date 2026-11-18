@@ -34,10 +34,10 @@ class MainActivity : Activity() {
     /** [inBar] tabs sit in the bottom bar; every tab is also in the ☰ menu. */
     private enum class Tab(val icon: String, val label: String, val title: String, val inBar: Boolean) {
         HOME("◉", "Today", "Training Today", true),
-        WEEK("▥", "Week", "Training load", true),
         STREAKS("✦", "Streaks", "Streaks", true),
         POWER("ϟ", "Power", "Power", true),
         SUBT("⏱", "SubT", "SubT & sub-3", true),
+        WEEK("▥", "Week", "Training load", false),
         RACE("⚑", "Race", "Race", false),
         RECOVERY("♥", "Recovery", "Recovery", false),
     }
@@ -51,6 +51,7 @@ class MainActivity : Activity() {
     private lateinit var controls: HorizontalScrollView
     private lateinit var chips: LinearLayout
     private val tabViews = mutableMapOf<Tab, TextView>()
+    private var menuView: TextView? = null
 
     // Week screen state
     private var mode = RangeMode.WEEK
@@ -104,17 +105,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.open_settings).setOnClickListener {
             startActivity(Intent(this, SetupActivity::class.java))
         }
-        findViewById<View>(R.id.open_menu).setOnClickListener { v ->
-            val pm = android.widget.PopupMenu(this, v)
-            Tab.entries.forEachIndexed { i, t -> pm.menu.add(0, i, i, "${t.icon}   ${t.label}") }
-            pm.menu.add(0, 99, 99, "⚙   Settings")
-            pm.setOnMenuItemClickListener { item ->
-                if (item.itemId == 99) startActivity(Intent(this, SetupActivity::class.java))
-                else { tab = Tab.entries[item.itemId]; show() }
-                true
-            }
-            pm.show()
-        }
+
         buildTabs()
 
         if (Prefs.credentials(this) == null) {
@@ -185,11 +176,32 @@ class MainActivity : Activity() {
             tabViews[t] = tv
             bar.addView(tv)
         }
+        // ☰ More: the other screens + Settings
+        menuView = TextView(this).apply {
+            text = "☰\nMore"
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            setLineSpacing(0f, 1.15f)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            setOnClickListener { v ->
+                val pm = android.widget.PopupMenu(this@MainActivity, v)
+                Tab.entries.filter { !it.inBar }.forEachIndexed { i, t -> pm.menu.add(0, t.ordinal, i, "${t.icon}   ${t.label}") }
+                pm.menu.add(0, 99, 99, "⚙   Settings")
+                pm.setOnMenuItemClickListener { item ->
+                    if (item.itemId == 99) startActivity(Intent(this@MainActivity, SetupActivity::class.java))
+                    else { tab = Tab.entries[item.itemId]; show() }
+                    true
+                }
+                pm.show()
+            }
+        }
+        bar.addView(menuView)
     }
 
     /** Updates tabs, title and chips, then draws the screen once the layout has settled. */
     private fun show() {
         tabViews.forEach { (t, tv) -> tv.setTextColor(if (t == tab) 0xFF4EA1FF.toInt() else 0xFF6B7386.toInt()) }
+        menuView?.setTextColor(if (!tab.inBar) 0xFF4EA1FF.toInt() else 0xFF6B7386.toInt())
         findViewById<TextView>(R.id.screen_title).text = tab.title
         buildChips()
         content.post { drawContent() }

@@ -11,7 +11,7 @@
         android:layout_height="56dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="6dp"
+        android:paddingStart="20dp"
         android:paddingEnd="8dp">
 
         <TextView
@@ -22,7 +22,8 @@
             android:gravity="center"
             android:text="☰"
             android:textColor="@color/text_dim"
-            android:textSize="22sp" />
+            android:textSize="22sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/screen_title"
