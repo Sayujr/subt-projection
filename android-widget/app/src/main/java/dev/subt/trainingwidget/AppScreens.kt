@@ -1211,23 +1211,14 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
 
     // ================================================================ Home cards
 
-    /** Push / Hold / Back off with the reasons behind it. */
+    /** Push / Hold / Back off / Taper: a clean stack (label, call, one-line reason, signals as bullets). */
     fun verdictCard(col: LinearLayout) {
         val v = Verdict.compute(Prefs.snapshot(a)) ?: return
         val c = card(col)
-        val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        r.addView(TextView(a).apply {
-            text = v.call.label.uppercase(loc); setTextColor(v.call.color); letterSpacing = 0.08f
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f); typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        })
-        r.addView(TextView(a).apply { text = "   " + v.headline; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        c.addView(r)
-        val reasons = TextView(a).apply {
-            text = spans(*v.reasons.flatMapIndexed { i, (col2, t) -> listOf((if (i > 0) "  ·  " else "") to FAINT, t to col2) }.toTypedArray())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f); setPadding(0, dp(6), 0, 0); setLineSpacing(dpf(2f).toFloat(), 1f)
-        }
-        c.addView(reasons)
+        label(c, "Today's call")
+        text(c, v.call.label, 26f, v.call.color, bold = true, top = 2).apply { letterSpacing = 0.02f }
+        text(c, v.headline, 14.5f, DIM, top = 0)
+        for ((color, t) in v.reasons) bullet(c, color, t)
     }
 
     /** Today's planned sessions with their power steps (app only). */
@@ -1293,9 +1284,9 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val st = Streaks.compute(a) ?: return
         val c = card(col)
         label(c, "Load-balance streak")
-        text(c, spans("${st.dayStreak}" to TEXT, " day${if (st.dayStreak == 1) "" else "s"}" to DIM, "   ·   " to FAINT,
-            "${st.weekStreak}" to TEXT, " week${if (st.weekStreak == 1) "" else "s"}" to DIM, "   ·   " to FAINT,
+        text(c, spans("${st.weekStreak}" to TEXT, " week${if (st.weekStreak == 1) "" else "s"}" to DIM, "   ·   " to FAINT,
             "${st.monthStreak}" to TEXT, " month${if (st.monthStreak == 1) "" else "s"}" to DIM), 18f, top = 2)
+        text(c, "Day streak ${st.dayStreak}", 12f, FAINT, top = 2)
         st.thisWeek?.let { dayDots(c, it.days, LocalDate.now()) }
     }
 
@@ -1330,48 +1321,40 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
 
     // ================================================================ Streaks tab
 
+    /** A card whose body opens on tap (closed by default). */
+    private fun collapsible(col: LinearLayout, title: String, open: Boolean = false): LinearLayout {
+        val c = card(col)
+        val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; visibility = if (open) View.VISIBLE else View.GONE }
+        val head = TextView(a).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f); letterSpacing = 0.08f; setTextColor(DIM)
+            fun label(o: Boolean) { text = title.uppercase(loc) + if (o) "   ⌄" else "   ›" }
+            label(open)
+            setOnClickListener { val o = body.visibility != View.VISIBLE; body.visibility = if (o) View.VISIBLE else View.GONE; label(o) }
+        }
+        c.addView(head); c.addView(body)
+        return body
+    }
+
     fun streaks(col: LinearLayout) {
         val st = Streaks.compute(a)
         val top = card(col)
         label(top, "Load-balance streaks")
         if (st == null) { text(top, "Needs about two months of Fitness history. Loading…", 14f, DIM, top = 4); return }
         stats3(top, listOf(
-            Triple("Day streak", "${st.dayStreak}" to GOOD, "best ${st.bestDayStreak}"),
             Triple("Week streak", "${st.weekStreak}" to GOOD, "best ${st.bestWeekStreak}"),
             Triple("Month streak", "${st.monthStreak}" to GOOD, "${st.months.count { it.passed == true }} passed"),
+            Triple("This week", (st.thisWeek?.let { w -> if (w.kind == "taper / race week") "Taper" else w.avgForm?.let { signed(it.roundToInt()) } } ?: "–") to
+                (st.thisWeek?.avgForm?.let { if (it in -10.0..5.0) GOOD else WARN } ?: 0xFF5EC8FF.toInt()), "avg Form so far"),
         ))
-        text(top, spans("This week so far: " to DIM, (st.thisWeek?.avgForm?.let { "avg Form ${signed(it.roundToInt())}" } ?: "–") to
-            (st.thisWeek?.avgForm?.let { if (it in -10.0..5.0) GOOD else WARN } ?: TEXT)), 13.5f, top = 6)
         st.thisWeek?.let { dayDots(top, it.days, LocalDate.now()) }
+        text(top, "Day streak ${st.dayStreak} · best ${st.bestDayStreak}", 12f, FAINT, top = 6)
 
-        // Rules + adjusters
-        val rules = card(col)
-        label(rules, "Your rules")
-        val band = Prefs.fitnessBand(a); val fat = Prefs.fatigueMin(a)
-        text(rules, spans("Day streak (relaxed) passes when:" to TEXT), 14f, bold = true, top = 6)
-        text(rules, "• Fitness stays within $band% of your reference peak\n• the 3-day average Form is −15 to +8, so one rest or recovery day is fine but several in a row aren't\n• TT mini-taper, taper and race days pass if the floor holds", 13.5f, DIM, top = 2)
-        text(rules, spans("Week (Mon–Sun) passes when:" to TEXT), 14f, bold = true, top = 12)
-        text(rules, "• average Form across the week is in the Grey zone (−10 to +5)\n" +
-            "• average Fatigue is at least $fat% of average Fitness\n" +
-            "• you exit the week (Sunday) with Fitness within $band% of your reference peak and Form in the Grey zone too (unless Sunday is a TT or race)", 13.5f, DIM, top = 2)
-        chipRow(rules, listOf(5, 10, 15, 20).map { "Fitness within $it%" }, listOf(5, 10, 15, 20).indexOf(band)) { Prefs.setFitnessBand(a, listOf(5, 10, 15, 20)[it]); onChange() }
-        chipRow(rules, listOf(90, 95, 100, 105).map { "Fatigue ≥ $it%" }, listOf(90, 95, 100, 105).indexOf(fat)) { Prefs.setFatigueMin(a, listOf(90, 95, 100, 105)[it]); onChange() }
-        text(rules, spans("Month passes when:" to TEXT), 14f, bold = true, top = 12)
-        text(rules, "• average Form is −12 to +5\n• exit Fitness is at least 97% of entry (90% in a race month)\n• no more than one week failed", 13.5f, DIM, top = 2)
-        text(rules, spans("Lighter rules:" to TEXT), 14f, bold = true, top = 12)
-        text(rules, "• TT / race / CP-test days: any workout or activity whose name contains race, TT, time trial, parkrun, CP or CPT (\"race pace\" doesn't count). The 2 days before, the day itself and the day after are left out of the Form and Fatigue averages, but the Fitness floor still applies\n" +
-            "• Race taper (A 14 · B 10 · C 5 days): judged only on Fitness staying above the race floor. Race day and the 3 days after aren't judged", 13.5f, DIM, top = 2)
-        text(rules, spans("Day dots: " to FAINT, "● all build rules  " to GOOD, "● day streak OK  " to WARN, "● day streak broken  " to BAD, "● TT mini-taper  " to 0xFF8C9EFF.toInt(), "● race / taper" to 0xFF5EC8FF.toInt()), 11.5f, top = 10)
-        text(rules, "Dots follow the day streak. Week and month results come from averages and how you exit.", 11.5f, FAINT, top = 2)
-
-        // Streak history: timelines, stats and every run with what ended it
-        streakHistory(col, "Day streaks", st.dayRuns, st.days.firstOrNull()?.date, "days")
+        streakInsights(col, st)
         streakHistory(col, "Week streaks", st.weekRuns, st.weeks.firstOrNull()?.monday, "weeks")
         streakHistory(col, "Month streaks", st.monthRuns, st.months.firstOrNull()?.month, "months")
 
-        // Weeks, newest first
-        val wc = card(col)
-        label(wc, "Weeks")
+        // Week by week (collapsed)
+        val wc = collapsible(col, "Week by week")
         for (w in st.weeks.reversed()) {
             val head = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
             head.addView(TextView(a).apply { text = "${w.monday.format(dm)} – ${w.monday.plusDays(6).format(dm)}"; setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) },
@@ -1392,9 +1375,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             text(wc, facts.joinToString(" · "), 11.5f, FAINT, top = 2)
             if (w.reasons.isNotEmpty() && w.passed == false) text(wc, w.reasons.joinToString(" · "), 11.5f, WARN, top = 1)
         }
-        // Months
-        val mc = card(col)
-        label(mc, "Months")
+        // Months (collapsed)
+        val mc = collapsible(col, "Months")
         for (m in st.months.reversed()) {
             row(mc, listOf(
                 m.month.format(DateTimeFormatter.ofPattern("MMMM yyyy", loc)) to TEXT,
@@ -1408,11 +1390,108 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             )
             text(mc, parts.joinToString(" · "), 11.5f, FAINT, top = 0)
         }
+        // Day streaks (collapsed)
+        val dc = collapsible(col, "Day streaks")
+        streakHistory(dc, "Day streaks", st.dayRuns, st.days.firstOrNull()?.date, "days", inCard = false)
+
+        // Rules & settings (collapsed)
+        val rules = collapsible(col, "Rules & settings")
+        val band = Prefs.fitnessBand(a); val fat = Prefs.fatigueMin(a)
+        text(rules, spans("Week (Mon–Sun) passes when:" to TEXT), 14f, bold = true, top = 8)
+        text(rules, "• average Form across the week is in the Grey zone (−10 to +5)\n" +
+            "• average Fatigue is at least $fat% of average Fitness\n" +
+            "• you exit the week (Sunday) with Fitness within $band% of your reference peak and Form in the Grey zone (unless Sunday is a TT or race)", 13.5f, DIM, top = 2)
+        chipRow(rules, listOf(5, 10, 15, 20).map { "Fitness within $it%" }, listOf(5, 10, 15, 20).indexOf(band)) { Prefs.setFitnessBand(a, listOf(5, 10, 15, 20)[it]); onChange() }
+        chipRow(rules, listOf(90, 95, 100, 105).map { "Fatigue ≥ $it%" }, listOf(90, 95, 100, 105).indexOf(fat)) { Prefs.setFatigueMin(a, listOf(90, 95, 100, 105)[it]); onChange() }
+        text(rules, spans("Month passes when:" to TEXT), 14f, bold = true, top = 12)
+        text(rules, "• average Form is −12 to +5\n• exit Fitness is at least 97% of entry (90% in a race month)\n• no more than one week failed", 13.5f, DIM, top = 2)
+        text(rules, spans("Day streak (relaxed) passes when:" to TEXT), 14f, bold = true, top = 12)
+        text(rules, "• Fitness stays within $band% of your reference peak\n• the 3-day average Form is −15 to +8, so one rest or recovery day is fine\n• TT, taper and race days pass if the floor holds", 13.5f, DIM, top = 2)
+        text(rules, spans("Lighter rules:" to TEXT), 14f, bold = true, top = 12)
+        text(rules, "• TT / race / CP-test days: any workout or activity whose name contains race, TT, time trial, parkrun, CP or CPT (\"race pace\" doesn't count). The 2 days before, the day itself and the day after are left out of the Form and Fatigue averages, but the Fitness floor still applies\n" +
+            "• Race taper (A 14 · B 10 · C 5 days): judged only on Fitness staying above the race floor. Race day and the 3 days after aren't judged", 13.5f, DIM, top = 2)
+        text(rules, spans("Day dots: " to FAINT, "● all build rules  " to GOOD, "● day streak OK  " to WARN, "● day streak broken  " to BAD, "● TT mini-taper  " to 0xFF8C9EFF.toInt(), "● race / taper" to 0xFF5EC8FF.toInt()), 11.5f, top = 10)
     }
 
-    private fun streakHistory(col: LinearLayout, title: String, runs: List<Streaks.Run>, from: LocalDate?, unit: String) {
+    /** What broke the last streak, whether it was a one-off, the trend, and this week's action items. */
+    private fun streakInsights(col: LinearLayout, st: Streaks.Summary) {
         val c = card(col)
-        label(c, "History · $title")
+        label(c, "Insights")
+        val done = st.weeks.filter { it.complete && it.passed != null }
+        if (done.isEmpty()) { text(c, "No completed weeks to learn from yet.", 13.5f, DIM, top = 4); return }
+
+        // 1) What happened to the streak
+        val lastFail = done.lastOrNull { it.passed == false }
+        text(c, "What happened", 14f, TEXT, bold = true, top = 6)
+        if (lastFail == null) {
+            bullet(c, GOOD, "No failed weeks in your history here. The ${st.weekStreak}-week streak is your whole record.")
+        } else {
+            val before = st.weekRuns.firstOrNull { it.brokenOn == lastFail.monday }
+            val afterIdx = done.indexOf(lastFail)
+            val prevFails = done.take(afterIdx).takeLast(8).count { it.passed == false }
+            val oneOff = (before?.length ?: 0) >= 3 && prevFails == 0
+            bullet(c, BAD, "Week of ${lastFail.monday.format(dm)} broke " + (before?.let { "a ${it.length}-week streak" } ?: "the run") + ": " +
+                lastFail.reasons.joinToString("; ").ifBlank { "missed the rules" } + ".")
+            if (oneOff) bullet(c, GOOD, "It looks like a one-off: you'd passed ${before!!.length} weeks in a row with no misses in the 8 weeks before. Since then: ${st.weekStreak} week${if (st.weekStreak == 1) "" else "s"} back on track.")
+            else if (prevFails > 0) bullet(c, WARN, "Not a one-off: $prevFails other miss${if (prevFails == 1) "" else "es"} in the 8 weeks before it.")
+            if (st.weekStreak < st.bestWeekStreak) {
+                val best = st.weekRuns.maxBy { it.length }
+                bullet(c, DIM, "Your best was ${best.length} weeks (${best.start.format(dm)} – ${best.end.format(dm)} ${best.end.year}). You're ${st.bestWeekStreak - st.weekStreak} away from matching it.")
+            }
+        }
+
+        // 2) Pattern / reflection
+        text(c, "Pattern", 14f, TEXT, bold = true, top = 12)
+        fun rate(l: List<Streaks.WeekResult>) = if (l.isEmpty()) null else l.count { it.passed == true } * 100 / l.size
+        val r4 = rate(done.takeLast(4)); val r12 = rate(done.takeLast(12)); val rPrev = rate(done.dropLast(12).takeLast(12))
+        bullet(c, if ((r12 ?: 0) >= 75) GOOD else WARN, "Passed ${r4 ?: 0}% of the last 4 weeks and ${r12 ?: 0}% of the last 12" + (rPrev?.let { " (vs $it% the 12 before)" } ?: "") + ".")
+        val fails = done.filter { it.passed == false }
+        val common = fails.flatMap { it.reasons }.map { r -> when {
+            r.startsWith("Average Form") -> if ((r.filter { ch -> ch.isDigit() || ch == '-' }.toIntOrNull() ?: 0) < -10) "weeks too hard (avg Form below −10)" else "weeks too easy (avg Form above +5)"
+            r.startsWith("Exited with Form") -> "ending the week outside Grey"
+            r.startsWith("Average Fatigue") -> "too little load (Fatigue low vs Fitness)"
+            r.startsWith("Exited with Fitness") -> "Fitness slipping under the floor"
+            else -> r
+        } }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }
+        if (common.isNotEmpty()) bullet(c, WARN, "Weeks usually fail from " + common.take(2).joinToString(" and ") { "${it.key} (${it.value}×)" } + ".")
+        val forms = done.mapNotNull { it.avgForm }
+        if (forms.size >= 4) {
+            val recent = forms.takeLast(4).average()
+            bullet(c, DIM, "Average weekly Form over the last 4 weeks: ${signed(recent.roundToInt())}" +
+                (if (recent > 5) ". You're drifting fresh, which can quietly cost Fitness." else if (recent < -10) ". You're digging deep, so watch recovery." else ", right in the Grey zone."))
+        }
+
+        // 3) This week: projection from the plan + actions
+        val s = Prefs.snapshot(a) ?: return
+        val tw = st.thisWeek ?: return
+        text(c, "This week", 14f, TEXT, bold = true, top = 12)
+        if (tw.kind == "taper / race week") {
+            bullet(c, 0xFF5EC8FF.toInt(), "Taper / race week: judged only on Fitness staying above the race floor" + (tw.floor?.let { " (${it.roundToInt()})" } ?: "") + ". Form and Fatigue don't count, so rest up.")
+            return
+        }
+        val sunday = tw.monday.plusDays(6).toString()
+        val past = tw.days.mapNotNull { it.day }
+        val future = s.proj.filter { it.date > LocalDate.now().toString() && it.date <= sunday }
+        val all = past + future
+        if (all.isEmpty()) return
+        val avgForm = all.map { it.form }.average()
+        val exit = all.last()
+        val ratio = all.map { it.atl }.average() / all.map { it.ctl }.average()
+        bullet(c, DIM, "Projected from your plan: avg Form ${signed(avgForm.roundToInt())}, Sunday Form ${signed(exit.form.roundToInt())}, Fatigue ${(ratio * 100).roundToInt()}% of Fitness.")
+        val fatMin = Prefs.fatigueMin(a) / 100.0
+        val actions = mutableListOf<Pair<Int, String>>()
+        if (exit.form > 5) actions += WARN to "Sunday Form +${exit.form.roundToInt()} would be above Grey. Keep the planned long run, or add some steady volume late in the week."
+        if (exit.form < -10) actions += WARN to "Sunday Form ${exit.form.roundToInt()} would be too deep. Make Saturday and Sunday easier."
+        if (avgForm > 5) actions += WARN to "The week is trending too fresh. Don't skip the key sessions."
+        if (avgForm < -10) actions += WARN to "The week is trending too hard. Swap one session for easy running."
+        if (ratio < fatMin) actions += WARN to "Fatigue is only ${(ratio * 100).roundToInt()}% of Fitness, short of the ${(fatMin * 100).roundToInt()}% the week needs."
+        if (actions.isEmpty()) actions += GOOD to "On track to pass. Run the plan as written."
+        actions.forEach { (col2, t) -> bullet(c, col2, t) }
+    }
+
+    private fun streakHistory(col: LinearLayout, title: String, runs: List<Streaks.Run>, from: LocalDate?, unit: String, inCard: Boolean = true) {
+        val c = if (inCard) card(col) else col
+        if (inCard) label(c, "History · $title")
         if (runs.isEmpty() || from == null) { text(c, "No completed $unit yet.", 13.5f, DIM, top = 4); return }
         val today = LocalDate.now()
         image(c, Charts.streakTimeline(runs, from, today, "$unit · green = streak, red = broken", chartW(), dp(64), d), 64)
