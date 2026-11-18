@@ -95,6 +95,9 @@ GitHub Actions (`.github/workflows/android-widget.yml`) builds the APK on every 
 To build locally, open this folder in Android Studio, or run `./gradlew assembleDebug`.
 
 Builds are signed with a private key kept in two GitHub Actions secrets: `SIGNING_KEYSTORE_B64` (the keystore,
-base64-encoded) and `SIGNING_PASSWORD`. Every build uses that same key and gets a higher version number, so a new APK
-installs as an update and your placed widgets and settings stay. CI refuses to build without them. Local builds
-without the secrets use the standard Android debug key.
+base64-encoded) and `SIGNING_PASSWORD`. CI refuses to build without them.
+
+Early versions were signed with a public key, `keystore/legacy-public.jks`. CI uses Android **key rotation**
+(APK Signature Scheme v3 lineage), so new builds install as updates over those versions without an uninstall.
+After a phone installs a rotated build, it trusts only the private key, and an APK signed with just the
+legacy key is refused. The legacy key stays in the repo only to sign that rotation proof.

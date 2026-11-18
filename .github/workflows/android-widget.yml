@@ -51,19 +51,36 @@ jobs:
               echo "::error::The signing password doesn't open the keystore. Re-paste SIGNING_PASSWORD."
               exit 1
             fi
-            echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-            echo "SIGNING_PASSWORD=$PW" >> "$GITHUB_ENV"
-            echo "Signing with the private key from secrets"
+            echo "NEW_KS=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "NEW_PW=$PW" >> "$GITHUB_ENV"
+            echo "Private signing key ready"
           else
             echo "::error::SIGNING_KEYSTORE_B64 secret is missing. Not building, because an APK signed with another key wouldn't install as an update."
             exit 1
           fi
 
-      - name: Build release APK
+      - name: Build release APK (unsigned)
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk training-widget.apk
+
+      # Key rotation (APK Signature Scheme v3): signed by the old key with a proof that the private
+      # key replaces it, so it installs over copies signed with the old key, without an uninstall.
+      # Phones that have it then trust only the private key; an APK signed with just the old key is refused.
+      - name: Sign with key rotation (old key -> private key)
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "Using build-tools $(basename "$BT")"
+          "$BT/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" rotate --out "$RUNNER_TEMP/lineage.bin" \
+            --old-signer --ks keystore/legacy-public.jks --ks-key-alias trainingwidget --ks-pass pass:trainingwidget --key-pass pass:trainingwidget \
+            --new-signer --ks "$NEW_KS" --ks-key-alias trainingtoday --ks-pass env:NEW_PW --key-pass env:NEW_PW
+          "$BT/apksigner" sign \
+            --ks keystore/legacy-public.jks --ks-key-alias trainingwidget --ks-pass pass:trainingwidget --key-pass pass:trainingwidget \
+            --next-signer --ks "$NEW_KS" --ks-key-alias trainingtoday --ks-pass env:NEW_PW --key-pass env:NEW_PW \
+            --lineage "$RUNNER_TEMP/lineage.bin" \
+            --out training-widget.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify -v --print-certs training-widget.apk | grep -E "Verified using|Number of signers|certificate DN|lineage" || true
 
       - uses: actions/upload-artifact@v4
         with:
