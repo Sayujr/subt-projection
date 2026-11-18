@@ -261,16 +261,16 @@ object SubtApi {
             conn.disconnect()
         }
         val o = JSONObject(body)
+        val laps = o.optJSONArray("all_repeats")?.objects().orEmpty()
+        val hrByMonth = laps.groupBy { it.optString("date").take(7) }
+            .mapValues { (_, l) -> l.mapNotNull { x -> x.optDouble("hr").takeIf { !it.isNaN() && it > 0 } }.sorted() }
+            .mapValues { (_, v) -> if (v.isEmpty()) null else if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2 }
         val monthly = o.getJSONArray("monthly").objects().map {
             SubtMonth(
                 it.getString("date").take(7), it.getDouble("pace"), it.optInt("n"), it.optBoolean("is_outlier"),
                 hrByMonth[it.getString("date").take(7)],
             )
         }.sortedBy { it.month }
-        val laps = o.optJSONArray("all_repeats")?.objects().orEmpty()
-        val hrByMonth = laps.groupBy { it.optString("date").take(7) }
-            .mapValues { (_, l) -> l.mapNotNull { x -> x.optDouble("hr").takeIf { !it.isNaN() && it > 0 } }.sorted() }
-            .mapValues { (_, v) -> if (v.isEmpty()) null else if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2 }
         val cutoff = today.minusDays(30).toString()
         return SubtData(
             fetchedAt = System.currentTimeMillis(),
