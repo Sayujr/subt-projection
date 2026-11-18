@@ -12,7 +12,7 @@ import kotlin.math.roundToInt
  *  Fatigue target = f × P, with f by priority (A 0.66 · B 0.72 · C 0.80), adjusted for distance
  *  (marathon −0.05 · half −0.02 · 10K 0 · 5K +0.03) and preset (strict −0.04 · relaxed +0.04),
  *  then blended 50/50 with your own past races where you improved (their race-eve Fatigue ÷ P).
- *  Range: (f − 0.04)…(f + 0.03) × P.
+ *  Range: (f − 0.04)…(f + 0.03) × P, aiming at the low end: target = (f − 0.03) × P.
  *
  *  Fitness floor = g × P, g by distance (marathon 0.92 · half 0.90 · 10K 0.88 · 5K 0.87),
  *  A race −0.01, preset strict +0.02 · relaxed −0.03.
@@ -65,7 +65,7 @@ object Taper {
         val presetG = when (preset) { 0 -> 0.02; 2 -> -0.03; else -> 0.0 }
         val g = floorFactor(distance) - (if (category == "RACE_A") 0.01 else 0.0) + presetG
         return Targets(p60, p90, p120, ref, distance, baseF, personalF, good.size, f,
-            (f - 0.04) * ref, f * ref, (f + 0.03) * ref, g, g * ref)
+            (f - 0.04) * ref, (f - 0.03) * ref, (f + 0.03) * ref, g, g * ref)
     }
 
     fun pct(v: Double) = "${(v * 100).roundToInt()}%"

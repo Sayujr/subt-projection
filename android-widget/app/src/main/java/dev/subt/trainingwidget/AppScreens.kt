@@ -291,7 +291,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             text(tg, spans(
                 "How it's worked out\n" to DIM,
                 "Reference peak = 50% × 2-month peak ${tt.p60?.roundToInt() ?: "–"} + 30% × 3-month ${tt.p90?.roundToInt() ?: "–"} + 20% × 4-month ${tt.p120?.roundToInt() ?: "–"} = ${tt.ref.roundToInt()}\n" to FAINT,
-                "Fatigue target = ${Taper.pct(tt.f)} of reference: ${race.category.removePrefix("RACE_")} race, ${dist.label.lowercase(loc)}, ${listOf("strict", "standard", "relaxed")[preset]} preset → ${Taper.pct(tt.baseF)}" to FAINT,
+                "Fatigue range = ${Taper.pct(tt.f - 0.04)}–${Taper.pct(tt.f + 0.03)} of reference, target at the low end (${Taper.pct(tt.f - 0.03)}). Centre ${Taper.pct(tt.f)}: ${race.category.removePrefix("RACE_")} race, ${dist.label.lowercase(loc)}, ${listOf("strict", "standard", "relaxed")[preset]} preset → ${Taper.pct(tt.baseF)}" to FAINT,
                 (if (tt.personalF != null) ", blended 50/50 with your ${tt.personalN} improved race${if (tt.personalN > 1) "s" else ""} (${Taper.pct(tt.personalF)})" else ", not yet calibrated (load Past races)") to FAINT,
                 "\nFitness floor = ${Taper.pct(tt.g)} of reference (by distance and priority)" to FAINT,
             ), 12f, top = 10)
@@ -325,7 +325,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                     }
                     eve.atl < tt.fatLo -> bullet(c, FormColors.FITNESS, "Race-morning Fatigue ${eve.atl.roundToInt()} is below the ${tt.fatLo.roundToInt()}–${tt.fatHi.roundToInt()} range, so you'd be fresher than you need to be. " +
                         "You could keep a little more steady running in the final week to protect Fitness.")
-                    else -> bullet(c, GOOD, "Race-morning Fatigue ${eve.atl.roundToInt()} sits in your ${tt.fatLo.roundToInt()}–${tt.fatHi.roundToInt()} target range.")
+                    eve.atl > tt.fatTarget + 1 -> bullet(c, GOOD, "Race-morning Fatigue ${eve.atl.roundToInt()} is in your ${tt.fatLo.roundToInt()}–${tt.fatHi.roundToInt()} range but above the low-end target of ${tt.fatTarget.roundToInt()}. A slightly easier last 2–3 days would get you there.")
+                    else -> bullet(c, GOOD, "Race-morning Fatigue ${eve.atl.roundToInt()} is at the low end of your ${tt.fatLo.roundToInt()}–${tt.fatHi.roundToInt()} range, right on target.")
                 }
                 if (eve.ctl < tt.floor) bullet(c, BAD, "Fitness ${eve.ctl.roundToInt()} would be under your ${tt.floor.roundToInt()} floor (${Taper.pct(tt.g)} of the ${tt.ref.roundToInt()} reference peak). The taper is too deep, so keep some volume and drop Fatigue with shorter, easier sessions rather than rest days.")
                 else bullet(c, GOOD, "Fitness ${eve.ctl.roundToInt()} stays above the ${tt.floor.roundToInt()} floor. High Fitness is fine as long as Fatigue is managed.")
