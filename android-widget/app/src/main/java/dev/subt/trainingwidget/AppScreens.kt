@@ -1364,6 +1364,11 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         text(rules, spans("Day dots: " to FAINT, "● all build rules  " to GOOD, "● day streak OK  " to WARN, "● day streak broken  " to BAD, "● TT mini-taper  " to 0xFF8C9EFF.toInt(), "● race / taper" to 0xFF5EC8FF.toInt()), 11.5f, top = 10)
         text(rules, "Dots follow the day streak. Week and month results come from averages and how you exit.", 11.5f, FAINT, top = 2)
 
+        // Streak history: timelines, stats and every run with what ended it
+        streakHistory(col, "Day streaks", st.dayRuns, st.days.firstOrNull()?.date, "days")
+        streakHistory(col, "Week streaks", st.weekRuns, st.weeks.firstOrNull()?.monday, "weeks")
+        streakHistory(col, "Month streaks", st.monthRuns, st.months.firstOrNull()?.month, "months")
+
         // Weeks, newest first
         val wc = card(col)
         label(wc, "Weeks")
@@ -1403,6 +1408,32 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             )
             text(mc, parts.joinToString(" · "), 11.5f, FAINT, top = 0)
         }
+    }
+
+    private fun streakHistory(col: LinearLayout, title: String, runs: List<Streaks.Run>, from: LocalDate?, unit: String) {
+        val c = card(col)
+        label(c, "History · $title")
+        if (runs.isEmpty() || from == null) { text(c, "No completed $unit yet.", 13.5f, DIM, top = 4); return }
+        val today = LocalDate.now()
+        image(c, Charts.streakTimeline(runs, from, today, "$unit · green = streak, red = broken", chartW(), dp(64), d), 64)
+        val current = runs.lastOrNull()?.takeIf { it.brokenOn == null }?.length ?: 0
+        val longest = runs.maxBy { it.length }
+        val avg = runs.filter { it.brokenOn != null }.map { it.length }.takeIf { it.isNotEmpty() }?.average()
+        val breaks = runs.count { it.brokenOn != null }
+        stats3(c, listOf(
+            Triple("Current", "$current" to GOOD, unit),
+            Triple("Longest", "${longest.length}" to TEXT, "${longest.start.format(dm)} – ${longest.end.format(dm)}"),
+            Triple("Average", (avg?.let { fmt1(it) } ?: "–") to TEXT, "$breaks break${if (breaks == 1) "" else "s"}"),
+        ))
+        val why = runs.mapNotNull { it.brokenBy }.map { it.substringBefore(" ·").replace(Regex("[−-]?\\d+"), "#").trim() }
+            .groupingBy { it }.eachCount().maxByOrNull { it.value }
+        why?.let { text(c, spans("Most often ended by: " to FAINT, "${it.key.replace("#", "…")} (${it.value}×)" to WARN), 12.5f, top = 6) }
+        for (r in runs.reversed().take(12)) {
+            val head = "${r.start.format(dm)} → ${if (r.brokenOn == null) "now" else r.end.format(dm)}"
+            text(c, spans(head to TEXT, "  ·  ${r.length} $unit" to (if (r.brokenOn == null) GOOD else DIM)), 13.5f, top = 8)
+            if (r.brokenOn != null) text(c, "ended ${r.brokenOn.format(dm)}: ${r.brokenBy}", 12f, WARN, top = 0)
+        }
+        if (runs.size > 12) text(c, "+ ${runs.size - 12} earlier streaks", 11.5f, FAINT, top = 6)
     }
 
     // ================================================================ Power tab

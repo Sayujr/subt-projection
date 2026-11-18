@@ -35,11 +35,33 @@ object Streaks {
         val month: LocalDate, val weeks: List<WeekResult>, val passed: Boolean?,
         val avgForm: Double?, val entryCtl: Double?, val exitCtl: Double?, val failedWeeks: Int, val hadRace: Boolean,
     )
+    /** One streak: first and last passing period, its length, and what broke it (null while it's still going). */
+    data class Run(val start: LocalDate, val end: LocalDate, val length: Int, val brokenOn: LocalDate?, val brokenBy: String?)
+
     data class Summary(
         val days: List<DayResult>, val weeks: List<WeekResult>, val months: List<MonthResult>,
         val weekStreak: Int, val monthStreak: Int, val bestWeekStreak: Int, val thisWeek: WeekResult?,
         val dayStreak: Int = 0, val bestDayStreak: Int = 0,
+        val dayRuns: List<Run> = emptyList(), val weekRuns: List<Run> = emptyList(), val monthRuns: List<Run> = emptyList(),
     )
+
+    /** Splits a sequence of pass / fail / skip periods into streak runs. */
+    private fun <T> runs(items: List<T>, date: (T) -> LocalDate, endOf: (T) -> LocalDate, pass: (T) -> Boolean?, why: (T) -> String): List<Run> {
+        val out = mutableListOf<Run>()
+        var first: T? = null; var last: T? = null; var n = 0
+        for (it in items) {
+            when (pass(it)) {
+                null -> continue
+                true -> { if (first == null) first = it; last = it; n++ }
+                false -> {
+                    if (first != null) out += Run(date(first!!), endOf(last!!), n, date(it), why(it))
+                    first = null; last = null; n = 0
+                }
+            }
+        }
+        if (first != null) out += Run(date(first!!), endOf(last!!), n, null, null)
+        return out
+    }
 
     private data class RaceRef(val date: LocalDate, val category: String, val name: String)
     private val TT = Regex("(\\bTT\\b|time ?trial|parkrun)", RegexOption.IGNORE_CASE)
@@ -164,7 +186,16 @@ object Streaks {
         for (r in judgedDays.reversed()) { if (dayPass(r)) dStreak++ else break }
         var bestD = 0; var runD = 0
         for (r in judgedDays) { if (dayPass(r)) { runD++; bestD = maxOf(bestD, runD) } else runD = 0 }
+        val dayRuns = runs(judgedDays, { it.date }, { it.date }, { dayPass(it) }, { it.notes.firstOrNull { n -> !n.startsWith("Fatigue") && !n.startsWith("Form outside") } ?: "missed the day rules" })
+        val weekRuns = runs(done, { it.monday }, { it.monday.plusDays(6) }, { it.passed }, { it.reasons.joinToString(" · ").ifBlank { "missed" } })
+        val monthRuns = runs(months.filter { it.passed != null }, { it.month }, { it.month.plusMonths(1).minusDays(1) }, { it.passed }, { m ->
+            listOfNotNull(
+                if (m.failedWeeks > 1) "${m.failedWeeks} weeks failed" else null,
+                if (m.entryCtl != null && m.exitCtl != null && m.exitCtl < m.entryCtl * (if (m.hadRace) 0.9 else 0.97)) "Fitness fell ${((1 - m.exitCtl / m.entryCtl) * 100).toInt()}%" else null,
+                m.avgForm?.takeIf { it !in -12.0..5.0 }?.let { "avg Form ${it.toInt()}" },
+            ).joinToString(" · ").ifBlank { "missed" }
+        })
         return Summary(dayResults, weeks, months, streak(done.map { it.passed }), streak(months.map { it.passed }), best,
-            weeks.lastOrNull()?.takeIf { !it.complete }, dStreak, bestD)
+            weeks.lastOrNull()?.takeIf { !it.complete }, dStreak, bestD, dayRuns, weekRuns, monthRuns)
     }
 }

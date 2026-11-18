@@ -846,6 +846,39 @@ object Charts {
         return bmp
     }
 
+    /** Streaks on a time line: green bars for each run (labelled with its length when there's room), red ticks where one broke. */
+    fun streakTimeline(runs: List<Streaks.Run>, start: LocalDate, end: LocalDate, unit: String, w: Int, h: Int, density: Float): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val text = labelPaint(density).apply { textSize = 10f * density }
+        val span = java.time.temporal.ChronoUnit.DAYS.between(start, end).toFloat().coerceAtLeast(1f)
+        fun x(d: LocalDate) = (java.time.temporal.ChronoUnit.DAYS.between(start, d) / span * (w - 4f * density) + 2f * density)
+        val laneTop = 16f * density; val laneBottom = h - 18f * density
+        c.drawRoundRect(0f, laneTop, w.toFloat(), laneBottom, 4f * density, 4f * density, Paint().apply { color = 0xFF2C3240.toInt() })
+        val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC3DD68C.toInt() }
+        val live = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3DD68C.toInt() }
+        val brk = Paint().apply { color = 0xFFFF7A7A.toInt(); strokeWidth = 2f * density }
+        val lbl = labelPaint(density).apply { textSize = 10f * density; color = 0xFFF2F4F8.toInt() }
+        for (r in runs) {
+            val x0 = x(r.start); val x1 = maxOf(x(r.end.plusDays(1)), x0 + 2f * density)
+            c.drawRoundRect(x0, laneTop, x1, laneBottom, 3f * density, 3f * density, if (r.brokenOn == null) live else bar)
+            val s = "${r.length}"
+            if (x1 - x0 > lbl.measureText(s) + 6f * density) c.drawText(s, (x0 + x1) / 2 - lbl.measureText(s) / 2, (laneTop + laneBottom) / 2 + 3.5f * density, lbl)
+            r.brokenOn?.let { b -> val bx = x(b); c.drawLine(bx, laneTop - 4f * density, bx, laneBottom + 4f * density, brk) }
+        }
+        // Month labels
+        var m = start.withDayOfMonth(1).plusMonths(1)
+        val f = DateTimeFormatter.ofPattern("MMM", Locale.getDefault())
+        var lastRight = -1f
+        while (!m.isAfter(end)) {
+            val xx = x(m); val l = m.format(f); val tw = text.measureText(l)
+            if (xx - tw / 2 > lastRight + 4f * density) { c.drawText(l, (xx - tw / 2).coerceIn(0f, w - tw), h - 3f * density, text); lastRight = xx + tw / 2 }
+            m = m.plusMonths(1)
+        }
+        c.drawText(unit, 0f, 11f * density, text)
+        return bmp
+    }
+
     private fun signed(v: Int) = if (v > 0) "+$v" else "$v"
 
     private fun shortDate(iso: String): String = try {

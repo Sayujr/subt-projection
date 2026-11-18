@@ -32,7 +32,7 @@ object Prefs {
     /** Days of history needed to draw every widget's chosen period. */
     fun historyNeeded(ctx: Context): Int =
         // 120 days minimum so the Race screen can show the 3-month build-up
-        (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + period(ctx, WidgetRenderer.APP_ID) + 180).max()
+        (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + period(ctx, WidgetRenderer.APP_ID) + 365).max()
 
     fun subt(ctx: Context): SubtData? = sp(ctx).getString("subt", null)?.let { SubtData.fromJson(it) }
 
