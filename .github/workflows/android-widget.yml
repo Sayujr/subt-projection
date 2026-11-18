@@ -31,7 +31,13 @@ jobs:
           KS: ${{ secrets.SIGNING_KEYSTORE_B64 }}
         run: |
           if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+            # Tolerate spaces / line breaks picked up when pasting the secret
+            CLEAN=$(printf '%s' "$KS" | tr -d ' \r\n\t')
+            echo "Keystore secret length after cleanup: ${#CLEAN} characters"
+            if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.jks" 2>/dev/null || [ ! -s "$RUNNER_TEMP/release.jks" ]; then
+              echo "::error::SIGNING_KEYSTORE_B64 isn't valid base64 (probably cut short when copying). Re-paste it."
+              exit 1
+            fi
             echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
             echo "Signing with the private key from secrets"
           else
