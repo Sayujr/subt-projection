@@ -75,10 +75,8 @@ object WidgetRenderer {
     }
 
     /** What AUTO means for each widget: the look each one shipped with. */
-    fun autoStyleDescription(providerClass: String?): String = when (providerClass) {
-        TrainingWidgetProvider::class.java.name -> "Three graphs; all in one at 4×4 and bigger"
-        else -> "All in one chart"
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun autoStyleDescription(providerClass: String?): String = "All three in one chart"
 
     // ---------------------------------------------------------------- Full: workouts + graphs
 
@@ -86,7 +84,7 @@ object WidgetRenderer {
         val s = State(ctx)
         val (widthDp, heightDp) = sizeDp(mgr, id, 300, 250)
         val large = heightDp >= 360 // roughly 4×4 and up
-        val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) (if (large) GraphStyle.ONE else GraphStyle.THREE) else it }
+        val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) GraphStyle.ONE else it }
         val views = RemoteViews(ctx.packageName, R.layout.widget_full)
 
         views.setTextViewText(R.id.title, titleText(s.today))
@@ -101,7 +99,7 @@ object WidgetRenderer {
 
         // Height left after padding (24), header (28) and margins (14), shared by workout rows (22dp each) and graphs
         val available = heightDp - 66
-        val minGraphs = if (style == GraphStyle.ONE) 130 else 92
+        val minGraphs = if (style == GraphStyle.ONE) 110 else 92
         val rowsCap = if (large) (heightDp * 0.4 / 22).toInt() else 12
         val maxRows = minOf((available - minGraphs) / 22, rowsCap).coerceIn(1, 12)
 

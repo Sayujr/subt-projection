@@ -16,7 +16,7 @@ Four widgets that share one intervals.icu connection. You pick them from the wid
 Long-press a widget and tap the **pencil (Settings)**. You can choose:
 
 - **Graphs**
-  - **Automatic** (the default): Full shows three graphs, and all-in-one at about 4×4 or bigger. Trends and Compact show all-in-one.
+  - **Automatic** (the default): all three in one chart, on every widget.
   - **Three separate graphs**
   - **Fitness + Fatigue together, Form separate**
   - **All three in one chart:** Fitness and Fatigue on top, zone-coloured Form below. When the chart is tall enough it adds date and value labels.
