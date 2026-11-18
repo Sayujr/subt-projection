@@ -18,7 +18,7 @@ abstract class BaseWidgetProvider : AppWidgetProvider() {
         val snap = Prefs.snapshot(ctx)
         val stale = snap == null || System.currentTimeMillis() - snap.fetchedAt > 15 * 60_000 ||
             snap.today != LocalDate.now().toString()
-        if (stale && Prefs.credentials(ctx) != null) Refresh.now(ctx, replace = false)
+        if ((stale && Prefs.credentials(ctx) != null) || Prefs.subt(ctx) == null) Refresh.now(ctx, replace = false)
     }
 
     override fun onAppWidgetOptionsChanged(ctx: Context, mgr: AppWidgetManager, id: Int, newOptions: Bundle) {
@@ -78,4 +78,24 @@ class WorkoutsWidgetProvider : BaseWidgetProvider() {
         super.onUpdate(ctx, mgr, ids)
         mgr.notifyAppWidgetViewDataChanged(ids, R.id.workout_list)
     }
+}
+
+/** This week's load per day, with what's still planned. */
+class WeekWidgetProvider : BaseWidgetProvider() {
+    override fun render(ctx: Context, mgr: AppWidgetManager, id: Int) = ExtraWidgets.renderWeek(ctx, mgr, id)
+}
+
+/** Countdown to the next race, with projected race-day Fitness / Form. */
+class RaceWidgetProvider : BaseWidgetProvider() {
+    override fun render(ctx: Context, mgr: AppWidgetManager, id: Int) = ExtraWidgets.renderRace(ctx, mgr, id)
+}
+
+/** HRV, resting HR and sleep trends. */
+class RecoveryWidgetProvider : BaseWidgetProvider() {
+    override fun render(ctx: Context, mgr: AppWidgetManager, id: Int) = ExtraWidgets.renderRecovery(ctx, mgr, id)
+}
+
+/** Monthly SubT pace from the projection page's data. */
+class SubtWidgetProvider : BaseWidgetProvider() {
+    override fun render(ctx: Context, mgr: AppWidgetManager, id: Int) = ExtraWidgets.renderSubt(ctx, mgr, id)
 }

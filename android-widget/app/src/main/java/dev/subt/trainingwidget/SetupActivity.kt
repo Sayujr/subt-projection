@@ -50,10 +50,19 @@ class SetupActivity : Activity() {
         val provider = if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
             AppWidgetManager.getInstance(this).getAppWidgetInfo(widgetId)?.provider?.className
         } else null
-        val hasGraphs = provider != null && provider != WorkoutsWidgetProvider::class.java.name
+        val graphWidgets = setOf(
+            TrainingWidgetProvider::class.java.name, TrendWidgetProvider::class.java.name, CompactWidgetProvider::class.java.name,
+        )
+        val showStyle = provider in graphWidgets
+        val showPeriod = showStyle || provider == RecoveryWidgetProvider::class.java.name
+        val hasGraphs = showPeriod
         if (hasGraphs) {
             findViewById<View>(R.id.widget_section).visibility = View.VISIBLE
             findViewById<View>(R.id.widget_hint).visibility = View.GONE
+            if (!showStyle) {
+                findViewById<View>(R.id.style_label).visibility = View.GONE
+                styleGroup.visibility = View.GONE
+            }
             val styles = listOf(
                 GraphStyle.AUTO to "Automatic (default): ${WidgetRenderer.autoStyleDescription(provider)}",
                 GraphStyle.THREE to "Three separate graphs",
@@ -101,7 +110,7 @@ class SetupActivity : Activity() {
             if (!needFetch) {
                 WidgetRenderer.renderAll(this)
                 setResult(RESULT_OK, resultIntent())
-                if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) finish() else status.text = "Saved ✓"
+                finish()
                 return@setOnClickListener
             }
 
@@ -123,9 +132,7 @@ class SetupActivity : Activity() {
                                 "Form ${last.form.roundToInt()}  ·  ${snap.workouts.size} workout(s) today"
                         } else "Connected ✓"
                         setResult(RESULT_OK, resultIntent())
-                        if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
-                            status.postDelayed({ finish() }, 900)
-                        }
+                        status.postDelayed({ finish() }, 900)
                     }.onFailure { e ->
                         status.text = when (e) {
                             is AuthException -> "intervals.icu rejected that API key / athlete ID. Double-check both."

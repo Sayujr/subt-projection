@@ -3,8 +3,15 @@ package dev.subt.trainingwidget
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** One day of the intervals.icu fitness model. Form (TSB) = Fitness (CTL) - Fatigue (ATL). */
-data class Day(val date: String, val ctl: Double, val atl: Double) {
+/** One day of intervals.icu wellness data. Form (TSB) = Fitness (CTL) - Fatigue (ATL). */
+data class Day(
+    val date: String,
+    val ctl: Double,
+    val atl: Double,
+    val hrv: Double? = null,
+    val rhr: Double? = null,
+    val sleepSecs: Double? = null,
+) {
     val form: Double get() = ctl - atl
 }
 
@@ -17,51 +24,138 @@ data class Workout(
     val load: Int,
     val distanceM: Double,
     val status: WorkoutStatus,
+    /** Local date yyyy-MM-dd. */
+    val date: String = "",
 )
+
+/** An upcoming race from the intervals.icu calendar, with projected race-day Fitness / Fatigue when known. */
+data class Race(
+    val date: String,
+    val name: String,
+    val type: String,
+    val category: String,
+    val projCtl: Double? = null,
+    val projAtl: Double? = null,
+) {
+    val projForm: Double? get() = if (projCtl != null && projAtl != null) projCtl - projAtl else null
+}
 
 data class Snapshot(
     val fetchedAt: Long,
-    /** Local date (yyyy-MM-dd) the workout list belongs to. */
+    /** Local date (yyyy-MM-dd) the data belongs to. */
     val today: String,
     val days: List<Day>,
+    /** Today's workouts. */
     val workouts: List<Workout>,
+    /** Everything this week (Mon–Sun): planned, races and completed. */
+    val week: List<Workout> = emptyList(),
+    /** Total load completed last week (Mon–Sun). */
+    val lastWeekLoad: Int = 0,
+    val races: List<Race> = emptyList(),
 ) {
     fun toJson(): String = JSONObject().apply {
         put("fetchedAt", fetchedAt)
         put("today", today)
         put("days", JSONArray().apply {
-            days.forEach { put(JSONObject().put("d", it.date).put("c", it.ctl).put("a", it.atl)) }
-        })
-        put("workouts", JSONArray().apply {
-            workouts.forEach {
+            days.forEach {
                 put(
-                    JSONObject()
-                        .put("n", it.name).put("t", it.type).put("s", it.seconds)
-                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name)
+                    JSONObject().put("d", it.date).put("c", it.ctl).put("a", it.atl)
+                        .putOpt("h", it.hrv).putOpt("r", it.rhr).putOpt("s", it.sleepSecs)
+                )
+            }
+        })
+        put("workouts", workoutsJson(workouts))
+        put("week", workoutsJson(week))
+        put("lastWeekLoad", lastWeekLoad)
+        put("races", JSONArray().apply {
+            races.forEach {
+                put(
+                    JSONObject().put("d", it.date).put("n", it.name).put("t", it.type).put("c", it.category)
+                        .putOpt("pc", it.projCtl).putOpt("pa", it.projAtl)
                 )
             }
         })
     }.toString()
 
     companion object {
+        private fun workoutsJson(list: List<Workout>) = JSONArray().apply {
+            list.forEach {
+                put(
+                    JSONObject()
+                        .put("n", it.name).put("t", it.type).put("s", it.seconds)
+                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date)
+                )
+            }
+        }
+
+        private fun parseWorkouts(a: JSONArray?): List<Workout> = if (a == null) emptyList() else
+            (0 until a.length()).map {
+                val x = a.getJSONObject(it)
+                Workout(
+                    x.getString("n"), x.getString("t"), x.getInt("s"), x.getInt("l"),
+                    x.getDouble("m"), WorkoutStatus.valueOf(x.getString("st")), x.optString("d"),
+                )
+            }
+
+        private fun JSONObject.optNullableDouble(k: String): Double? =
+            if (has(k) && !isNull(k)) optDouble(k).takeUnless { it.isNaN() } else null
+
         fun fromJson(s: String): Snapshot? = try {
             val o = JSONObject(s)
             val d = o.getJSONArray("days")
-            val w = o.getJSONArray("workouts")
+            val r = o.optJSONArray("races")
             Snapshot(
                 fetchedAt = o.getLong("fetchedAt"),
                 today = o.getString("today"),
                 days = (0 until d.length()).map {
                     val x = d.getJSONObject(it)
-                    Day(x.getString("d"), x.getDouble("c"), x.getDouble("a"))
-                },
-                workouts = (0 until w.length()).map {
-                    val x = w.getJSONObject(it)
-                    Workout(
-                        x.getString("n"), x.getString("t"), x.getInt("s"), x.getInt("l"),
-                        x.getDouble("m"), WorkoutStatus.valueOf(x.getString("st"))
+                    Day(
+                        x.getString("d"), x.getDouble("c"), x.getDouble("a"),
+                        x.optNullableDouble("h"), x.optNullableDouble("r"), x.optNullableDouble("s"),
                     )
                 },
+                workouts = parseWorkouts(o.getJSONArray("workouts")),
+                week = parseWorkouts(o.optJSONArray("week")),
+                lastWeekLoad = o.optInt("lastWeekLoad"),
+                races = if (r == null) emptyList() else (0 until r.length()).map {
+                    val x = r.getJSONObject(it)
+                    Race(
+                        x.getString("d"), x.getString("n"), x.optString("t"), x.optString("c"),
+                        x.optNullableDouble("pc"), x.optNullableDouble("pa"),
+                    )
+                },
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+}
+
+/** Monthly SubT lap medians from the projection page's data.json. */
+data class SubtMonth(val month: String, val pace: Double, val laps: Int, val outlier: Boolean)
+
+data class SubtData(val fetchedAt: Long, val months: List<SubtMonth>, val lapsLast30d: Int, val lastLapDate: String) {
+    fun toJson(): String = JSONObject().apply {
+        put("fetchedAt", fetchedAt)
+        put("lapsLast30d", lapsLast30d)
+        put("lastLapDate", lastLapDate)
+        put("months", JSONArray().apply {
+            months.forEach { put(JSONObject().put("m", it.month).put("p", it.pace).put("n", it.laps).put("o", it.outlier)) }
+        })
+    }.toString()
+
+    companion object {
+        fun fromJson(s: String): SubtData? = try {
+            val o = JSONObject(s)
+            val m = o.getJSONArray("months")
+            SubtData(
+                o.getLong("fetchedAt"),
+                (0 until m.length()).map {
+                    val x = m.getJSONObject(it)
+                    SubtMonth(x.getString("m"), x.getDouble("p"), x.getInt("n"), x.getBoolean("o"))
+                },
+                o.getInt("lapsLast30d"),
+                o.getString("lastLapDate"),
             )
         } catch (e: Exception) {
             null

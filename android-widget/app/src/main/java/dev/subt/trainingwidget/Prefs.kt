@@ -33,6 +33,10 @@ object Prefs {
     fun historyNeeded(ctx: Context): Int =
         (WidgetRenderer.allIds(ctx).map { period(ctx, it) } + Periods.DEFAULT).max()
 
+    fun subt(ctx: Context): SubtData? = sp(ctx).getString("subt", null)?.let { SubtData.fromJson(it) }
+
+    fun saveSubt(ctx: Context, d: SubtData) = sp(ctx).edit().putString("subt", d.toJson()).apply()
+
     fun error(ctx: Context): String? = sp(ctx).getString("error", null)
 
     fun setError(ctx: Context, msg: String) = sp(ctx).edit().putString("error", msg).apply()

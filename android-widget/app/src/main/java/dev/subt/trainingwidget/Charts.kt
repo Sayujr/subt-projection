@@ -21,16 +21,17 @@ object Charts {
     private const val TILE_BG = 0xFF222733.toInt()
     private const val GRID = 0x339AA3B2
     private const val LABEL = 0xFF6B7386.toInt()
+    const val SUBT = 0xFFFF9F5A.toInt()
+    const val FITNESS_COLOR = 0xFF4EA1FF.toInt()
 
     /** Maps data to a rectangle on the canvas. */
-    private class Frame(val r: RectF, val n: Int, val pad: Float, lo0: Double, hi0: Double) {
+    private class Frame(val r: RectF, val n: Int, val pad: Float, lo0: Double, hi0: Double, minSpan: Double = 4.0) {
         val lo: Double
         val hi: Double
 
         init {
             var lo1 = lo0
             var hi1 = hi0
-            val minSpan = 4.0
             if (hi1 - lo1 < minSpan) {
                 val mid = (hi1 + lo1) / 2
                 lo1 = mid - minSpan / 2; hi1 = mid + minSpan / 2
@@ -226,6 +227,154 @@ object Charts {
             c.drawText(signed(form.min().roundToInt()), 2f * density, bottom.bottom - 2f * density, text)
         }
         return bmp
+    }
+
+    // ---------------------------------------------------------------- week bars
+
+    /**
+     * Mon–Sun columns: completed load (green), still-planned load (amber, translucent),
+     * missed planned load on past days (grey outline). Today's column is highlighted.
+     */
+    fun weekBars(week: List<Workout>, monday: LocalDate, today: LocalDate, w: Int, h: Int, density: Float): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val dates = (0 until 7).map { monday.plusDays(it.toLong()) }
+        val done = dates.map { d -> week.filter { it.date == d.toString() && it.status == WorkoutStatus.DONE }.sumOf { it.load } }
+        val planned = dates.map { d -> week.filter { it.date == d.toString() && it.status != WorkoutStatus.DONE }.sumOf { it.load } }
+        val max = (0 until 7).maxOf { done[it] + planned[it] }.coerceAtLeast(50)
+
+        val label = labelPaint(density).apply { textSize = 10f * density }
+        val number = labelPaint(density).apply { textSize = 10f * density; color = 0xFF9AA3B2.toInt() }
+        val topPad = 14f * density
+        val bottomPad = 15f * density
+        val colW = w / 7f
+        val barW = colW * 0.56f
+        val chartH = h - topPad - bottomPad
+        val doneP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3DD68C.toInt() }
+        val planP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x99FFC53D.toInt() }
+        val missP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.2f * density; color = 0x889AA3B2.toInt()
+            pathEffect = DashPathEffect(floatArrayOf(3f * density, 2f * density), 0f)
+        }
+        val todayBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1AFFFFFF }
+        val base = Paint().apply { color = GRID; strokeWidth = 1f }
+        c.drawLine(0f, topPad + chartH, w.toFloat(), topPad + chartH, base)
+
+        val r = 3f * density
+        for (i in 0 until 7) {
+            val d = dates[i]
+            val cx = colW * i + colW / 2
+            val left = cx - barW / 2
+            val right = cx + barW / 2
+            if (d == today) c.drawRoundRect(colW * i + 2f, 0f, colW * (i + 1) - 2f, h.toFloat(), 8f * density, 8f * density, todayBg)
+            var y = topPad + chartH
+            if (done[i] > 0) {
+                val bh = chartH * done[i] / max
+                c.drawRoundRect(left, y - bh, right, y, r, r, doneP)
+                y -= bh
+            }
+            if (planned[i] > 0) {
+                val bh = chartH * planned[i] / max
+                if (d.isBefore(today)) c.drawRoundRect(left, y - bh, right, y, r, r, missP)
+                else c.drawRoundRect(left, y - bh, right, y, r, r, planP)
+                y -= bh
+            }
+            val total = done[i] + planned[i]
+            if (total > 0) {
+                val t = total.toString()
+                c.drawText(t, cx - number.measureText(t) / 2, y - 3f * density, number)
+            }
+            val dl = d.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault()).take(3)
+            label.color = if (d == today) 0xFFF2F4F8.toInt() else LABEL
+            label.isFakeBoldText = d == today
+            c.drawText(dl, cx - label.measureText(dl) / 2, h - 3f * density, label)
+        }
+        return bmp
+    }
+
+    // ---------------------------------------------------------------- SubT pace
+
+    fun paceText(minPerKm: Double): String {
+        val total = (minPerKm * 60).roundToInt()
+        return "${total / 60}:${"%02d".format(total % 60)}"
+    }
+
+    /**
+     * Monthly median SubT pace, faster = higher. Outlier months are hollow and left out of the line
+     * and trend. A dashed least-squares trend runs through the last six regular months.
+     */
+    fun subtPace(months: List<SubtMonth>, w: Int, h: Int, density: Float, bg: Int, labels: Boolean): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        if (months.size < 2) return bmp
+        val c = Canvas(bmp)
+        val color = SUBT
+        val axisH = if (labels) 13f * density else 0f
+        val leftPad = if (labels) 26f * density else 0f
+        val r = RectF(leftPad, 0f, w.toFloat(), h - axisH)
+        // Negate pace so faster (smaller) plots higher
+        val vals = months.map { -it.pace }
+        val f = Frame(r, months.size, 5f * density, vals.min(), vals.max(), minSpan = 0.15)
+
+        if (labels) {
+            val text = labelPaint(density)
+            c.drawText(paceText(-f.hi), 0f, r.top + 9f * density, text)
+            c.drawText(paceText(-f.lo), 0f, r.bottom - 2f * density, text)
+            var last = -1f
+            months.forEachIndexed { i, m ->
+                val lbl = runCatching {
+                    LocalDate.parse(m.month + "-01").month.getDisplayName(java.time.format.TextStyle.NARROW, Locale.getDefault())
+                }.getOrDefault("")
+                val x = f.x(i) - text.measureText(lbl) / 2
+                if (x > last + 2f * density) {
+                    c.drawText(lbl, x, h - 2f * density, text)
+                    last = x + text.measureText(lbl)
+                }
+            }
+        }
+
+        val regular = months.indices.filter { !months[it].outlier }
+        val path = Path()
+        regular.forEachIndexed { k, i -> if (k == 0) path.moveTo(f.x(i), f.y(vals[i])) else path.lineTo(f.x(i), f.y(vals[i])) }
+        c.drawPath(path, stroke(color, density))
+
+        // Trend over the last six regular months
+        val tail = regular.takeLast(6)
+        if (tail.size >= 3) {
+            val xs = tail.map { it.toDouble() }
+            val ys = tail.map { vals[it] }
+            val mx = xs.average(); val my = ys.average()
+            val slope = xs.indices.sumOf { (xs[it] - mx) * (ys[it] - my) } / xs.indices.sumOf { (xs[it] - mx) * (xs[it] - mx) }
+            val x0 = tail.first(); val x1 = months.lastIndex
+            val trend = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE; strokeWidth = 1.2f * density; this.color = withAlpha(color, 0x99)
+                pathEffect = DashPathEffect(floatArrayOf(4f * density, 3f * density), 0f)
+            }
+            c.drawLine(f.x(x0), f.y(my + slope * (x0 - mx)), f.x(x1), f.y(my + slope * (x1 - mx)), trend)
+        }
+
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f * density; this.color = LABEL }
+        months.forEachIndexed { i, m ->
+            if (m.outlier) {
+                c.drawCircle(f.x(i), f.y(vals[i]), 2.6f * density, ring)
+            } else {
+                fill.color = bg; c.drawCircle(f.x(i), f.y(vals[i]), 3.4f * density, fill)
+                fill.color = color; c.drawCircle(f.x(i), f.y(vals[i]), (if (i == months.lastIndex) 3f else 2.2f) * density, fill)
+            }
+        }
+        return bmp
+    }
+
+    /** Least-squares slope (min/km per month) over the last six regular months, or null. */
+    fun subtTrendPerMonth(months: List<SubtMonth>): Double? {
+        val reg = months.withIndex().filter { !it.value.outlier }.takeLast(6)
+        if (reg.size < 3) return null
+        val xs = reg.map { it.index.toDouble() }
+        val ys = reg.map { it.value.pace }
+        val mx = xs.average(); val my = ys.average()
+        val den = xs.sumOf { (it - mx) * (it - mx) }
+        if (den == 0.0) return null
+        return xs.indices.sumOf { (xs[it] - mx) * (ys[it] - my) } / den
     }
 
     private fun signed(v: Int) = if (v > 0) "+$v" else "$v"

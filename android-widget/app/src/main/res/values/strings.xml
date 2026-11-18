@@ -8,4 +8,12 @@
     <string name="workouts_widget_description">Today\'s workouts. Scroll for more.</string>
     <string name="compact_widget_label">Training Today · Compact</string>
     <string name="compact_widget_description">Today\'s workouts in a scrolling strip, with the trend chart underneath</string>
+    <string name="week_widget_label">Training Today · This week</string>
+    <string name="week_widget_description">Load per day this week: done, still planned and missed, vs last week</string>
+    <string name="race_widget_label">Training Today · Race countdown</string>
+    <string name="race_widget_description">Days to your next race with projected race-day Fitness and Form</string>
+    <string name="recovery_widget_label">Training Today · Recovery</string>
+    <string name="recovery_widget_description">HRV, resting heart rate and sleep trends</string>
+    <string name="subt_widget_label">Training Today · SubT pace</string>
+    <string name="subt_widget_description">Monthly SubT pace and trend from your projection page</string>
 </resources>

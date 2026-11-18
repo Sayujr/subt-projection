@@ -10,11 +10,16 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+
+    companion object {
+        const val FORCE = "force"
+    }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val ctx = applicationContext
@@ -28,6 +33,11 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             } catch (e: Exception) {
                 Prefs.setError(ctx, "offline")
             }
+        }
+        // SubT data comes from the repo (updated every few days) and needs no login
+        val subt = Prefs.subt(ctx)
+        if (subt == null || System.currentTimeMillis() - subt.fetchedAt > 6 * 3600_000L || inputData.getBoolean(FORCE, false)) {
+            runCatching { SubtApi.fetch() }.onSuccess { Prefs.saveSubt(ctx, it) }
         }
         Prefs.setRefreshing(ctx, false)
         WidgetRenderer.renderAll(ctx)
@@ -50,7 +60,9 @@ object Refresh {
         WorkManager.getInstance(ctx).enqueueUniqueWork(
             NOW,
             if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
-            OneTimeWorkRequestBuilder<RefreshWorker>().build(),
+            OneTimeWorkRequestBuilder<RefreshWorker>()
+                .setInputData(workDataOf(RefreshWorker.FORCE to replace))
+                .build(),
         )
     }
 

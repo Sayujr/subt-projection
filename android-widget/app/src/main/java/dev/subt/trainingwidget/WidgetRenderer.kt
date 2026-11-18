@@ -16,19 +16,22 @@ import kotlin.math.roundToInt
 
 object WidgetRenderer {
 
-    private const val UP = 0xFF3DD68C.toInt()
-    private const val DOWN = 0xFFFF7A7A.toInt()
-    private const val DIM = 0xFF9AA3B2.toInt()
-    private const val PLANNED = 0xFFFFC53D.toInt()
-    private const val TEXT = 0xFFF2F4F8.toInt()
-    private const val WIDGET_BG = 0xFF161A22.toInt()
-    private const val TILE_BG = 0xFF222733.toInt()
+    /** Pseudo widget id used for the in-app screens' settings. */
+    const val APP_ID = -1
 
-    private const val CALENDAR_URL = "https://intervals.icu/calendar"
-    private const val FITNESS_URL = "https://intervals.icu/fitness"
+    internal const val UP = 0xFF3DD68C.toInt()
+    internal const val DOWN = 0xFFFF7A7A.toInt()
+    internal const val DIM = 0xFF9AA3B2.toInt()
+    internal const val PLANNED = 0xFFFFC53D.toInt()
+    internal const val TEXT = 0xFFF2F4F8.toInt()
+    internal const val WIDGET_BG = 0xFF161A22.toInt()
+    internal const val TILE_BG = 0xFF222733.toInt()
+
+    internal const val CALENDAR_URL = "https://intervals.icu/calendar"
+    internal const val FITNESS_URL = "https://intervals.icu/fitness"
 
     /** Everything a render needs, read once. */
-    private class State(ctx: Context) {
+    internal class State(ctx: Context) {
         val creds = Prefs.credentials(ctx)
         val snap = Prefs.snapshot(ctx)
         val error = Prefs.error(ctx)
@@ -46,6 +49,10 @@ object WidgetRenderer {
         TrendWidgetProvider::class.java,
         CompactWidgetProvider::class.java,
         WorkoutsWidgetProvider::class.java,
+        WeekWidgetProvider::class.java,
+        RaceWidgetProvider::class.java,
+        RecoveryWidgetProvider::class.java,
+        SubtWidgetProvider::class.java,
     )
 
     fun allIds(ctx: Context): List<Int> {
@@ -63,11 +70,12 @@ object WidgetRenderer {
         compact.forEach { renderCompact(ctx, mgr, it) }
         val list = ids(ctx, mgr, WorkoutsWidgetProvider::class.java)
         list.forEach { renderWorkouts(ctx, mgr, it) }
+        ExtraWidgets.renderAll(ctx, mgr)
         val withList = compact + list
         if (withList.isNotEmpty()) mgr.notifyAppWidgetViewDataChanged(withList, R.id.workout_list)
     }
 
-    private fun sizeDp(mgr: AppWidgetManager, id: Int, defW: Int, defH: Int): Pair<Int, Int> {
+    internal fun sizeDp(mgr: AppWidgetManager, id: Int, defW: Int, defH: Int): Pair<Int, Int> {
         val o = mgr.getAppWidgetOptions(id)
         val w = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0).takeIf { it > 0 } ?: defW
         val h = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0).takeIf { it > 0 } ?: defH
@@ -81,8 +89,13 @@ object WidgetRenderer {
     // ---------------------------------------------------------------- Full: workouts + graphs
 
     fun renderFull(ctx: Context, mgr: AppWidgetManager, id: Int) {
+        val (w, h) = sizeDp(mgr, id, 300, 250)
+        mgr.updateAppWidget(id, buildFull(ctx, id, w, h))
+    }
+
+    /** Full widget view at the given size. Also used for the app's home screen (id = [APP_ID]). */
+    fun buildFull(ctx: Context, id: Int, widthDp: Int, heightDp: Int): RemoteViews {
         val s = State(ctx)
-        val (widthDp, heightDp) = sizeDp(mgr, id, 300, 250)
         val large = heightDp >= 360 // roughly 4×4 and up
         val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) GraphStyle.ONE else it }
         val views = RemoteViews(ctx.packageName, R.layout.widget_full)
@@ -121,7 +134,7 @@ object WidgetRenderer {
             R.id.graphs,
             graphs(ctx, s, style, OneVariant.TILE, widthDp - 24, available - rows * 22, Prefs.period(ctx, id))
         )
-        mgr.updateAppWidget(id, views)
+        return views
     }
 
     // ---------------------------------------------------------------- Trends: graphs only
@@ -284,12 +297,12 @@ object WidgetRenderer {
         views.setTextColor(R.id.form_zone, zone.color)
     }
 
-    private fun titleText(today: LocalDate): String {
+    internal fun titleText(today: LocalDate): String {
         val d = today.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
         return "TODAY · ${d.uppercase(Locale.getDefault())}"
     }
 
-    private fun updatedText(ctx: Context, s: State): String = when {
+    internal fun updatedText(ctx: Context, s: State): String = when {
         s.refreshing -> "updating…"
         s.error != null && s.snap != null -> "⚠ ${time(ctx, s.snap.fetchedAt)}"
         s.error != null -> "⚠ ${s.error}"
@@ -297,7 +310,7 @@ object WidgetRenderer {
         else -> ""
     }
 
-    private fun setDelta(views: RemoteViews, viewId: Int, delta: Double?, upColor: Int, downColor: Int) {
+    internal fun setDelta(views: RemoteViews, viewId: Int, delta: Double?, upColor: Int, downColor: Int) {
         if (delta == null) {
             views.setTextViewText(viewId, ""); return
         }
@@ -311,9 +324,9 @@ object WidgetRenderer {
         views.setTextColor(viewId, if (rounded > 0) upColor else if (rounded < 0) downColor else DIM)
     }
 
-    private fun fmt1(v: Double) = if (v >= 10) v.roundToInt().toString() else String.format(Locale.US, "%.1f", v)
+    internal fun fmt1(v: Double) = if (v >= 10) v.roundToInt().toString() else String.format(Locale.US, "%.1f", v)
 
-    fun row(ctx: Context, w: Workout): RemoteViews {
+    fun row(ctx: Context, w: Workout, namePrefix: String = ""): RemoteViews {
         val r = RemoteViews(ctx.packageName, R.layout.widget_workout_row)
         when (w.status) {
             WorkoutStatus.DONE -> {
@@ -330,15 +343,15 @@ object WidgetRenderer {
             }
         }
         r.setTextViewText(R.id.row_sport, sportIcon(w.type))
-        r.setTextViewText(R.id.row_name, w.name)
+        r.setTextViewText(R.id.row_name, namePrefix + w.name)
         r.setTextViewText(R.id.row_meta, meta(w))
         return r
     }
 
-    private fun message(ctx: Context, text: String): RemoteViews =
+    internal fun message(ctx: Context, text: String): RemoteViews =
         RemoteViews(ctx.packageName, R.layout.widget_message_row).apply { setTextViewText(R.id.message, text) }
 
-    private fun meta(w: Workout): String {
+    internal fun meta(w: Workout): String {
         val parts = mutableListOf<String>()
         when {
             w.seconds > 0 -> {
@@ -351,7 +364,7 @@ object WidgetRenderer {
         return parts.joinToString(" · ")
     }
 
-    private fun sportIcon(type: String): String {
+    internal fun sportIcon(type: String): String {
         val t = type.lowercase(Locale.US)
         return when {
             "run" in t -> "🏃"
@@ -367,21 +380,21 @@ object WidgetRenderer {
         }
     }
 
-    private fun time(ctx: Context, millis: Long): String =
+    internal fun time(ctx: Context, millis: Long): String =
         android.text.format.DateFormat.getTimeFormat(ctx).format(Date(millis))
 
-    private fun refreshIntent(ctx: Context, provider: Class<*>): PendingIntent = PendingIntent.getBroadcast(
+    internal fun refreshIntent(ctx: Context, provider: Class<*>): PendingIntent = PendingIntent.getBroadcast(
         ctx, provider.name.hashCode(),
         Intent(ctx, provider).setAction(BaseWidgetProvider.ACTION_REFRESH),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 
-    private fun setupIntent(ctx: Context): PendingIntent = PendingIntent.getActivity(
+    internal fun setupIntent(ctx: Context): PendingIntent = PendingIntent.getActivity(
         ctx, 10, Intent(ctx, SetupActivity::class.java),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 
-    private fun browser(ctx: Context, req: Int, url: String): PendingIntent = PendingIntent.getActivity(
+    internal fun browser(ctx: Context, req: Int, url: String): PendingIntent = PendingIntent.getActivity(
         ctx, req, Intent(Intent.ACTION_VIEW, Uri.parse(url)),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
