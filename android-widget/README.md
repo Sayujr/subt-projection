@@ -8,6 +8,8 @@ Opening **Training Today** shows the full view at full-screen size, with today's
 Fitness / Fatigue / Form chart. Tabs along the bottom open the **Week**, **Race**, **Recovery** and **SubT** screens.
 These are the same views as the widgets, drawn at full size. ⚙ opens your account settings.
 
+Tapping a widget on your home screen opens the app on that widget's screen. Inside the app, taps open intervals.icu.
+
 ![App home (sample data)](preview-app.png)
 
 ## Widgets

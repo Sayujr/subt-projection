@@ -42,6 +42,7 @@ class MainActivity : Activity() {
         setContentView(R.layout.activity_main)
         content = findViewById(R.id.content)
         savedInstanceState?.getString("tab")?.let { name -> Tab.entries.firstOrNull { it.name == name }?.let { tab = it } }
+        if (savedInstanceState == null) selectFromIntent(intent)
 
         findViewById<android.view.View>(R.id.open_settings).setOnClickListener {
             startActivity(Intent(this, SetupActivity::class.java))
@@ -51,6 +52,24 @@ class MainActivity : Activity() {
         if (Prefs.credentials(this) == null) {
             startActivity(Intent(this, SetupActivity::class.java))
         }
+    }
+
+    /** A tap on a home-screen widget opens the app on that widget's screen. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (selectFromIntent(intent)) content.post { show() }
+    }
+
+    private fun selectFromIntent(intent: Intent?): Boolean {
+        val name = intent?.getStringExtra(EXTRA_TAB) ?: return false
+        val t = Tab.entries.firstOrNull { it.name == name } ?: return false
+        tab = t
+        return true
+    }
+
+    companion object {
+        const val EXTRA_TAB = "tab"
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -101,11 +120,11 @@ class MainActivity : Activity() {
             content.post { show() }; return
         }
         val rv: RemoteViews = when (tab) {
-            Tab.HOME -> WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp)
-            Tab.WEEK -> ExtraWidgets.buildWeek(this, wDp, hDp)
-            Tab.RACE -> ExtraWidgets.buildRace(this, wDp, hDp)
-            Tab.RECOVERY -> ExtraWidgets.buildRecovery(this, WidgetRenderer.APP_ID, wDp, hDp)
-            Tab.SUBT -> ExtraWidgets.buildSubt(this, wDp, hDp)
+            Tab.HOME -> WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true)
+            Tab.WEEK -> ExtraWidgets.buildWeek(this, wDp, hDp, inApp = true)
+            Tab.RACE -> ExtraWidgets.buildRace(this, wDp, hDp, inApp = true)
+            Tab.RECOVERY -> ExtraWidgets.buildRecovery(this, WidgetRenderer.APP_ID, wDp, hDp, inApp = true)
+            Tab.SUBT -> ExtraWidgets.buildSubt(this, wDp, hDp, inApp = true)
         }
         content.removeAllViews()
         try {

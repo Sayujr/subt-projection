@@ -94,7 +94,7 @@ object WidgetRenderer {
     }
 
     /** Full widget view at the given size. Also used for the app's home screen (id = [APP_ID]). */
-    fun buildFull(ctx: Context, id: Int, widthDp: Int, heightDp: Int): RemoteViews {
+    fun buildFull(ctx: Context, id: Int, widthDp: Int, heightDp: Int, inApp: Boolean = false): RemoteViews {
         val s = State(ctx)
         val large = heightDp >= 360 // roughly 4×4 and up
         val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) GraphStyle.ONE else it }
@@ -106,8 +106,9 @@ object WidgetRenderer {
         if (s.creds == null) {
             views.setOnClickPendingIntent(R.id.root, setupIntent(ctx))
         } else {
-            views.setOnClickPendingIntent(R.id.workouts, browser(ctx, 11, CALENDAR_URL))
-            views.setOnClickPendingIntent(R.id.graphs, browser(ctx, 12, FITNESS_URL))
+            // On the home screen a tap opens the app; inside the app it opens intervals.icu
+            views.setOnClickPendingIntent(R.id.workouts, if (inApp) browser(ctx, 11, CALENDAR_URL) else appIntent(ctx, "HOME"))
+            views.setOnClickPendingIntent(R.id.graphs, if (inApp) browser(ctx, 12, FITNESS_URL) else appIntent(ctx, "HOME"))
         }
 
         // Height left after padding (24), header (28) and margins (14), shared by workout rows (22dp each) and graphs
@@ -147,7 +148,7 @@ object WidgetRenderer {
         val views = RemoteViews(ctx.packageName, R.layout.widget_trend)
 
         views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, TrendWidgetProvider::class.java))
-        views.setOnClickPendingIntent(R.id.root, if (s.creds == null) setupIntent(ctx) else browser(ctx, 13, FITNESS_URL))
+        views.setOnClickPendingIntent(R.id.root, if (s.creds == null) setupIntent(ctx) else appIntent(ctx, "HOME"))
         views.setTextViewText(
             R.id.updated,
             if (s.creds == null) "Tap to connect intervals.icu" else "${Periods.label(period)} · ${updatedText(ctx, s)}"
@@ -168,7 +169,7 @@ object WidgetRenderer {
         views.setTextViewText(R.id.title, titleText(s.today) + (if (s.refreshing) "  ·  updating…" else ""))
         views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, CompactWidgetProvider::class.java))
         setupList(ctx, views, s, id)
-        if (s.creds != null) views.setOnClickPendingIntent(R.id.graphs, browser(ctx, 16, FITNESS_URL))
+        if (s.creds != null) views.setOnClickPendingIntent(R.id.graphs, appIntent(ctx, "HOME"))
 
         // padding 18, header 18, list 26, margin 6
         views.removeAllViews(R.id.graphs)
@@ -203,8 +204,9 @@ object WidgetRenderer {
             views.setOnClickPendingIntent(R.id.root, setupIntent(ctx))
             views.setOnClickPendingIntent(R.id.workout_empty, setupIntent(ctx))
         } else {
-            views.setOnClickPendingIntent(R.id.workout_empty, browser(ctx, 14, CALENDAR_URL))
-            views.setPendingIntentTemplate(R.id.workout_list, browser(ctx, 15, CALENDAR_URL))
+            views.setOnClickPendingIntent(R.id.root, appIntent(ctx, "HOME"))
+            views.setOnClickPendingIntent(R.id.workout_empty, appIntent(ctx, "HOME"))
+            views.setPendingIntentTemplate(R.id.workout_list, appIntent(ctx, "HOME"))
         }
     }
 
@@ -391,6 +393,16 @@ object WidgetRenderer {
 
     internal fun setupIntent(ctx: Context): PendingIntent = PendingIntent.getActivity(
         ctx, 10, Intent(ctx, SetupActivity::class.java),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    )
+
+    /** Opens the app on the given screen (MainActivity tab name). */
+    internal fun appIntent(ctx: Context, tab: String): PendingIntent = PendingIntent.getActivity(
+        ctx, ("tab:$tab").hashCode(),
+        Intent(ctx, MainActivity::class.java)
+            .setData(Uri.parse("trainingtoday://screen/$tab"))
+            .putExtra(MainActivity.EXTRA_TAB, tab)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 

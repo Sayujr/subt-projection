@@ -65,19 +65,26 @@ object ExtraWidgets {
     private fun dayName(d: LocalDate) = d.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault()))
     private fun dateLabel(d: LocalDate) = d.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
 
-    private fun header(ctx: Context, v: RemoteViews, s: R0.State, title: String, provider: Class<*>, url: String, needsLogin: Boolean = true) {
+    private fun header(
+        ctx: Context, v: RemoteViews, s: R0.State, title: String, provider: Class<*>, url: String,
+        tab: String, inApp: Boolean, needsLogin: Boolean = true,
+    ) {
         v.setTextViewText(R.id.title, title)
         v.setTextViewText(R.id.updated, R0.updatedText(ctx, s))
         v.setOnClickPendingIntent(R.id.refresh, R0.refreshIntent(ctx, provider))
         v.setOnClickPendingIntent(
             R.id.root,
-            if (needsLogin && s.creds == null) R0.setupIntent(ctx) else R0.browser(ctx, url.hashCode(), url)
+            when {
+                needsLogin && s.creds == null -> R0.setupIntent(ctx)
+                inApp -> R0.browser(ctx, url.hashCode(), url)   // inside the app: open intervals.icu / the page
+                else -> R0.appIntent(ctx, tab)                   // on the home screen: open this screen in the app
+            }
         )
     }
 
     // ---------------------------------------------------------------- This week
 
-    fun buildWeek(ctx: Context, wDp: Int, hDp: Int): RemoteViews {
+    fun buildWeek(ctx: Context, wDp: Int, hDp: Int, inApp: Boolean = false): RemoteViews {
         val s = R0.State(ctx)
         val v = RemoteViews(ctx.packageName, R.layout.widget_week)
         val today = s.today
@@ -89,7 +96,7 @@ object ExtraWidgets {
             "${monday.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))} – " +
                 sunday.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
         }
-        header(ctx, v, s, "THIS WEEK · ${range.uppercase(Locale.getDefault())}", WeekWidgetProvider::class.java, R0.CALENDAR_URL)
+        header(ctx, v, s, "THIS WEEK · ${range.uppercase(Locale.getDefault())}", WeekWidgetProvider::class.java, R0.CALENDAR_URL, "WEEK", inApp)
 
         val snap = s.snap
         // Only trust a snapshot from this same week
@@ -141,10 +148,10 @@ object ExtraWidgets {
 
     // ---------------------------------------------------------------- Race countdown
 
-    fun buildRace(ctx: Context, wDp: Int, hDp: Int): RemoteViews {
+    fun buildRace(ctx: Context, wDp: Int, hDp: Int, inApp: Boolean = false): RemoteViews {
         val s = R0.State(ctx)
         val v = RemoteViews(ctx.packageName, R.layout.widget_race)
-        header(ctx, v, s, "NEXT RACE", RaceWidgetProvider::class.java, R0.CALENDAR_URL)
+        header(ctx, v, s, "NEXT RACE", RaceWidgetProvider::class.java, R0.CALENDAR_URL, "RACE", inApp)
         v.setTextViewText(R.id.updated, "")
 
         if (s.creds == null) {
@@ -209,11 +216,11 @@ object ExtraWidgets {
 
     // ---------------------------------------------------------------- Recovery
 
-    fun buildRecovery(ctx: Context, id: Int, wDp: Int, hDp: Int): RemoteViews {
+    fun buildRecovery(ctx: Context, id: Int, wDp: Int, hDp: Int, inApp: Boolean = false): RemoteViews {
         val s = R0.State(ctx)
         val v = RemoteViews(ctx.packageName, R.layout.widget_recovery)
         val period = Prefs.period(ctx, id)
-        header(ctx, v, s, "RECOVERY · ${Periods.label(period).uppercase(Locale.getDefault())}", RecoveryWidgetProvider::class.java, "https://intervals.icu/")
+        header(ctx, v, s, "RECOVERY · ${Periods.label(period).uppercase(Locale.getDefault())}", RecoveryWidgetProvider::class.java, "https://intervals.icu/", "RECOVERY", inApp)
 
         val days = s.snap?.days.orEmpty().takeLast(period)
         val hrv = days.mapNotNull { it.hrv }
@@ -283,11 +290,11 @@ object ExtraWidgets {
 
     // ---------------------------------------------------------------- SubT pace
 
-    fun buildSubt(ctx: Context, wDp: Int, hDp: Int): RemoteViews {
+    fun buildSubt(ctx: Context, wDp: Int, hDp: Int, inApp: Boolean = false): RemoteViews {
         val s = R0.State(ctx)
         val v = RemoteViews(ctx.packageName, R.layout.widget_subt)
         val data = Prefs.subt(ctx)
-        header(ctx, v, s, "SUBT PACE", SubtWidgetProvider::class.java, SubtApi.PAGE_URL, needsLogin = false)
+        header(ctx, v, s, "SUBT PACE", SubtWidgetProvider::class.java, SubtApi.PAGE_URL, "SUBT", inApp, needsLogin = false)
         v.setTextViewText(R.id.updated, data?.let { R0.time(ctx, it.fetchedAt) } ?: "")
 
         val months = data?.months.orEmpty()
