@@ -2,18 +2,38 @@
 
 ![Widget previews (sample data): Full, Full with Fitness+Fatigue / Form, Full large, Trends, Compact, Workouts](preview.png)
 
-Four widgets that share one intervals.icu connection. You pick them from the widget picker:
+## The app
+
+Opening **Training Today** shows the full view at full-screen size, with today's workouts above one large
+Fitness / Fatigue / Form chart. Tabs along the bottom open the **Week**, **Race**, **Recovery** and **SubT** screens.
+These are the same views as the widgets, drawn at full size. ⚙ opens your account settings.
+
+![App home (sample data)](preview-app.png)
+
+## Widgets
+
+All widgets share one intervals.icu connection. You pick them from the widget picker:
 
 | Widget | Default size | What it shows |
 |---|---|---|
-| **Training Today · Full** | 4×3 | Today's workouts with graphs underneath. Make it taller to list more workouts. |
-| **Training Today · Trends** | 4×2 | Graphs only, with today's numbers. |
-| **Training Today · Compact** | 4×2 | A one-row workout strip you can scroll, with the trend chart underneath. Workouts still to do come first. |
-| **Training Today · Workouts** | 4×1 | A compact list you can scroll. At 1 row tall you see only the top workout. `+2 ↓` tells you how many more there are. |
+| **Full** | 4×3 | Today's workouts above the long combined chart. Make it taller to list more workouts. |
+| **Trends** | 4×2 | Graphs only, with today's numbers. |
+| **Compact** | 4×2 | A one-row workout strip you can scroll, with the trend chart underneath. Workouts still to do come first. |
+| **Workouts** | 4×1 | A compact list you can scroll. `+2 ↓` tells you how many more there are. |
+| **This week** | 4×2 | Load per day, Mon–Sun: done (green), still planned (amber) and missed (dashed). Shows totals compared with last week, and lists the remaining sessions when tall. |
+| **Race countdown** | 2×2 | Days to your next A/B/C race and the projected race-day Fitness and Form (zone-coloured). Lists further races when tall. |
+| **Recovery** | 4×2 | HRV, resting HR and last night's sleep. Each shows its 7-day average against your baseline and a trend line. |
+| **SubT pace** | 2×2 | This month's median SubT lap pace, the change from last month, a monthly chart (faster plots higher) and a 6-month trend. It uses this repo's `data.json`, so it needs no login. |
+
+![New widgets: week, recovery, race, SubT (SubT uses real data.json; others sample)](preview-extra.png)
+
+**How the race projection works:** starting from today's Fitness and Fatigue, it adds the load of every planned workout
+up to race day. It uses the standard 42-day and 7-day averages, the same model intervals.icu uses. It covers races up to
+12 weeks away, and it's only as good as your planned workouts.
 
 ### Per-widget settings
 
-Long-press a widget and tap the **pencil (Settings)**. You can choose:
+Long-press a Full, Trends, Compact or Recovery widget and tap the **pencil (Settings)**. You can choose:
 
 - **Graphs**
   - **Automatic** (the default): all three in one chart, on every widget.

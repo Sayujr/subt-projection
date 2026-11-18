@@ -174,8 +174,9 @@ object ExtraWidgets {
             }
         }
         val prio = next.category.removePrefix("RACE_").takeIf { it.length == 1 }?.let { " · $it race" } ?: ""
-        val sport = next.type.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""
+        val sport = next.type.takeIf { it.isNotBlank() && wDp >= 250 }?.let { " · $it" } ?: ""
         v.setTextViewText(R.id.race_date, dateLabel(d) + sport + prio)
+        val narrow = wDp < 250
 
         val pf = next.projForm
         if (pf != null && next.projCtl != null) {
@@ -183,8 +184,10 @@ object ExtraWidgets {
             v.setTextViewText(
                 R.id.race_proj,
                 spans(
-                    "Race day ≈ " to R0.DIM, "Fitness ${next.projCtl.roundToInt()}" to Charts.FITNESS_COLOR,
-                    " · " to R0.DIM, "Form ${signed(pf.roundToInt())} ${z.label}" to z.color,
+                    (if (narrow) "Race day " else "Projected race day ") to R0.DIM,
+                    "Fit ${next.projCtl.roundToInt()}" to Charts.FITNESS_COLOR,
+                    " · " to R0.DIM,
+                    (if (narrow) "Form ${signed(pf.roundToInt())}" else "Form ${signed(pf.roundToInt())} ${z.label}") to z.color,
                 )
             )
         } else if (n > 84) {
@@ -298,7 +301,10 @@ object ExtraWidgets {
         val monthName = runCatching {
             LocalDate.parse(last.month + "-01").format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault()))
         }.getOrDefault(last.month)
-        val parts = mutableListOf<Pair<String, Int?>>("$monthName median · ${last.laps} laps" to R0.DIM)
+        val narrow = wDp < 250
+        val parts = mutableListOf<Pair<String, Int?>>(
+            (if (narrow) "$monthName · ${last.laps} laps" else "$monthName median · ${last.laps} laps") to R0.DIM
+        )
         if (prev != null) {
             val diff = ((last.pace - prev.pace) * 60).roundToInt()
             val prevName = runCatching {
@@ -306,6 +312,9 @@ object ExtraWidgets {
             }.getOrDefault(prev.month)
             parts += " · " to R0.DIM
             parts += when {
+                narrow && diff < 0 -> "▲${-diff}s" to R0.UP
+                narrow && diff > 0 -> "▼${diff}s" to R0.DOWN
+                narrow -> "＝" to R0.DIM
                 diff < 0 -> "${-diff}s faster than $prevName" to R0.UP
                 diff > 0 -> "${diff}s slower than $prevName" to R0.DOWN
                 else -> "same as $prevName" to R0.DIM
@@ -327,7 +336,7 @@ object ExtraWidgets {
                 else -> {
                     val sec = (slope * 60).roundToInt()
                     val trend = if (sec < 0) "${-sec}s/km faster" else if (sec > 0) "${sec}s/km slower" else "flat"
-                    "Trend: $trend per month · ${data!!.lapsLast30d} laps in 30 days"
+                    if (narrow) "Trend $trend /mo" else "Trend: $trend per month · ${data!!.lapsLast30d} laps in 30 days"
                 }
             }
         )

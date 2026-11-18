@@ -313,7 +313,10 @@ object Charts {
         val r = RectF(leftPad, 0f, w.toFloat(), h - axisH)
         // Negate pace so faster (smaller) plots higher
         val vals = months.map { -it.pace }
-        val f = Frame(r, months.size, 5f * density, vals.min(), vals.max(), minSpan = 0.15)
+        // Scale to regular months only; outliers are pinned to the chart edge so they can't squash it
+        val scale = months.indices.filter { !months[it].outlier }.map { vals[it] }.ifEmpty { vals }
+        val f = Frame(r, months.size, 5f * density, scale.min(), scale.max(), minSpan = 0.15)
+        fun yy(i: Int) = f.y(vals[i]).coerceIn(r.top + 3f * density, r.bottom - 3f * density)
 
         if (labels) {
             val text = labelPaint(density)
@@ -334,7 +337,7 @@ object Charts {
 
         val regular = months.indices.filter { !months[it].outlier }
         val path = Path()
-        regular.forEachIndexed { k, i -> if (k == 0) path.moveTo(f.x(i), f.y(vals[i])) else path.lineTo(f.x(i), f.y(vals[i])) }
+        regular.forEachIndexed { k, i -> if (k == 0) path.moveTo(f.x(i), yy(i)) else path.lineTo(f.x(i), yy(i)) }
         c.drawPath(path, stroke(color, density))
 
         // Trend over the last six regular months
@@ -356,10 +359,10 @@ object Charts {
         val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f * density; this.color = LABEL }
         months.forEachIndexed { i, m ->
             if (m.outlier) {
-                c.drawCircle(f.x(i), f.y(vals[i]), 2.6f * density, ring)
+                c.drawCircle(f.x(i), yy(i), 2.6f * density, ring)
             } else {
-                fill.color = bg; c.drawCircle(f.x(i), f.y(vals[i]), 3.4f * density, fill)
-                fill.color = color; c.drawCircle(f.x(i), f.y(vals[i]), (if (i == months.lastIndex) 3f else 2.2f) * density, fill)
+                fill.color = bg; c.drawCircle(f.x(i), yy(i), 3.4f * density, fill)
+                fill.color = color; c.drawCircle(f.x(i), yy(i), (if (i == months.lastIndex) 3f else 2.2f) * density, fill)
             }
         }
         return bmp
