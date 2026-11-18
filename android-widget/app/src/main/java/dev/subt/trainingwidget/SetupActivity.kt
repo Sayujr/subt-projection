@@ -48,6 +48,22 @@ class SetupActivity : Activity() {
             isChecked = Prefs.notifyAlerts(this@SetupActivity)
             setOnCheckedChangeListener { _, on -> Prefs.setNotifyAlerts(this@SetupActivity, on) }
         }
+        // Your numbers: show entered values, with the automatic value as the hint
+        fun tm(sec: Double) = SubtModel.time(sec)
+        val autoPb = Prefs.pbs(this)
+        val autoKg = Prefs.snapshot(this)?.weight
+        val autoCp = Prefs.snapshot(this)?.runFtp
+        val autoSubt = Prefs.subt(this)?.months?.lastOrNull { !it.outlier }?.pace
+        val fields = listOf(
+            Triple(R.id.num_weight, Prefs.weightOverride(this)?.let { String.format(java.util.Locale.US, "%.1f", it) }, autoKg?.let { "auto: %.1f (intervals.icu)".format(it) }),
+            Triple(R.id.num_cp, Prefs.cpOverride(this)?.let { it.roundToInt().toString() }, autoCp?.let { "auto: ${it.roundToInt()} W (intervals.icu FTP)" }),
+            Triple(R.id.num_subt, Prefs.subtOverride(this)?.let { Charts.paceText(it) }, autoSubt?.let { "auto: ${Charts.paceText(it)} (latest monthly median)" }),
+            Triple(R.id.num_pb5, Prefs.manualPb(this, "5k")?.let { tm(it) }, autoPb?.fiveK?.let { "auto: ${tm(it.seconds)}" }),
+            Triple(R.id.num_pb10, Prefs.manualPb(this, "10k")?.let { tm(it) }, autoPb?.tenK?.let { "auto: ${tm(it.seconds)}" }),
+            Triple(R.id.num_pbhm, Prefs.manualPb(this, "hm")?.let { tm(it) }, autoPb?.half?.let { "auto: ${tm(it.seconds)}" }),
+        )
+        for ((id, v, hint) in fields) findViewById<EditText>(id).apply { setText(v ?: ""); this.hint = hint ?: "auto" }
+
         val stored = Prefs.credentials(this)
         stored?.let {
             athlete.setText(if (it.athleteId == "0") "" else it.athleteId)
@@ -96,6 +112,7 @@ class SetupActivity : Activity() {
         }
 
         save.setOnClickListener {
+            saveNumbers()
             val apiKey = key.text.toString().trim()
             var ath = athlete.text.toString().trim()
             if (ath.isNotEmpty() && ath.all { it.isDigit() }) ath = "i$ath"
@@ -149,6 +166,22 @@ class SetupActivity : Activity() {
                     }
                 }
             }.start()
+        }
+    }
+
+    /** Parses and stores the "Your numbers" fields; blank = automatic, unparseable = left unchanged. */
+    private fun saveNumbers() {
+        fun txt(id: Int) = findViewById<EditText>(id).text.toString().trim()
+        fun num(id: Int) = txt(id).replace(',', '.').toDoubleOrNull()
+        fun time(id: Int): Double? {
+            val p = txt(id).split(":").mapNotNull { it.trim().toIntOrNull() }
+            return when (p.size) { 2 -> p[0] * 60.0 + p[1]; 3 -> p[0] * 3600.0 + p[1] * 60 + p[2]; else -> null }
+        }
+        if (txt(R.id.num_weight).isEmpty()) Prefs.setWeightOverride(this, null) else num(R.id.num_weight)?.takeIf { it in 30.0..200.0 }?.let { Prefs.setWeightOverride(this, it) }
+        if (txt(R.id.num_cp).isEmpty()) Prefs.setCpOverride(this, null) else num(R.id.num_cp)?.takeIf { it in 80.0..700.0 }?.let { Prefs.setCpOverride(this, it) }
+        if (txt(R.id.num_subt).isEmpty()) Prefs.setSubtOverride(this, null) else time(R.id.num_subt)?.takeIf { it in 150.0..480.0 }?.let { Prefs.setSubtOverride(this, it / 60) }
+        for ((id, key) in listOf(R.id.num_pb5 to "5k", R.id.num_pb10 to "10k", R.id.num_pbhm to "hm")) {
+            if (txt(id).isEmpty()) Prefs.setManualPb(this, key, null) else time(id)?.let { Prefs.setManualPb(this, key, it) }
         }
     }
 

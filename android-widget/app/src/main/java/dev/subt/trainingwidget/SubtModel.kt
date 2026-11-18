@@ -36,6 +36,10 @@ object SubtModel {
     fun gapFrom5k(pbSec: Double, subt: Double) = gapFrom(1, pbSec, subt)
     fun gapFrom(idx: Int, pbSec: Double, subt: Double) = (pbSec / interp(subt, idx) - 1).coerceIn(-0.05, 0.25)
 
+    /** Current SubT pace: your Settings value if entered, else the latest regular monthly median. */
+    fun currentPace(ctx: android.content.Context): Double? =
+        Prefs.subtOverride(ctx) ?: Prefs.subt(ctx)?.months?.lastOrNull { !it.outlier }?.pace
+
     /** SubT in the month a PB was set (or the latest month). */
     fun subtAt(ctx: android.content.Context, date: String?): Double? {
         val months = Prefs.subt(ctx)?.months.orEmpty().filter { !it.outlier }

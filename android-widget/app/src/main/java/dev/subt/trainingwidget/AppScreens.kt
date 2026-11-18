@@ -733,7 +733,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
     fun subtExtras(col: LinearLayout) {
         val sub = Prefs.subt(a) ?: return
         val months = sub.months.filter { !it.outlier }
-        val cur = months.lastOrNull()?.pace ?: return
+        val cur = SubtModel.currentPace(a) ?: return
         SubtModel.applyGap(a)
         pbCard(col, cur)
         val pb5 = Prefs.effectivePbs(a).fiveK
@@ -863,7 +863,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
     private fun subtNow(col: LinearLayout): SubtNow? {
         val sub = Prefs.subt(a)
         val months = sub?.months.orEmpty().filter { !it.outlier }
-        val cur = months.lastOrNull()?.pace
+        val cur = SubtModel.currentPace(a)
         if (cur == null) { text(card(col), "Loading SubT data…", 16f); return null }
         return SubtNow(months, cur)
     }
@@ -1648,8 +1648,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         if (re == null || kg == null) { text(c, "Needs your weight and a few runs with power to work out running effectiveness.", 14f, DIM, top = 4); return }
         val fm = PowerModel.fmShare(a)
         SubtModel.applyGap(a)
-        val months = Prefs.subt(a)?.months.orEmpty().filter { !it.outlier }
-        val subt = months.lastOrNull()?.pace
+        val subt = SubtModel.currentPace(a)
         val pbs = Prefs.effectivePbs(a)
         row(c, listOf("" to FAINT, "POWER" to FAINT, "@ W" to FAINT, "VDOT" to FAINT, "PB" to FAINT), header = true, weights = listOf(0.9f, 1.1f, 0.8f, 1.1f, 1.1f))
         divider(c)
@@ -1752,6 +1751,6 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         row(lv, listOf("−1 kg body weight" to TEXT, diff(PowerModel.time(42195.0, p.cp, share, re, kg - 1)) to GOOD), weights = listOf(1.5f, 1f))
         row(lv, listOf("+1% durability (race at a higher % of CP)" to TEXT, diff(PowerModel.time(42195.0, p.cp, share + 0.01, re, kg)) to GOOD), weights = listOf(1.5f, 1f))
         text(lv, "Predicted marathon now: ${t(base)} at ${(p.cp * share).roundToInt()} W. Compare it with the Sub-3 forecast (VDOT) on the SubT tab.", 12.5f, FAINT, top = 8)
-        weightCard(col, Prefs.subt(a)?.months?.lastOrNull { !it.outlier }?.pace ?: 4.5, SubtModel.requiredSubt(3, SubtModel.SUB3))
+        weightCard(col, SubtModel.currentPace(a) ?: 4.5, SubtModel.requiredSubt(3, SubtModel.SUB3))
     }
 }

@@ -27,6 +27,7 @@ object PowerModel {
         val eftp = withCp.lastOrNull()?.cp
         // Your set FTP is CP; eFTP is the estimate beside it; the 3/12-min curve only if neither exists
         val (cp, src) = when {
+            Prefs.cpOverride(ctx) != null -> Prefs.cpOverride(ctx)!! to "the CP you entered in Settings"
             s.runFtp != null -> s.runFtp to "your FTP set in intervals.icu"
             eftp != null -> eftp to "intervals.icu eFTP (no FTP set)"
             s.curveCp != null -> s.curveCp to "90-day power curve estimate (no FTP set)"

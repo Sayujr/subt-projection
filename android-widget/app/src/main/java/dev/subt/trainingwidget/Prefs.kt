@@ -130,6 +130,13 @@ object Prefs {
     fun saveTtDates(ctx: Context, d: List<String>) =
         sp(ctx).edit().putString("tt_dates", org.json.JSONObject().put("t", System.currentTimeMillis()).put("d", org.json.JSONArray(d)).toString()).apply()
 
+    // ---- numbers you enter in Settings (override intervals.icu / measured values in this app only)
+    fun cpOverride(ctx: Context): Double? = sp(ctx).getFloat("cp_override", 0f).takeIf { it > 0 }?.toDouble()
+    fun setCpOverride(ctx: Context, w: Double?) = sp(ctx).edit().putFloat("cp_override", (w ?: 0.0).toFloat()).apply()
+    /** SubT pace, min/km. */
+    fun subtOverride(ctx: Context): Double? = sp(ctx).getFloat("subt_override", 0f).takeIf { it > 0 }?.toDouble()
+    fun setSubtOverride(ctx: Context, p: Double?) = sp(ctx).edit().putFloat("subt_override", (p ?: 0.0).toFloat()).apply()
+
     // ---- PBs and race gap
 
     fun pbs(ctx: Context): Pbs? = sp(ctx).getString("pbs", null)?.let { Pbs.fromJson(it) }

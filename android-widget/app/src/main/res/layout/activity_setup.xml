@@ -152,6 +152,155 @@
         </LinearLayout>
 
         <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:fontFamily="sans-serif-medium"
+            android:text="Your numbers"
+            android:textColor="@color/text"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="These override intervals.icu or measured values for this app only. Leave a field blank to use the automatic value shown."
+            android:textColor="@color/text_faint"
+            android:textSize="12.5sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Weight (kg)"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/num_weight"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/input_bg"
+            android:hint="auto"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_faint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="CP / FTP (W)"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/num_cp"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/input_bg"
+            android:hint="auto"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_faint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="SubT pace (m:ss /km)"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/num_subt"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/input_bg"
+            android:hint="auto"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_faint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="5K PB (m:ss)"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/num_pb5"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/input_bg"
+            android:hint="auto"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_faint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="10K PB (m:ss)"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/num_pb10"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/input_bg"
+            android:hint="auto"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_faint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Half PB (h:mm:ss)"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/num_pbhm"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/input_bg"
+            android:hint="auto"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_faint" />
+
+        <TextView
             android:id="@+id/status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
