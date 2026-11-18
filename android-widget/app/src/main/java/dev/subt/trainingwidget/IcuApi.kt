@@ -11,6 +11,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
+import kotlin.math.abs
 import kotlin.math.exp
 
 class AuthException : IOException("intervals.icu rejected the athlete ID / API key")
@@ -68,7 +69,7 @@ class IcuApi(private val creds: Credentials) {
         // Project far enough to cover every race in the next 12 weeks
         val raceDates = raceEvents.mapNotNull { runCatching { LocalDate.parse(date(it)) }.getOrNull() }
             .filter { ChronoUnit.DAYS.between(today, it) <= 84 }
-        val projectTo = (raceDates + sunday + listOfNotNull(nextRaceDate?.takeIf { ChronoUnit.DAYS.between(today, it) <= 84 })).max()
+        val projectTo = (raceDates + sunday + today.plusDays(14) + listOfNotNull(nextRaceDate?.takeIf { ChronoUnit.DAYS.between(today, it) <= 84 })).max()
         val events = getArray(
             "/athlete/$ath/events",
             mapOf("oldest" to monday.toString(), "newest" to projectTo.plusDays(1).toString()),
@@ -186,6 +187,98 @@ class IcuApi(private val creds: Credentials) {
             return futures.flatMap { it.get() }.sortedWith(compareBy({ it.date }, { it.activityId }, { it.index }))
         } finally {
             pool.shutdown()
+        }
+    }
+
+    /**
+     * Best 5K / 10K / half-marathon times over the last year: from intervals.icu's pace curve
+     * when available, and from runs of those distances (time trials, races), keeping the faster.
+     */
+    fun fetchPbs(today: LocalDate = LocalDate.now()): Pbs {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val targets = listOf(5000.0, 10000.0, 21097.5)
+        val best = arrayOfNulls<Pb>(3)
+        fun offer(i: Int, pb: Pb) { if (best[i] == null || pb.seconds < best[i]!!.seconds) best[i] = pb }
+
+        // 1) Pace curve (defensive parsing: distances in metres + times in seconds, or speeds)
+        runCatching {
+            val text = getText("/athlete/$ath/pace-curves", mapOf("type" to "Run", "curves" to "1y"))
+            val root = org.json.JSONTokener(text).nextValue()
+            val curves = when (root) {
+                is JSONObject -> root.optJSONArray("list")?.objects() ?: listOf(root)
+                is JSONArray -> root.objects()
+                else -> emptyList()
+            }
+            for (cv in curves) {
+                val dist = cv.optJSONArray("distance") ?: continue
+                val vals = cv.optJSONArray("values") ?: cv.optJSONArray("secs") ?: continue
+                for ((ti, target) in targets.withIndex()) {
+                    var bi = -1; var bd = Double.MAX_VALUE
+                    for (k in 0 until minOf(dist.length(), vals.length())) {
+                        val dd = abs(dist.optDouble(k) - target)
+                        if (dd < bd) { bd = dd; bi = k }
+                    }
+                    if (bi < 0 || bd > target * 0.02) continue
+                    var v = vals.optDouble(bi)
+                    if (v.isNaN() || v <= 0) continue
+                    if (v < 20) v = target / v          // a speed (m/s), not a time
+                    if (v in target * 0.12..target * 0.6) offer(ti, Pb(v, null, "pace curve"))
+                }
+            }
+        }
+        // 2) Runs of (about) those distances in the last year
+        runCatching {
+            val acts = getArray(
+                "/athlete/$ath/activities",
+                mapOf("oldest" to today.minusDays(365).toString(), "newest" to today.plusDays(1).toString()),
+            ).objects().filter { it.optString("type").contains("Run", ignoreCase = true) }
+            for (a in acts) {
+                val dist = a.optNum("distance") ?: continue
+                val secs = a.optNum("moving_time") ?: a.optNum("elapsed_time") ?: continue
+                for ((ti, target) in targets.withIndex()) {
+                    if (dist in target * 0.99..target * 1.05) offer(ti, Pb(secs * target / dist, date(a), a.optString("name")))
+                }
+            }
+        }
+        return Pbs(System.currentTimeMillis(), best[0], best[1], best[2])
+    }
+
+    /** Sets one wellness field for a day in intervals.icu (used to correct an obviously wrong sleep value). */
+    fun updateWellness(date: String, fields: JSONObject) {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val conn = URL("$BASE/athlete/$ath/wellness/${URLEncoder.encode(date, "UTF-8")}").openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "PUT"
+            conn.doOutput = true
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 25_000
+            val token = Base64.encodeToString("API_KEY:${creds.apiKey}".toByteArray(), Base64.NO_WRAP)
+            conn.setRequestProperty("Authorization", "Basic $token")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.outputStream.use { it.write(fields.toString().toByteArray()) }
+            val code = conn.responseCode
+            if (code == 401 || code == 403) throw AuthException()
+            if (code !in 200..299) throw IOException("intervals.icu returned HTTP $code")
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun getText(path: String, params: Map<String, String>): String {
+        val query = params.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }
+        val conn = URL("$BASE$path?$query").openConnection() as HttpURLConnection
+        try {
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 25_000
+            val token = Base64.encodeToString("API_KEY:${creds.apiKey}".toByteArray(), Base64.NO_WRAP)
+            conn.setRequestProperty("Authorization", "Basic $token")
+            conn.setRequestProperty("Accept", "application/json")
+            val code = conn.responseCode
+            if (code == 401 || code == 403) throw AuthException()
+            if (code !in 200..299) throw IOException("intervals.icu returned HTTP $code")
+            return conn.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            conn.disconnect()
         }
     }
 

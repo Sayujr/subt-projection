@@ -177,6 +177,28 @@ data class Snapshot(
     }
 }
 
+/** A best time for a distance. */
+data class Pb(val seconds: Double, val date: String?, val name: String?)
+
+data class Pbs(val fetchedAt: Long, val fiveK: Pb?, val tenK: Pb?, val half: Pb?) {
+    fun toJson(): String {
+        fun j(p: Pb?) = p?.let { JSONObject().put("s", it.seconds).putOpt("d", it.date).putOpt("n", it.name) }
+        return JSONObject().put("t", fetchedAt).putOpt("5k", j(fiveK)).putOpt("10k", j(tenK)).putOpt("hm", j(half)).toString()
+    }
+
+    companion object {
+        fun fromJson(s: String): Pbs? = try {
+            val o = JSONObject(s)
+            fun p(k: String) = o.optJSONObject(k)?.let {
+                Pb(it.getDouble("s"), it.optString("d").ifBlank { null }, it.optString("n").ifBlank { null })
+            }
+            Pbs(o.getLong("t"), p("5k"), p("10k"), p("hm"))
+        } catch (e: Exception) {
+            null
+        }
+    }
+}
+
 /** One SubT rep (lap) from an intervals.icu activity. */
 data class SubtRep(
     val activityId: String,

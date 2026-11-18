@@ -448,8 +448,11 @@ class MainActivity : Activity() {
     private fun enableScrub(root: View) {
         val iv = root.findViewById<android.widget.ImageView>(R.id.trend_chart) ?: return
         val period = Prefs.period(this, WidgetRenderer.APP_ID)
-        val days = Prefs.snapshot(this)?.days?.takeLast(period) ?: return
+        val snap = Prefs.snapshot(this) ?: return
+        val days = snap.days.takeLast(period)
         if (days.size < 2) return
+        val future = if (snap.today == LocalDate.now().toString()) snap.proj.take(14).filter { it.date > days.last().date } else emptyList()
+        val all = days + future
         val d = resources.displayMetrics.density
         val ctlV = root.findViewById<TextView>(R.id.ctl_value); val ctlD = root.findViewById<TextView>(R.id.ctl_delta)
         val atlV = root.findViewById<TextView>(R.id.atl_value); val atlD = root.findViewById<TextView>(R.id.atl_delta)
@@ -460,12 +463,12 @@ class MainActivity : Activity() {
             when (e.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_MOVE -> {
                     v.parent?.requestDisallowInterceptTouchEvent(true)
-                    val i = Charts.combinedIndexAt(e.x, days.size, v.width, d, labels)
-                    val day = days[i]
-                    iv.setImageBitmap(Charts.combined(days, v.width, v.height, d, WidgetRenderer.TILE_BG, labels, highlight = i))
+                    val i = Charts.combinedIndexAt(e.x, all.size, v.width, d, labels)
+                    val day = all[i]
+                    iv.setImageBitmap(Charts.combined(days, v.width, v.height, d, WidgetRenderer.TILE_BG, labels, highlight = i, future = future))
                     val z = FormZone.of(day.form)
                     ctlV?.text = day.ctl.roundToInt().toString()
-                    ctlD?.text = runCatching { LocalDate.parse(day.date).format(df) }.getOrDefault(day.date)
+                    ctlD?.text = runCatching { LocalDate.parse(day.date).format(df) }.getOrDefault(day.date) + if (i > days.lastIndex) " · plan" else ""
                     ctlD?.setTextColor(0xFFF2F4F8.toInt())
                     atlV?.text = day.atl.roundToInt().toString(); atlD?.text = ""
                     formV?.text = (if (day.form > 0) "+" else "") + day.form.roundToInt(); formV?.setTextColor(z.color)

@@ -264,7 +264,7 @@ object ExtraWidgets {
         val days = s.snap?.days.orEmpty().takeLast(period)
         val hrv = days.mapNotNull { it.hrv }
         val rhr = days.mapNotNull { it.rhr }
-        val sleep = days.mapNotNull { it.sleepSecs?.div(60) } // minutes
+        val sleep = days.mapNotNull { it.sleepSecs?.div(60)?.takeIf { m -> m <= 14 * 60 } } // minutes; >14 h = tracking error
         val note = when {
             s.creds == null -> "Tap to connect intervals.icu"
             s.snap == null -> "Loading…"

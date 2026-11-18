@@ -67,10 +67,17 @@ object Charts {
         values.forEachIndexed { i, v -> if (i == 0) moveTo(f.x(i), f.y(v)) else lineTo(f.x(i), f.y(v)) }
     }
 
-    private fun drawFilledLine(c: Canvas, f: Frame, values: List<Double>, color: Int, density: Float, bg: Int) {
-        val line = pathOf(f, values)
+    private fun dashedStroke(color: Int, density: Float, width: Float = 1.8f) = stroke(color, density, width).apply {
+        pathEffect = DashPathEffect(floatArrayOf(4f * density, 3.5f * density), 0f)
+    }
+
+    /** Line with gradient fill; points after [split] (planned future) are dashed and unfilled. */
+    private fun drawFilledLine(c: Canvas, f: Frame, values: List<Double>, color: Int, density: Float, bg: Int, split: Int = values.lastIndex) {
+        val hist = values.take(split + 1)
+        val line = Path()
+        hist.forEachIndexed { i, v -> if (i == 0) line.moveTo(f.x(i), f.y(v)) else line.lineTo(f.x(i), f.y(v)) }
         val fill = Path(line).apply {
-            lineTo(f.x(values.lastIndex), f.r.bottom)
+            lineTo(f.x(hist.lastIndex), f.r.bottom)
             lineTo(f.x(0), f.r.bottom)
             close()
         }
@@ -82,10 +89,17 @@ object Charts {
         }
         c.drawPath(fill, fillPaint)
         c.drawPath(line, stroke(color, density))
-        dot(c, f.x(values.lastIndex), f.y(values.last()), color, density, bg)
+        if (split < values.lastIndex) {
+            val fut = Path().apply {
+                moveTo(f.x(split), f.y(values[split]))
+                for (i in split + 1..values.lastIndex) lineTo(f.x(i), f.y(values[i]))
+            }
+            c.drawPath(fut, dashedStroke(withAlpha(color, 0xCC), density))
+        }
+        dot(c, f.x(split), f.y(values[split]), color, density, bg)
     }
 
-    private fun drawForm(c: Canvas, r: RectF, values: List<Double>, density: Float, bg: Int, labels: Boolean = false): Frame {
+    private fun drawForm(c: Canvas, r: RectF, values: List<Double>, density: Float, bg: Int, labels: Boolean = false, split: Int = values.lastIndex): Frame {
         val f = Frame(r, values.size, 4f * density, min(values.min(), 0.0), max(values.max(), 0.0))
         val band = Paint()
         for (z in FormZone.entries) {
@@ -104,12 +118,13 @@ object Charts {
         val zy = f.y(0.0)
         c.drawLine(r.left, zy, r.right, zy, zero)
         for (i in 1 until values.size) {
+            val col = FormZone.of(values[i]).color
             c.drawLine(
                 f.x(i - 1), f.y(values[i - 1]), f.x(i), f.y(values[i]),
-                stroke(FormZone.of(values[i]).color, density)
+                if (i > split) dashedStroke(withAlpha(col, 0xCC), density) else stroke(col, density)
             )
         }
-        dot(c, f.x(values.lastIndex), f.y(values.last()), FormZone.of(values.last()).color, density, bg)
+        dot(c, f.x(split), f.y(values[split]), FormZone.of(values[split]).color, density, bg)
         if (labels) {
             // Zone boundaries as dotted lines with their values, zone names at the right edge
             val text = labelPaint(density)
@@ -219,13 +234,17 @@ object Charts {
     }
 
     /** Fitness (filled) + Fatigue (line) on a shared scale inside [r]. */
-    private fun drawFitFat(c: Canvas, r: RectF, days: List<Day>, density: Float, bg: Int, labels: Boolean): Frame {
+    private fun drawFitFat(c: Canvas, r: RectF, days: List<Day>, density: Float, bg: Int, labels: Boolean, split: Int = days.lastIndex): Frame {
         val ctl = days.map { it.ctl }
         val atl = days.map { it.atl }
         val f = Frame(r, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
-        drawFilledLine(c, f, ctl, FormColors.FITNESS, density, bg)
-        c.drawPath(pathOf(f, atl), stroke(FormColors.FATIGUE, density, 1.5f))
-        dot(c, f.x(atl.lastIndex), f.y(atl.last()), FormColors.FATIGUE, density, bg)
+        drawFilledLine(c, f, ctl, FormColors.FITNESS, density, bg, split)
+        c.drawPath(pathOf(f, atl.take(split + 1)), stroke(FormColors.FATIGUE, density, 1.5f))
+        if (split < atl.lastIndex) {
+            val fut = Path().apply { moveTo(f.x(split), f.y(atl[split])); for (i in split + 1..atl.lastIndex) lineTo(f.x(i), f.y(atl[i])) }
+            c.drawPath(fut, dashedStroke(withAlpha(FormColors.FATIGUE, 0xCC), density, 1.5f))
+        }
+        dot(c, f.x(split), f.y(atl[split]), FormColors.FATIGUE, density, bg)
         if (labels) {
             val text = labelPaint(density)
             c.drawText("${max(ctl.max(), atl.max()).roundToInt()}", r.left + 2f * density, r.top + 9f * density, text)
@@ -256,10 +275,14 @@ object Charts {
      * With [labels], date ticks run along the bottom and the panels get value labels.
      */
     fun combined(
-        days: List<Day>, w: Int, h: Int, density: Float, bg: Int, labels: Boolean = false, highlight: Int? = null,
+        history: List<Day>, w: Int, h: Int, density: Float, bg: Int, labels: Boolean = false, highlight: Int? = null,
+        future: List<Day> = emptyList(),
     ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        if (days.size < 2) return bmp
+        if (history.size < 2) return bmp
+        // History then the planned days ahead (dashed); split = today
+        val days = history + future.filter { it.date > history.last().date }
+        val split = history.lastIndex
         val c = Canvas(bmp)
         val form = days.map { it.form }
 
@@ -276,8 +299,19 @@ object Charts {
         val ft = Frame(top, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
         if (labels) drawValueGrid(c, ft, top, density)
         drawGrid(c, ft, days, chartH, h, w, density, labels)
-        drawFitFat(c, top, days, density, bg, labels = false)
-        val fb = drawForm(c, bottom, form, density, bg, labels)
+        drawFitFat(c, top, days, density, bg, labels = false, split = split)
+        val fb = drawForm(c, bottom, form, density, bg, labels, split)
+        if (split < days.lastIndex) {
+            val x = ft.x(split)
+            val p = Paint().apply { color = 0x44FFFFFF; strokeWidth = 1f * density }
+            c.drawLine(x, 0f, x, chartH, p)
+            if (labels) {
+                val t = labelPaint(density).apply { color = 0xFFF2F4F8.toInt() }
+                c.drawText("today", (x - t.measureText("today") - 3f * density).coerceAtLeast(left), 10f * density, t)
+                val pl = labelPaint(density)
+                c.drawText("plan", x + 3f * density, 10f * density, pl)
+            }
+        }
 
         if (highlight != null && highlight in days.indices) {
             val x = ft.x(highlight)

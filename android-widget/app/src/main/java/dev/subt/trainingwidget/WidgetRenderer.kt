@@ -267,7 +267,9 @@ object WidgetRenderer {
                     OneVariant.PLAIN -> Triple(wDp, hDp - 48, WIDGET_BG)
                     OneVariant.SLIM -> Triple(wDp, hDp - 38, WIDGET_BG)
                 }
-                rv.setImageViewBitmap(R.id.trend_chart, Charts.combined(days, px(cw), px(ch), d, bg, labels = ch >= 110))
+                // Two weeks of the plan ahead, dashed
+                val future = if (s.isToday) s.snap?.proj.orEmpty().take(14) else emptyList()
+                rv.setImageViewBitmap(R.id.trend_chart, Charts.combined(days, px(cw), px(ch), d, bg, labels = ch >= 110, future = future))
             }
         }
         return rv

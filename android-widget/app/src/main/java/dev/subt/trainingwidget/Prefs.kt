@@ -66,6 +66,14 @@ object Prefs {
     fun fitnessGuardrail(ctx: Context): Int = sp(ctx).getInt("fitness_guardrail", 15)
     fun setFitnessGuardrail(ctx: Context, pct: Int) = sp(ctx).edit().putInt("fitness_guardrail", pct).apply()
 
+    // ---- PBs and race gap
+
+    fun pbs(ctx: Context): Pbs? = sp(ctx).getString("pbs", null)?.let { Pbs.fromJson(it) }
+    fun savePbs(ctx: Context, p: Pbs) = sp(ctx).edit().putString("pbs", p.toJson()).apply()
+    /** true = calibrate the race gap from your 5K PB; false = the projection page's 11 %. */
+    fun gapFromPb(ctx: Context): Boolean = sp(ctx).getBoolean("gap_from_pb", true)
+    fun setGapFromPb(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("gap_from_pb", on).apply()
+
     // ---- marathon / weight planning
 
     /** User-entered weight overrides the intervals.icu value. */

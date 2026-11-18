@@ -19,7 +19,22 @@ object SubtModel {
         doubleArrayOf(3.48, 840.0, 3922.0, 8231.0), doubleArrayOf(3.37, 810.0, 3777.0, 7935.0),
         doubleArrayOf(3.28, 781.0, 3639.0, 7658.0),
     )
-    const val GAP = 0.11
+    /** The projection page's race-readiness gap. */
+    const val PAGE_GAP = 0.11
+
+    /** Gap used by every calculation; the app sets it from your 5K PB when available. */
+    @Volatile var GAP = PAGE_GAP
+
+    /** Race gap implied by an actual 5K time at a given SubT pace (clamped to 0–25 %). */
+    fun gapFrom5k(pbSec: Double, subt: Double) = (pbSec / interp(subt, 1) - 1).coerceIn(0.0, 0.25)
+
+    /** Applies the user's gap choice: calibrated from the 5K PB (using SubT in the PB's month) or the page default. */
+    fun applyGap(ctx: android.content.Context) {
+        val pb = Prefs.pbs(ctx)?.fiveK
+        val months = Prefs.subt(ctx)?.months.orEmpty().filter { !it.outlier }
+        val subtAtPb = pb?.date?.take(7)?.let { m -> months.lastOrNull { it.month <= m } } ?: months.lastOrNull()
+        GAP = if (Prefs.gapFromPb(ctx) && pb != null && subtAtPb != null) gapFrom5k(pb.seconds, subtAtPb.pace) else PAGE_GAP
+    }
     const val PEAK = 4 + 32 / 60.0
     const val FLOOR = 3 + 20 / 60.0
 

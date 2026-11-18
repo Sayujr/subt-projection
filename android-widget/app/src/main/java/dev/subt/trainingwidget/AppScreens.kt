@@ -362,7 +362,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             val delta = rhr.takeLast(7).average() - base
             if (delta >= 3) bullet(c, WARN, "Resting HR is up ${fmt1(delta)} bpm on your normal (${base.roundToInt()}). Prioritise sleep, hydrate, and take an extra easy day if it stays high.")
         }
-        val sleep = s.days.mapNotNull { it.sleepSecs?.div(60) }
+        val sleep = s.days.mapNotNull { it.sleepSecs?.div(60)?.takeIf { m -> m <= 14 * 60 } }
         if (sleep.size >= 5 && sleep.takeLast(7).average() < 420) {
             bullet(c, WARN, "Sleep is averaging ${hm(sleep.takeLast(7).average())}. Aim for 8 hours or more in the nights before the race.")
         }
@@ -434,8 +434,16 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             val c = card(col)
             val color = 0xFF8C9EFF.toInt()
             label(c, "Sleep", color)
-            val vals = days.mapNotNull { dd -> dd.sleepSecs?.let { date(dd.date)!! to it / 3600.0 } }
+            val raw = days.mapNotNull { dd -> dd.sleepSecs?.let { dd.date to it / 3600.0 } }
+            // Nights over 14 h are tracking errors (watch left recording): leave them out
+            val bad = raw.filter { it.second > 14 }
+            val vals = raw.filter { it.second <= 14 }.map { date(it.first)!! to it.second }
             if (vals.isEmpty()) { text(c, "No sleep data in intervals.icu for this period.", 14f, DIM, top = 4); return@run }
+            for ((bd, hrs) in bad) {
+                val dl = date(bd)?.format(edm) ?: bd
+                text(c, spans("Left out $dl: ${hm(hrs * 60)} recorded, likely a tracking error.  " to WARN, "Set to 8h in intervals.icu ›" to FormColors.FITNESS), 13f, top = 4)
+                    .setOnClickListener { fixSleep(bd, hrs) }
+            }
             val avg7 = vals.takeLast(7).map { it.second }.average()
             val colr = when { avg7 >= 7 -> GOOD; avg7 < 6 -> BAD; else -> WARN }
             text(c, spans(hm(vals.last().second * 60) to TEXT, " last night" to DIM), 24f, bold = true, top = 2)
@@ -534,12 +542,65 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         return sv
     }
 
+    /** Corrects a wrong sleep value in intervals.icu (after confirmation), then refreshes. */
+    private fun fixSleep(dateStr: String, hrs: Double) {
+        val creds = Prefs.credentials(a) ?: return
+        AlertDialog.Builder(a)
+            .setTitle("Fix sleep on ${date(dateStr)?.format(edm) ?: dateStr}?")
+            .setMessage("intervals.icu has ${hm(hrs * 60)} of sleep for this night. Set it to 8h 00m in your intervals.icu wellness data?")
+            .setPositiveButton("Set to 8 h") { _, _ ->
+                Thread {
+                    val r = runCatching { IcuApi(creds).updateWellness(dateStr, org.json.JSONObject().put("sleepSecs", 8 * 3600)) }
+                    a.runOnUiThread {
+                        android.widget.Toast.makeText(a, r.fold({ "Updated. Refreshing…" }, { "Couldn't update: ${it.message}" }), android.widget.Toast.LENGTH_LONG).show()
+                        if (r.isSuccess) Refresh.now(a, replace = true)
+                    }
+                }.start()
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    /** Your actual bests from intervals.icu plus the race-gap choice they feed. */
+    private fun pbCard(col: LinearLayout, cur: Double) {
+        val pbs = Prefs.pbs(a)
+        val c = card(col)
+        label(c, "Your bests · last 12 months (intervals.icu)")
+        if (pbs == null || (pbs.fiveK == null && pbs.tenK == null && pbs.half == null)) {
+            text(c, if (pbs == null) "Loading PBs… (tap ⟳ on any screen)" else "No 5K, 10K or half-marathon efforts found in the last year.", 14f, DIM, top = 4)
+            return
+        }
+        fun cap(p: Pb?) = p?.let { listOfNotNull(it.date?.let { d -> date(d)?.format(dm) }, it.name?.take(18)).joinToString(" · ") } ?: ""
+        stats3(c, listOf(
+            Triple("5K", (pbs.fiveK?.let { t(it.seconds) } ?: "–") to GOOD, cap(pbs.fiveK)),
+            Triple("10K", (pbs.tenK?.let { t(it.seconds) } ?: "–") to TEXT, cap(pbs.tenK)),
+            Triple("Half", (pbs.half?.let { t(it.seconds) } ?: "–") to TEXT, cap(pbs.half)),
+        ))
+        val pb5 = pbs.fiveK
+        if (pb5 != null) {
+            val months = Prefs.subt(a)?.months.orEmpty().filter { !it.outlier }
+            val subtAt = pb5.date?.take(7)?.let { m -> months.lastOrNull { it.month <= m } }?.pace ?: cur
+            val calibrated = SubtModel.gapFrom5k(pb5.seconds, subtAt)
+            val usePb = Prefs.gapFromPb(a)
+            text(c, spans(
+                "Race gap: " to DIM,
+                "your 5K PB at SubT ${Charts.paceText(subtAt)} means you race ${fmt1(calibrated * 100)}% slower than pure VDOT" to TEXT,
+                " (the page assumes ${fmt1(SubtModel.PAGE_GAP * 100)}%)" to FAINT,
+            ), 13f, top = 10)
+            chipRow(c, listOf("Use my PB (${fmt1(calibrated * 100)}%)", "Page default (11%)"), if (usePb) 0 else 1) {
+                Prefs.setGapFromPb(a, it == 0); SubtModel.applyGap(a); onChange()
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- SubT extras (below the widget card)
 
     fun subtExtras(col: LinearLayout) {
         val sub = Prefs.subt(a) ?: return
         val months = sub.months.filter { !it.outlier }
         val cur = months.lastOrNull()?.pace ?: return
+        SubtModel.applyGap(a)
+        pbCard(col, cur)
+        val pb5 = Prefs.pbs(a)?.fiveK
 
         val c = card(col)
         label(c, "Projection to 5K goals")
@@ -564,7 +625,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val longS = SubtModel.path(cur, SubtModel.SLOW, 60)
         for ((name, sec) in SubtModel.GOALS) {
             val need = SubtModel.requiredSubtFor5k(sec)
-            val done = cur <= need
+            val byPb = pb5 != null && pb5.seconds < sec
+            val done = byPb || cur <= need
             val r = SubtModel.arrival(longR, need)
             val f = SubtModel.arrival(longF, need)
             val sl = SubtModel.arrival(longS, need)
@@ -572,11 +634,11 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             row(c, listOf(
                 name to (if (done) GOOD else TEXT),
                 Charts.paceText(need) to DIM,
-                (if (done) "✓ now" else m(r)) to (if (done) GOOD else Charts.SUBT),
+                (if (byPb) "✓ PB ${t(pb5!!.seconds)}" else if (done) "✓ now" else m(r)) to (if (done) GOOD else Charts.SUBT),
                 (if (done) "" else "${m(f)} – ${m(sl)}") to FAINT,
             ), weights = listOf(1.3f, 0.9f, 1.1f, 1.4f))
         }
-        text(c, "Same model as your projection page: Daniels VDOT, 11% race gap, rates per month of −12 s/km while rebuilding to 4:32, then −2 (realistic; fast −3, slow −1) down to 4:00. Overrides you set on the page aren't visible here.", 12f, FAINT, top = 8)
+        text(c, "Same model as your projection page: Daniels VDOT, ${fmt1(SubtModel.GAP * 100)}% race gap (${if (Prefs.gapFromPb(a) && pb5 != null) "from your PB" else "page default"}), rates per month of −12 s/km while rebuilding to 4:32, then −2 (realistic; fast −3, slow −1) down to 4:00. Overrides you set on the page aren't visible here.", 12f, FAINT, top = 8)
     }
 
     // ---------------------------------------------------------------- shared controls
@@ -674,6 +736,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
 
     fun sub3Forecast(col: LinearLayout) {
         val sn = subtNow(col) ?: return
+        SubtModel.applyGap(a)
         val cur = sn.cur
         val w = weightIn()
         val need = SubtModel.requiredSubt(3, SubtModel.SUB3)
@@ -734,7 +797,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 t(fm) to (if (hit) GOOD else TEXT),
             ), weights = listOf(1f, 0.9f, 1f, 1.2f, 1.2f))
         }
-        text(tb, "These are the race times your SubT supports each month, using Daniels VDOT plus your 11% race-readiness gap. A 5K at or under the time shown means you're on or ahead of the curve.", 12f, FAINT, top = 8)
+        text(tb, "These are the race times your SubT supports each month, using Daniels VDOT plus a ${fmt1(SubtModel.GAP * 100)}% race-readiness gap. A 5K at or under the time shown means you're on or ahead of the curve.", 12f, FAINT, top = 8)
 
         weightCard(col, cur, need)
     }
@@ -749,6 +812,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
 
     fun sub3Plan(col: LinearLayout) {
         val sn = subtNow(col) ?: return
+        SubtModel.applyGap(a)
         val cur = sn.cur
         val w = weightIn()
         val today = LocalDate.now()

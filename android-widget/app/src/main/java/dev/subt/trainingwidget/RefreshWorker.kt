@@ -34,6 +34,13 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                 Prefs.setError(ctx, "offline")
             }
         }
+        // PBs change rarely: refresh daily (or on a manual refresh)
+        if (creds != null) {
+            val pb = Prefs.pbs(ctx)
+            if (pb == null || System.currentTimeMillis() - pb.fetchedAt > 24 * 3600_000L || inputData.getBoolean(FORCE, false)) {
+                runCatching { IcuApi(creds).fetchPbs() }.onSuccess { Prefs.savePbs(ctx, it) }
+            }
+        }
         // SubT data comes from the repo (updated every few days) and needs no login
         val subt = Prefs.subt(ctx)
         if (subt == null || System.currentTimeMillis() - subt.fetchedAt > 6 * 3600_000L || inputData.getBoolean(FORCE, false)) {
