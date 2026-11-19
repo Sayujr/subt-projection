@@ -105,7 +105,7 @@ object WidgetRenderer {
         views.setTextViewText(R.id.title, titleText(s.today))
         views.setTextViewText(R.id.updated, updatedText(ctx, s))
         views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, TrainingWidgetProvider::class.java))
-        setVerdict(views, s)
+        if (inApp) views.setTextViewText(R.id.verdict, "") else setVerdict(views, s)   // app shows the verdict card
         if (s.creds == null) {
             views.setOnClickPendingIntent(R.id.root, setupIntent(ctx))
         } else {

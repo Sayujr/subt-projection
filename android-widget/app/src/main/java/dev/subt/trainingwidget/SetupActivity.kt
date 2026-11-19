@@ -217,11 +217,22 @@ class SetupActivity : Activity() {
             val isOpen = sectionOpen[key] ?: open
             body.visibility = if (isOpen) View.VISIBLE else View.GONE
             val head = TextView(this).apply {
-                fun label(o: Boolean) = (if (o) "▾  " else "▸  ") + title + (sub?.let { "\n     $it" } ?: "")
+                fun label(o: Boolean): CharSequence {
+                    val sb = android.text.SpannableStringBuilder((if (o) "▾  " else "▸  ") + title)
+                    if (sub != null) {
+                        val st = sb.length
+                        sb.append("\n").append(sub)
+                        sb.setSpan(android.text.style.RelativeSizeSpan(0.76f), st, sb.length, 0)
+                        sb.setSpan(android.text.style.ForegroundColorSpan(if (sub.startsWith("⚠")) 0xFFFFC53D.toInt() else 0xFF9AA3B2.toInt()), st, sb.length, 0)
+                        sb.setSpan(android.text.style.TypefaceSpan("sans-serif"), st, sb.length, 0)
+                    }
+                    return sb
+                }
                 text = label(isOpen)
                 setTextColor(0xFFF2F4F8.toInt()); textSize = 17f
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                 setPadding(0, (18 * d).toInt(), 0, (8 * d).toInt())
+                setLineSpacing(3 * d, 1f)
                 setOnClickListener {
                     val o = body.visibility != View.VISIBLE
                     body.visibility = if (o) View.VISIBLE else View.GONE
