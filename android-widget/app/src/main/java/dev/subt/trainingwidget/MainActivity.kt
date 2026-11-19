@@ -186,9 +186,12 @@ class MainActivity : Activity() {
             setOnClickListener { v ->
                 val pm = android.widget.PopupMenu(this@MainActivity, v)
                 Tab.entries.filter { !it.inBar }.forEachIndexed { i, t -> pm.menu.add(0, t.ordinal, i, "${t.icon}   ${t.label}") }
+                pm.menu.add(0, 98, 98, "↗   Open intervals.icu")
                 pm.menu.add(0, 99, 99, "⚙   Settings")
                 pm.setOnMenuItemClickListener { item ->
-                    if (item.itemId == 99) startActivity(Intent(this@MainActivity, SetupActivity::class.java))
+                    if (item.itemId == 98) runCatching { startActivity(WidgetRenderer.browserIntent(this@MainActivity, "https://intervals.icu/")) }
+                        .onFailure { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://intervals.icu/"))) }
+                    else if (item.itemId == 99) startActivity(Intent(this@MainActivity, SetupActivity::class.java))
                     else { tab = Tab.entries[item.itemId]; show() }
                     true
                 }

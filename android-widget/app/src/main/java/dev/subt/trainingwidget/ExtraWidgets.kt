@@ -87,7 +87,7 @@ object ExtraWidgets {
             R.id.root,
             when {
                 needsLogin && s.creds == null -> R0.setupIntent(ctx)
-                inApp -> R0.browser(ctx, url.hashCode(), url)   // inside the app: open intervals.icu / the page
+                inApp -> null                                    // inside the app: taps stay in the app
                 else -> R0.appIntent(ctx, tab)                   // on the home screen: open this screen in the app
             }
         )

@@ -109,9 +109,9 @@ object WidgetRenderer {
         if (s.creds == null) {
             views.setOnClickPendingIntent(R.id.root, setupIntent(ctx))
         } else {
-            // On the home screen a tap opens the app; inside the app it opens intervals.icu
-            views.setOnClickPendingIntent(R.id.workouts, if (inApp) browser(ctx, 11, CALENDAR_URL) else appIntent(ctx, "HOME"))
-            views.setOnClickPendingIntent(R.id.graphs, if (inApp) browser(ctx, 12, FITNESS_URL) else appIntent(ctx, "HOME"))
+            // On the home screen a tap opens the app; inside the app taps stay put (no jump to intervals.icu)
+            views.setOnClickPendingIntent(R.id.workouts, if (inApp) null else appIntent(ctx, "HOME"))
+            views.setOnClickPendingIntent(R.id.graphs, if (inApp) null else appIntent(ctx, "HOME"))
         }
 
         // Height left after padding (24), header (28) and margins (14), shared by workout rows (22dp each) and graphs
@@ -447,7 +447,19 @@ object WidgetRenderer {
     )
 
     internal fun browser(ctx: Context, req: Int, url: String): PendingIntent = PendingIntent.getActivity(
-        ctx, req, Intent(Intent.ACTION_VIEW, Uri.parse(url)),
+        ctx, req, browserIntent(ctx, url),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
+
+    /**
+     * Opens a page in the real browser. Aimed at the default browser directly so an installed
+     * intervals.icu web app (which can open deep links as a blank screen) doesn't grab it.
+     */
+    internal fun browserIntent(ctx: Context, url: String): Intent {
+        val i = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
+        val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com/")).addCategory(Intent.CATEGORY_BROWSABLE)
+        val pkg = ctx.packageManager.resolveActivity(probe, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        if (pkg != null && pkg != "android") i.setPackage(pkg)
+        return i
+    }
 }
