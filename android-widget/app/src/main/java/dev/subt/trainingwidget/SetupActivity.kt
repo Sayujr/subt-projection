@@ -181,6 +181,28 @@ class SetupActivity : Activity() {
 
     private companion object { val sentToday = mutableMapOf<String, String>() }
 
+    override fun onResume() {
+        super.onResume()
+        showBatteryStatus()
+    }
+
+    /** Samsung/Android battery saving can stop the daily refresh; offer the one-tap exemption. */
+    private fun showBatteryStatus() {
+        val tv = findViewById<TextView>(R.id.battery_status)
+        if (DailyRefresh.batteryUnrestricted(this)) {
+            tv.text = "✓ Background refresh allowed: widgets update hourly and every morning"
+            tv.setTextColor(0xFF4ADE80.toInt()); tv.setOnClickListener(null)
+        } else {
+            tv.text = "⚠ Battery saving may stop widgets refreshing on their own. Tap to allow background refresh."
+            tv.setTextColor(0xFFFFC53D.toInt())
+            tv.setOnClickListener {
+                runCatching {
+                    startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$packageName")))
+                }.onFailure { startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+            }
+        }
+    }
+
     /** "Send to intervals.icu": one button per value you entered, each confirming before it writes. */
     private fun buildSyncButtons() {
         val box = findViewById<android.widget.LinearLayout>(R.id.sync_buttons)

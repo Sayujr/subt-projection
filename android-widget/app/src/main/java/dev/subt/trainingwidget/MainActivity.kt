@@ -147,7 +147,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         getSharedPreferences("training_widget", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsListener)
-        Refresh.schedulePeriodic(this)
+        DailyRefresh.ensure(this)
         val snap = Prefs.snapshot(this)
         val stale = snap == null || System.currentTimeMillis() - snap.fetchedAt > 15 * 60_000 ||
             snap.today != LocalDate.now().toString()

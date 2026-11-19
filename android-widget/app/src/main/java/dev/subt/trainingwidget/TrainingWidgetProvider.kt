@@ -14,7 +14,7 @@ abstract class BaseWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
         ids.forEach { render(ctx, mgr, it) }
-        Refresh.schedulePeriodic(ctx)
+        DailyRefresh.ensure(ctx)
         val snap = Prefs.snapshot(ctx)
         val stale = snap == null || System.currentTimeMillis() - snap.fetchedAt > 15 * 60_000 ||
             snap.today != LocalDate.now().toString()
@@ -29,7 +29,7 @@ abstract class BaseWidgetProvider : AppWidgetProvider() {
         ids.forEach { Prefs.deleteWidget(ctx, it) }
     }
 
-    override fun onEnabled(ctx: Context) = Refresh.schedulePeriodic(ctx)
+    override fun onEnabled(ctx: Context) = DailyRefresh.ensure(ctx)
 
     override fun onDisabled(ctx: Context) {
         if (WidgetRenderer.allIds(ctx).isEmpty()) Refresh.cancel(ctx)

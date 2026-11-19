@@ -94,6 +94,15 @@
             android:textColor="@color/text" />
 
         <TextView
+            android:id="@+id/battery_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textSize="13sp" />
+
+        <TextView
             android:id="@+id/widget_hint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
