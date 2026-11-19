@@ -236,28 +236,6 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Stryd CP (W)"
-            android:textColor="@color/text_dim"
-            android:textSize="13sp" />
-
-        <EditText
-            android:id="@+id/num_stryd"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="4dp"
-            android:background="@drawable/input_bg"
-            android:hint="auto"
-            android:importantForAutofill="no"
-            android:inputType="number"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:textColor="@color/text"
-            android:textColorHint="@color/text_faint" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
             android:text="Resting HR today (bpm)"
             android:textColor="@color/text_dim"
             android:textSize="13sp" />

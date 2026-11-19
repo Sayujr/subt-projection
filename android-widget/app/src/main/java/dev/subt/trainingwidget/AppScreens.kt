@@ -1709,11 +1709,6 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         p.slopePerMonth?.let { sl ->
             bullet(n, if (sl > 0.5) GOOD else if (sl < -0.5) WARN else DIM, "eFTP ${if (sl >= 0) "rising" else "falling"} ${fmt1(abs1(sl))} W/month over the last 90 days" +
                 (p.eftp?.let { e -> p.cp3moAgo?.let { " (${delta(e, it)} vs 3 months ago)" } } ?: "") + ".")
-            Prefs.strydCp(a)?.let { sc ->
-                val spread = listOfNotNull(sc, p.cp, p.eftp).let { it.max() - it.min() }
-                bullet(n, if (spread >= 8) WARN else GOOD, "Stryd CP ${sc.roundToInt()} · set FTP ${p.cp.roundToInt()}" + (p.eftp?.let { " · eFTP ${it.roundToInt()}" } ?: "") +
-                    " W: " + (if (spread >= 8) "${spread.roundToInt()} W apart. Check which one your training zones should follow." else "in agreement."))
-            }
             p.eftp?.let { e -> if (abs1(e - p.cp) >= 8) bullet(n, WARN, "eFTP ${e.roundToInt()} W is ${abs1(e - p.cp).roundToInt()} W ${if (e > p.cp) "above" else "below"} your set FTP ${p.cp.roundToInt()} W. Consider ${if (e > p.cp) "a CP test before raising" else "whether"} FTP in intervals.icu needs updating. I won't change it.") }
         }
         p.re?.let { re ->

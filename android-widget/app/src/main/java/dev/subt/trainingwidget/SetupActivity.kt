@@ -59,7 +59,6 @@ class SetupActivity : Activity() {
         val fields = listOf(
             Triple(R.id.num_weight, Prefs.weightOverride(this)?.let { String.format(java.util.Locale.US, "%.1f", it) }, autoKg?.let { "auto: %.1f (intervals.icu)".format(it) }),
             Triple(R.id.num_cp, Prefs.cpOverride(this)?.let { it.roundToInt().toString() }, autoCp?.let { "auto: ${it.roundToInt()} W (intervals.icu FTP)" }),
-            Triple(R.id.num_stryd, Prefs.strydCp(this)?.let { it.roundToInt().toString() }, "from the Stryd app (optional)"),
             Triple(R.id.num_rhr, Prefs.rhrOverride(this)?.let { it.roundToInt().toString() }, todayIcu?.rhr?.let { "auto: ${it.roundToInt()} (intervals.icu today)" }),
             Triple(R.id.num_hrv, Prefs.hrvOverride(this)?.let { it.roundToInt().toString() }, todayIcu?.hrv?.let { "auto: ${it.roundToInt()} ms (intervals.icu today)" }),
             Triple(R.id.num_subt, Prefs.subtOverride(this)?.let { Charts.paceText(it) }, autoSubt?.let { "auto: ${Charts.paceText(it)} (latest monthly median)" }),
@@ -444,7 +443,6 @@ class SetupActivity : Activity() {
         }
         if (txt(R.id.num_weight).isEmpty()) Prefs.setWeightOverride(this, null) else num(R.id.num_weight)?.takeIf { it in 30.0..200.0 }?.let { Prefs.setWeightOverride(this, it) }
         if (txt(R.id.num_cp).isEmpty()) Prefs.setCpOverride(this, null) else num(R.id.num_cp)?.takeIf { it in 80.0..700.0 }?.let { Prefs.setCpOverride(this, it) }
-        if (txt(R.id.num_stryd).isEmpty()) Prefs.setStrydCp(this, null) else num(R.id.num_stryd)?.takeIf { it in 80.0..700.0 }?.let { Prefs.setStrydCp(this, it) }
         if (txt(R.id.num_rhr).isEmpty()) Prefs.setRhrOverride(this, null) else num(R.id.num_rhr)?.takeIf { it in 25.0..120.0 }?.let { Prefs.setRhrOverride(this, it) }
         if (txt(R.id.num_hrv).isEmpty()) Prefs.setHrvOverride(this, null) else num(R.id.num_hrv)?.takeIf { it in 5.0..300.0 }?.let { Prefs.setHrvOverride(this, it) }
         if (txt(R.id.num_subt).isEmpty()) Prefs.setSubtOverride(this, null) else time(R.id.num_subt)?.takeIf { it in 150.0..480.0 }?.let { Prefs.setSubtOverride(this, it / 60) }

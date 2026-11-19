@@ -144,10 +144,6 @@ object Prefs {
     fun cpOverride(ctx: Context): Double? = sp(ctx).getFloat("cp_override", 0f).takeIf { it > 0 }?.toDouble()
     fun setCpOverride(ctx: Context, w: Double?) = sp(ctx).edit().putFloat("cp_override", (w ?: 0.0).toFloat()).apply()
     /** Today's resting HR / HRV you entered (used as today's reading). Stored with the date they apply to. */
-    /** Your current Stryd CP (from the Stryd app), to compare with intervals.icu FTP and eFTP. */
-    fun strydCp(ctx: Context): Double? = sp(ctx).getFloat("stryd_cp", 0f).takeIf { it > 0 }?.toDouble()
-    fun setStrydCp(ctx: Context, w: Double?) = sp(ctx).edit().putFloat("stryd_cp", (w ?: 0.0).toFloat()).apply()
-
     fun rhrOverride(ctx: Context): Double? = todayValue(ctx, "rhr_override")
     fun setRhrOverride(ctx: Context, v: Double?) = setTodayValue(ctx, "rhr_override", v)
     fun hrvOverride(ctx: Context): Double? = todayValue(ctx, "hrv_override")
