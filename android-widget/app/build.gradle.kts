@@ -1,3 +1,5 @@
+import java.time.Duration
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -54,7 +56,7 @@ android {
                 it.systemProperty("robolectric.graphicsMode", "NATIVE")
                 it.systemProperty("screens.dir", rootProject.file("build/screens").absolutePath)
                 it.maxHeapSize = "2g"
-                it.timeout.set(java.time.Duration.ofMinutes(20))
+                it.timeout.set(Duration.ofMinutes(20))
                 it.testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
             }
         }
