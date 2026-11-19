@@ -1276,7 +1276,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val btn = android.widget.Button(a).apply {
             isAllCaps = false; setTextColor(0xFF0F1218.toInt()); setBackgroundResource(R.drawable.chip_on)
             text = when (st) {
-                DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING, DownloadManager.STATUS_PAUSED -> "Downloading… ${prog.second}%"
+                DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING, DownloadManager.STATUS_PAUSED -> "Downloading… ${prog?.second ?: 0}%"
                 DownloadManager.STATUS_SUCCESSFUL -> "Install"
                 DownloadManager.STATUS_FAILED -> "Download failed: try again"
                 else -> "Download and install"
