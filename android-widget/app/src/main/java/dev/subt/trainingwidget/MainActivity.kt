@@ -47,6 +47,9 @@ class MainActivity : Activity() {
     }
 
     private var tab = Tab.HOME
+    private var layoutRetries = 0
+    /** When each background load last failed: no automatic retry for 5 minutes (stops offline retry loops). */
+    private val failedAt = mutableMapOf<String, Long>()
     private lateinit var content: FrameLayout
     private lateinit var controls: HorizontalScrollView
     private lateinit var chips: LinearLayout
@@ -152,6 +155,15 @@ class MainActivity : Activity() {
         val stale = snap == null || System.currentTimeMillis() - snap.fetchedAt > 15 * 60_000 ||
             snap.today != LocalDate.now().toString()
         if ((stale && Prefs.credentials(this) != null) || Prefs.subt(this) == null) Refresh.now(this, replace = false)
+        // Update check (every few hours) and "What's new" once after an update
+        Thread { runCatching { Updater.check(this) }; runOnUiThread { if (tab == Tab.HOME) content.post { drawContent() } } }.start()
+        if (Updater.takeWhatsNew(this)) {
+            val notes = Updater.whatsNew(this)
+            if (notes.isNotEmpty()) android.app.AlertDialog.Builder(this)
+                .setTitle("What's new in ${Updater.currentName(this)}")
+                .setMessage(notes.joinToString("\n\n") { "• $it" })
+                .setPositiveButton("OK", null).show()
+        }
         show()
     }
 
@@ -302,13 +314,14 @@ class MainActivity : Activity() {
         val cached = Prefs.raceHistory(this)
         if (histLoading) return
         if (!force && cached != null && System.currentTimeMillis() - cached.first < 24 * 3600_000L) return
+        if (!force && System.currentTimeMillis() - failedAt.getOrDefault("hist", 0L) < 5 * 60_000L) return
         histLoading = true
         histError = null
         Thread {
             val r = runCatching { IcuApi(creds).fetchRaceHistory() }
             runOnUiThread {
                 histLoading = false
-                r.onSuccess { Prefs.saveRaceHistory(this, it) }.onFailure { histError = it.message ?: it.javaClass.simpleName }
+                r.onSuccess { Prefs.saveRaceHistory(this, it) }.onFailure { histError = it.message ?: it.javaClass.simpleName; failedAt["hist"] = System.currentTimeMillis() }
                 if (tab == Tab.RACE) drawContent()
             }
         }.start()
@@ -320,6 +333,7 @@ class MainActivity : Activity() {
         val cached = Prefs.longHistory(this)
         if (histLongLoading) return
         if (!force && cached != null && System.currentTimeMillis() - cached.first < 24 * 3600_000L) return
+        if (!force && System.currentTimeMillis() - failedAt.getOrDefault("long", 0L) < 5 * 60_000L) return
         histLongLoading = true; histLongError = null
         Thread {
             val from = LocalDate.now().minusYears(5).withDayOfYear(1).minusDays(130)
@@ -330,7 +344,7 @@ class MainActivity : Activity() {
             val tts = index.map { it.first }
             runOnUiThread {
                 histLongLoading = false
-                r.onSuccess { Prefs.saveLongHistory(this, it) }.onFailure { histLongError = it.message ?: it.javaClass.simpleName }
+                r.onSuccess { Prefs.saveLongHistory(this, it) }.onFailure { histLongError = it.message ?: it.javaClass.simpleName; failedAt["long"] = System.currentTimeMillis() }
                 tts.onSuccess { Prefs.saveTtDates(this, it) }
                 if (index.isSuccess && planned.isSuccess) Prefs.saveLoadIndex(this, index.getOrThrow().second, planned.getOrThrow())
                 if (tab == Tab.STREAKS) drawContent()
@@ -343,13 +357,14 @@ class MainActivity : Activity() {
         val cached = Prefs.subtReps(this)
         if (repsLoading) return
         if (!force && cached != null && System.currentTimeMillis() - cached.first < 6 * 3600_000L) return
+        if (!force && System.currentTimeMillis() - failedAt.getOrDefault("reps", 0L) < 5 * 60_000L) return
         repsLoading = true
         repsError = null
         Thread {
             val r = runCatching { IcuApi(creds).fetchSubtReps() }
             runOnUiThread {
                 repsLoading = false
-                r.onSuccess { Prefs.saveSubtReps(this, it) }.onFailure { repsError = it.message ?: it.javaClass.simpleName }
+                r.onSuccess { Prefs.saveSubtReps(this, it) }.onFailure { repsError = it.message ?: it.javaClass.simpleName; failedAt["reps"] = System.currentTimeMillis() }
                 if (tab == Tab.SUBT && subtView == SubtView.ANALYSIS) drawContent()
             }
         }.start()
@@ -469,14 +484,27 @@ class MainActivity : Activity() {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(6), dp(4), dp(12)) }
         scroll.addView(list)
         col.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        list.addView(TextView(this).apply {
+        val legend = TextView(this).apply {
             val tol = Prefs.planTolerance(this@MainActivity)
-            text = "Green bar = load done (number on top). Dashed outline = load planned: a gap above the bar is how far short you were (number inside). Amber = still to do.  " +
+            text = "Green bar = load done (number on top). Dashed outline = load planned: a gap above the bar is how far short you were (number inside). Amber = still to do.\n" +
                 "✓ within ±$tol% of plan · ˄ more than planned · ˅ less than planned · no mark = nothing planned"
+            setTextColor(0xFF9AA3B2.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            setPadding(dp(4), dp(2), dp(4), dp(6))
+            visibility = if (AppScreens.openInfo.contains("week-legend")) View.VISIBLE else View.GONE
+        }
+        list.addView(TextView(this).apply {
+            text = "ⓘ  How to read the bars"
             setTextColor(0xFF6B7386.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            setPadding(dp(4), dp(2), dp(4), dp(4))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            setOnClickListener {
+                val open = legend.visibility != View.VISIBLE
+                legend.visibility = if (open) View.VISIBLE else View.GONE
+                if (open) AppScreens.openInfo += "week-legend" else AppScreens.openInfo -= "week-legend"
+            }
         })
+        list.addView(legend)
         when {
             creds == null -> list.addView(note("Connect intervals.icu in ⚙ settings"))
             items == null && rangeError != null -> list.addView(note("Couldn't load: $rangeError"))
@@ -583,11 +611,15 @@ class MainActivity : Activity() {
 
     private fun drawContent() {
         val d = resources.displayMetrics.density
-        val wDp = ((content.width - content.paddingLeft - content.paddingRight) / d).roundToInt()
-        val hDp = ((content.height - content.paddingBottom) / d).roundToInt()
+        var wDp = ((content.width - content.paddingLeft - content.paddingRight) / d).roundToInt()
+        var hDp = ((content.height - content.paddingBottom) / d).roundToInt()
         if (wDp <= 0 || hDp <= 0) {
-            content.post { drawContent() }; return
+            // Wait for layout, but not forever: fall back to the screen size
+            if (layoutRetries++ < 20) { content.post { drawContent() }; return }
+            wDp = (resources.displayMetrics.widthPixels / d).roundToInt() - 24
+            hDp = (resources.displayMetrics.heightPixels / d).roundToInt() - 200
         }
+        layoutRetries = 0
         if (tab == Tab.WEEK) {
             drawWeek(wDp, hDp); return
         }
@@ -612,6 +644,7 @@ class MainActivity : Activity() {
                 Tab.HOME -> content.addView(scrollPage("home") { col ->
                     // Verdict, the full view (chart scrubbable), today's power targets, the week checklist, streak
                     val screens = AppScreens(this, wDp) { drawContent() }
+                    screens.updateCard(col)
                     screens.verdictCard(col)
                     val chartH = (hDp * 0.6).roundToInt().coerceAtLeast(300)   // leave room so the next card peeks in
                     applyInto(col, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, chartH, inApp = true), dp(chartH))

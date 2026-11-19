@@ -16,6 +16,11 @@ object Deviations {
             s?.runFtp?.let { f -> if (abs(cp - f) >= 5) out += "CP ${cp.roundToInt()} W (yours) vs FTP ${f.roundToInt()} W in intervals.icu" }
             s?.runs?.lastOrNull { it.cp != null }?.cp?.let { e -> if (abs(cp - e) >= 5) out += "CP ${cp.roundToInt()} W (yours) vs eFTP ${e.roundToInt()} W estimated by intervals.icu" }
         }
+        Prefs.strydCp(ctx)?.let { sc ->
+            val ftp = s?.runFtp; val eftp = s?.runs?.lastOrNull { it.cp != null }?.cp
+            val parts = listOfNotNull(ftp?.takeIf { abs(sc - it) >= 5 }?.let { "FTP ${it.roundToInt()}" }, eftp?.takeIf { abs(sc - it) >= 5 }?.let { "eFTP ${it.roundToInt()}" })
+            if (parts.isNotEmpty()) out += "Stryd CP ${sc.roundToInt()} W vs intervals.icu ${parts.joinToString(" · ")} W"
+        }
         val todayDay = s?.days?.lastOrNull()?.takeIf { it.date == java.time.LocalDate.now().toString() }
         Prefs.rhrOverride(ctx)?.let { r ->
             val i = todayDay?.rhr

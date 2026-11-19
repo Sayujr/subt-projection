@@ -7,6 +7,16 @@ object Prefs {
     private fun sp(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences("training_widget", Context.MODE_PRIVATE)
 
+    // ---- app updates
+    fun updateInfo(ctx: Context): String? = sp(ctx).getString("update_info", null)
+    fun saveUpdateInfo(ctx: Context, json: String) = sp(ctx).edit().putString("update_info", json).apply()
+    fun updateCheckedAt(ctx: Context): Long = sp(ctx).getLong("update_checked", 0L)
+    fun setUpdateCheckedAt(ctx: Context, t: Long) = sp(ctx).edit().putLong("update_checked", t).apply()
+    fun updateDownload(ctx: Context): Pair<Long, Int>? = sp(ctx).getLong("update_dl_id", -1L).takeIf { it >= 0 }?.let { it to sp(ctx).getInt("update_dl_code", 0) }
+    fun setUpdateDownload(ctx: Context, id: Long, code: Int) = sp(ctx).edit().putLong("update_dl_id", id).putInt("update_dl_code", code).apply()
+    fun seenVersion(ctx: Context): Long = sp(ctx).getLong("seen_version", 0L)
+    fun setSeenVersion(ctx: Context, v: Long) = sp(ctx).edit().putLong("seen_version", v).apply()
+
     // ---- account
 
     fun credentials(ctx: Context): Credentials? {
@@ -134,6 +144,10 @@ object Prefs {
     fun cpOverride(ctx: Context): Double? = sp(ctx).getFloat("cp_override", 0f).takeIf { it > 0 }?.toDouble()
     fun setCpOverride(ctx: Context, w: Double?) = sp(ctx).edit().putFloat("cp_override", (w ?: 0.0).toFloat()).apply()
     /** Today's resting HR / HRV you entered (used as today's reading). Stored with the date they apply to. */
+    /** Your current Stryd CP (from the Stryd app), to compare with intervals.icu FTP and eFTP. */
+    fun strydCp(ctx: Context): Double? = sp(ctx).getFloat("stryd_cp", 0f).takeIf { it > 0 }?.toDouble()
+    fun setStrydCp(ctx: Context, w: Double?) = sp(ctx).edit().putFloat("stryd_cp", (w ?: 0.0).toFloat()).apply()
+
     fun rhrOverride(ctx: Context): Double? = todayValue(ctx, "rhr_override")
     fun setRhrOverride(ctx: Context, v: Double?) = setTodayValue(ctx, "rhr_override", v)
     fun hrvOverride(ctx: Context): Double? = todayValue(ctx, "hrv_override")

@@ -86,4 +86,41 @@ object Verdict {
         }
         return Result(call, reasons, headline)
     }
+
+    /** The facts behind today's call, as (label, value) rows for "Why this call?". */
+    fun explain(s: Snapshot?, rhrToday: Double? = null, hrvToday: Double? = null, loads: Map<String, Int>? = null): List<Pair<String, String>> {
+        if (s == null || s.days.isEmpty()) return emptyList()
+        val d = s.days.last().let { it.copy(rhr = rhrToday ?: it.rhr, hrv = hrvToday ?: it.hrv) }
+        val out = mutableListOf<Pair<String, String>>()
+        val f = d.form
+        out += "Form" to "${if (f > 0) "+" else ""}${f.roundToInt()}  (${FormZone.of(f).label}; Fitness ${d.ctl.roundToInt()} − Fatigue ${d.atl.roundToInt()})"
+        if (d.ctl > 0) out += "Fatigue vs Fitness" to "${(d.atl / d.ctl * 100).roundToInt()}%  (spike above 140%)"
+        fun normal(vals: List<Double>): Pair<Double, Double>? {
+            val base = vals.dropLast(1).takeLast(42)
+            if (base.size < 10) return null
+            val m = base.average(); val sd = sqrt(base.sumOf { (it - m) * (it - m) } / maxOf(1, base.size - 1))
+            return m to sd
+        }
+        normal(s.days.mapNotNull { it.rhr })?.let { (m, sd) ->
+            out += "Resting HR" to (d.rhr?.let { "${it.roundToInt()} bpm" + (if (rhrToday != null) " (yours)" else "") } ?: "no reading today") +
+                "  ·  normal ${m.roundToInt()} ± ${maxOf(1, sd.roundToInt())}"
+        }
+        val hn = normal(s.days.mapNotNull { it.hrv })
+        out += "HRV" to (if (hn == null) (d.hrv?.let { "${it.roundToInt()} ms (not enough history yet)" } ?: "no readings in intervals.icu")
+            else (d.hrv?.let { "${it.roundToInt()} ms" + (if (hrvToday != null) " (yours)" else "") } ?: "no reading today") + "  ·  normal ${hn.first.roundToInt()} ± ${maxOf(1, hn.second.roundToInt())}")
+        val sl = d.sleepSecs?.div(3600)?.takeIf { it <= 14 }
+        val sl7 = s.days.takeLast(7).mapNotNull { it.sleepSecs?.div(3600)?.takeIf { h -> h <= 14 } }
+        if (sl != null || sl7.isNotEmpty()) out += "Sleep" to listOfNotNull(sl?.let { "%.1f h last night".format(it) }, sl7.takeIf { it.size >= 3 }?.let { "%.1f h 7-day average".format(it.average()) }).joinToString("  ·  ")
+        if (loads != null) {
+            val t = LocalDate.now()
+            val l3 = (3 downTo 1).map { loads[t.minusDays(it.toLong()).toString()] ?: 0 }
+            out += "Load last 3 days" to l3.joinToString(" · ")
+        }
+        val drift = s.runs.filter { it.seconds >= 1800 }.mapNotNull { it.decoupling }.takeLast(3)
+        if (drift.isNotEmpty()) out += "HR drift, last runs" to drift.joinToString(" · ") { "${it.roundToInt()}%" } + "  (over 10% is high)"
+        s.races.firstOrNull { it.date >= LocalDate.now().toString() }?.let { r ->
+            out += "Next race" to "${r.name.take(24)} in ${ChronoUnit.DAYS.between(LocalDate.now(), LocalDate.parse(r.date))} days"
+        }
+        return out
+    }
 }

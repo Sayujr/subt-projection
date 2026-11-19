@@ -46,9 +46,11 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         if (subt == null || System.currentTimeMillis() - subt.fetchedAt > 6 * 3600_000L || inputData.getBoolean(FORCE, false)) {
             runCatching { SubtApi.fetch() }.onSuccess { Prefs.saveSubt(ctx, it) }
         }
+        runCatching { Updater.check(ctx, force = inputData.getBoolean(FORCE, false)) }
         Prefs.setRefreshing(ctx, false)
         WidgetRenderer.renderAll(ctx)
         runCatching { Notifier.run(ctx) }
+        runCatching { Notifier.updateReady(ctx) }
         Result.success()
     }
 }

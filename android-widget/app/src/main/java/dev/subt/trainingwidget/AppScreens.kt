@@ -1,6 +1,7 @@
 package dev.subt.trainingwidget
 
 import android.app.Activity
+import android.app.DownloadManager
 import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.text.InputType
@@ -28,6 +29,11 @@ import kotlin.math.sqrt
 
 /** Detailed in-app screens (Race, Recovery, SubT) built from normal views so they can scroll. */
 class AppScreens(private val a: Activity, private val wDp: Int, private val onChange: () -> Unit = {}) {
+    companion object {
+        @Volatile var autoInstalled = 0
+        /** Which ⓘ notes you've opened (kept while the app runs). */
+        val openInfo = mutableSetOf<String>()
+    }
 
     private val d = a.resources.displayMetrics.density
     private fun dp(v: Int) = (v * d).roundToInt()
@@ -113,6 +119,25 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
     private fun divider(parent: LinearLayout) {
         val v = View(a).apply { setBackgroundColor(0xFF2C3240.toInt()) }
         parent.addView(v, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply { topMargin = dp(2) })
+    }
+
+    /** "ⓘ How to read this": explanations stay folded away until you tap. */
+    private fun info(parent: LinearLayout, t: CharSequence) {
+        val key = t.toString().take(40)
+        val body = TextView(a).apply {
+            text = t; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f); setLineSpacing(dpf(2f).toFloat(), 1f)
+            setPadding(0, dp(4), 0, 0); visibility = if (key in openInfo) View.VISIBLE else View.GONE
+        }
+        val head = TextView(a).apply {
+            text = "ⓘ  How to read this"; setTextColor(FAINT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(0, dp(8), 0, dp(2))
+            setOnClickListener {
+                val open = body.visibility != View.VISIBLE
+                body.visibility = if (open) View.VISIBLE else View.GONE
+                if (open) openInfo += key else openInfo -= key
+            }
+        }
+        parent.addView(head); parent.addView(body)
     }
 
     private fun bullet(parent: LinearLayout, color: Int, t: CharSequence) {
@@ -302,14 +327,14 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 (if (tt.personalF != null) ", blended 50/50 with your ${tt.personalN} improved race${if (tt.personalN > 1) "s" else ""} (${Taper.pct(tt.personalF)})" else ", not yet calibrated (load Past races)") to FAINT,
                 "\nFitness floor = ${Taper.pct(tt.g)} of reference (by distance and priority)" to FAINT,
             ), 12f, top = 10)
-            text(tg, "Form is Fitness minus Fatigue, so it follows from these two. Change the strictness with the chips above.", 12f, FAINT, top = 6)
+            info(tg, "Form is Fitness minus Fatigue, so it follows from these two. Change the strictness with the chips above.")
         }
 
         // Coach notes
         val cn = card(col)
         label(cn, "Coach notes")
         coachNotes(cn, s, race, races, eveDay, peak, tt, daysTo)
-        text(cn, "Rule-of-thumb guidance from your intervals.icu data. It isn't medical advice.", 11f, FAINT, top = 10)
+        info(cn, "Rule-of-thumb guidance from your intervals.icu data. It isn't medical advice.")
         return sv
     }
 
@@ -447,7 +472,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             val pts = l.mapNotNull { r -> date(r.date)?.let { it to r.seconds!! / 60 } }
             image(sum, Charts.timeChart(pts, pts.minOf { it.first }.minusDays(20), pts.maxOf { it.first }.plusDays(20), GOOD, chartW(), dp(150), d, TILE,
                 scatter = false, invert = true, fmt = { m -> "%d:%02d".format(m.toInt(), ((m - m.toInt()) * 60).roundToInt()) }), 150)
-            text(sum, "${dd.label} times (minutes), with faster plotted higher.", 12f, FAINT, top = 4)
+            info(sum, "${dd.label} times (minutes), with faster plotted higher.")
         }
 
         // Each race, newest first, against the previous race at the same distance
@@ -531,7 +556,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             ), 14f, top = 2)
             image(c, Charts.timeChart(values, start, today, color, chartW(), dp(150), d, TILE,
                 band = (mean - sd) to (mean + sd), fmt = fmtV), 150)
-            text(c, "Shaded band = your normal range (average ± 1 SD over $pLabel). $whatItMeans", 12f, FAINT, top = 6)
+            info(c, "Shaded band = your normal range (average ± 1 SD over $pLabel). $whatItMeans")
             if (bad) signals += BAD to "$title ${if (higherIsBetter) "below" else "above"} normal (${fmtV(recent)} $unit vs ${fmtV(mean)})"
             else if (!good) signals += WARN to "$title drifting ${if (higherIsBetter) "down" else "up"}"
             else signals += GOOD to "$title normal"
@@ -566,7 +591,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             text(c, spans("7-day avg ${hm(avg7 * 60)}" to colr, "   ·   ${pLabel} avg ${hm(vals.map { it.second }.average() * 60)}" to DIM), 14f, top = 2)
             image(c, Charts.timeChart(vals, start, today, color, chartW(), dp(150), d, TILE,
                 band = 7.0 to 9.0, bandColor = GOOD, fmt = { "${it.roundToInt()}h" }), 150)
-            text(c, "Green band = 7–9 h, the range most athletes recover best in.", 12f, FAINT, top = 6)
+            info(c, "Green band = 7–9 h, the range most athletes recover best in.")
             signals += colr to (if (colr == GOOD) "Sleep on target" else "Sleep short (${hm(avg7 * 60)} avg)")
         }
 
@@ -591,7 +616,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             }, 14f, colr, top = 2)
             image(c, Charts.timeChart(pts, runStart, today, 0xFFFF9F5A.toInt(), chartW(), dp(150), d, TILE,
                 threshold = 5.0, scatter = true, fmt = { "${it.roundToInt()}%" }), 150)
-            text(c, "Dots = runs of 30 min or more, line = 5-run average, dashed = the 5% line. Most meaningful on steady runs.", 12f, FAINT, top = 6)
+            info(c, "Dots = runs of 30 min or more, line = 5-run average, dashed = the 5% line. Most meaningful on steady runs.")
             signals += colr to "HR drift ${fmt1(last5)}%"
         }
         run {
@@ -618,7 +643,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 else "Holding steady."), 14f, colr, top = 2)
             image(c, Charts.timeChart(pts, runStart, today, 0xFF4EA1FF.toInt(), chartW(), dp(150), d, TILE,
                 scatter = true, fmt = { String.format(loc, "%.2f", it) }), 150)
-            text(c, (if (usePower) "Average power ÷ average HR" else "Output ÷ heart rate") + " per run. Higher is better. Compare similar runs (easy with easy).", 12f, FAINT, top = 6)
+            info(c, (if (usePower) "Average power ÷ average HR" else "Output ÷ heart rate") + " per run. Higher is better. Compare similar runs (easy with easy).")
             signals += colr to "Efficiency ${if (ch >= 0) "+" else ""}${fmt1(ch)}%"
         }
         // SubT HR from the repo's data
@@ -639,7 +664,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             val pts = months.mapNotNull { m -> runCatching { LocalDate.parse(m.month + "-15") }.getOrNull()?.let { it to m.hr!! } }
             image(c, Charts.timeChart(pts, pts.first().first.minusDays(15), pts.last().first.plusDays(15), 0xFFFF9F5A.toInt(),
                 chartW(), dp(140), d, TILE, fmt = { it.roundToInt().toString() }), 140)
-            text(c, "Monthly median HR on SubT laps. Lower HR at the same or faster pace means adaptation.", 12f, FAINT, top = 6)
+            info(c, "Monthly median HR on SubT laps. Lower HR at the same or faster pace means adaptation.")
             signals += colr to "SubT efficiency ${if (effCh >= 0) "+" else ""}${fmt1(effCh)}%"
         }
 
@@ -654,7 +679,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         label(summary, "Readiness · $pLabel")
         text(summary, verdict, 22f, vc, bold = true, top = 2)
         signals.forEach { (c, t) -> bullet(summary, c, t) }
-        text(summary, "Based on resting HR, HRV, sleep, HR drift, efficiency and SubT HR. One bad night isn't a trend. Look for several signals together.", 12f, FAINT, top = 8)
+        info(summary, "Based on resting HR, HRV, sleep, HR drift, efficiency and SubT HR. One bad night isn't a trend. Look for several signals together.")
         return sv
     }
 
@@ -725,7 +750,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             chipRow(c, listOf("Use my PBs", "Page default (11%)"), if (usePb) 0 else 1) {
                 Prefs.setGapFromPb(a, it == 0); SubtModel.applyGap(a); onChange()
             }
-            text(c, "Predictions are never shown slower than a PB you've already run.", 12f, FAINT, top = 6)
+            info(c, "Predictions are never shown slower than a PB you've already run.")
         }
     }
 
@@ -775,7 +800,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 (if (done) "" else "${m(f)} – ${m(sl)}") to FAINT,
             ), weights = listOf(1.3f, 0.9f, 1.1f, 1.4f))
         }
-        text(c, "Same model as your projection page: Daniels VDOT, ${fmt1(SubtModel.GAP * 100)}% race gap (${if (Prefs.gapFromPb(a) && pb5 != null) "from your PB" else "page default"}; half/marathon ${fmt1(SubtModel.GAP_HM * 100)}/${fmt1(SubtModel.GAP_FM * 100)}%), rates per month of −12 s/km while rebuilding to 4:32, then −2 (realistic; fast −3, slow −1) down to 4:00. Overrides you set on the page aren't visible here.", 12f, FAINT, top = 8)
+        info(c, "Same model as your projection page: Daniels VDOT, ${fmt1(SubtModel.GAP * 100)}% race gap (${if (Prefs.gapFromPb(a) && pb5 != null) "from your PB" else "page default"}; half/marathon ${fmt1(SubtModel.GAP_HM * 100)}/${fmt1(SubtModel.GAP_FM * 100)}%), rates per month of −12 s/km while rebuilding to 4:32, then −2 (realistic; fast −3, slow −1) down to 4:00. Overrides you set on the page aren't visible here.")
     }
 
     // ---------------------------------------------------------------- shared controls
@@ -935,7 +960,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 t(fm) to (if (hit) GOOD else TEXT),
             ), weights = listOf(1f, 0.9f, 1f, 1.2f, 1.2f))
         }
-        text(tb, "These are the race times your SubT supports each month, using Daniels VDOT plus your race-readiness gaps (5K ${fmt1(SubtModel.GAP * 100)}%, half ${fmt1(SubtModel.GAP_HM * 100)}%, marathon ${fmt1(SubtModel.GAP_FM * 100)}%), never slower than your PBs. A 5K at or under the time shown means you're on or ahead of the curve.", 12f, FAINT, top = 8)
+        info(tb, "These are the race times your SubT supports each month, using Daniels VDOT plus your race-readiness gaps (5K ${fmt1(SubtModel.GAP * 100)}%, half ${fmt1(SubtModel.GAP_HM * 100)}%, marathon ${fmt1(SubtModel.GAP_FM * 100)}%), never slower than your PBs. A 5K at or under the time shown means you're on or ahead of the curve.")
 
         weightCard(col, cur, need)
     }
@@ -1005,7 +1030,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             "${fromWeight.roundToInt()} s from weight (${w.plan.label.lowercase(loc)}${wRace?.let { ", ${fmt1(it)} kg on race day" } ?: ""})" to TEXT,
             " + " to DIM, "${fromTraining.roundToInt()} s from training" to TEXT,
         ), 14f, top = 10)
-        text(h, "For reference, the model expects about −2 s/km per month at your level (fast −3, slow −1), slowing to −1.2 below 4:00.", 12f, FAINT, top = 6)
+        info(h, "For reference, the model expects about −2 s/km per month at your level (fast −3, slow −1), slowing to −1.2 below 4:00.")
         if (verdict == "Unlikely by this date") {
             val path = SubtModel.pathWithWeight(cur, SubtModel.REAL, 72, w.w0, w.plan.kgPerWeek, w.goal)
             SubtModel.arrival(path, need)?.let { text(h, "Earliest realistic month for this target: ${monthLabel(it)}.", 14f, WARN, top = 6) }
@@ -1056,7 +1081,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             else -> "Tap to load"
         }
         text(top, status, 13f, if (error != null) WARN else FAINT, top = 2).setOnClickListener { onRefresh() }
-        text(top, "Laps count as SubT with your projection page's filter: average HR over 160, max HR up to 172, 1.5–15 min long.", 12f, FAINT, top = 4)
+        info(top, "Laps count as SubT with your projection page's filter: average HR over 160, max HR up to 172, 1.5–15 min long.")
         if (reps == null) return
         if (reps.isEmpty()) { text(top, "No SubT laps found in the last 5 weeks.", 15f, DIM, top = 8); return }
 
@@ -1096,7 +1121,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             cells += String.format(loc, "%.2f", r.efficiency) to DIM
             row(ls, cells, weights = List(cells.size) { if (it == 0) 0.5f else 1f })
         }
-        text(ls, "M/BEAT = metres per minute per heartbeat (speed ÷ HR). Higher means more speed for the same cardiac effort.", 12f, FAINT, top = 6)
+        info(ls, "M/BEAT = metres per minute per heartbeat (speed ÷ HR). Higher means more speed for the same cardiac effort.")
 
         val notes = card(col)
         label(notes, "Coach notes · this session")
@@ -1160,7 +1185,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         label(tr, "Heart rate per rep").apply { setPadding(0, dp(12), 0, 0) }
         image(tr, Charts.timeChart(hrP, start, today, 0xFFFF7A90.toInt(), chartW(), dp(140), d, TILE, scatter = true, threshold = 172.0,
             fmt = { it.roundToInt().toString() }), 140)
-        text(tr, "Dashed line = your 172 bpm ceiling.", 12f, FAINT, top = 4)
+        info(tr, "Dashed line = your 172 bpm ceiling.")
         val effP = pts { it.efficiency }
         label(tr, "Speed per heartbeat (efficiency)").apply { setPadding(0, dp(12), 0, 0) }
         image(tr, Charts.timeChart(effP, start, today, GOOD, chartW(), dp(140), d, TILE, scatter = true,
@@ -1220,6 +1245,55 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         text(c, v.call.label, 26f, v.call.color, bold = true, top = 2).apply { letterSpacing = 0.02f }
         text(c, v.headline, 14.5f, DIM, top = 0)
         for ((color, t) in v.reasons) bullet(c, color, t)
+        // "Why this call?": the numbers behind it, folded away until tapped
+        val facts = Verdict.explain(Prefs.snapshot(a), Prefs.rhrOverride(a), Prefs.hrvOverride(a), Prefs.loadIndex(a)?.first)
+        if (facts.isEmpty()) return
+        val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; visibility = if ("why" in openInfo) View.VISIBLE else View.GONE }
+        for ((k, v2) in facts) row(body, listOf(k to DIM, v2 to TEXT), weights = listOf(1f, 2.1f))
+        text(body, "Push = recovered and balanced. Hold = one warning sign. Back off = several, or one strong one. Taper overrides near a race.", 12f, FAINT, top = 6)
+        val head = TextView(a).apply {
+            text = if ("why" in openInfo) "Why this call?  ▴" else "Why this call?  ▾"
+            setTextColor(0xFF4EA1FF.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f); setPadding(0, dp(10), 0, dp(2))
+            setOnClickListener {
+                val o = body.visibility != View.VISIBLE
+                body.visibility = if (o) View.VISIBLE else View.GONE
+                if (o) openInfo += "why" else openInfo -= "why"
+                text = if (o) "Why this call?  ▴" else "Why this call?  ▾"
+            }
+        }
+        c.addView(head); c.addView(body)
+    }
+
+    /** "Update ready" with what's new and a one-tap download → install. */
+    fun updateCard(col: LinearLayout) {
+        val l = Updater.available(a) ?: return
+        val c = card(col)
+        label(c, "Update ready", GOOD)
+        text(c, "Version ${l.name}  (you have ${Updater.currentName(a)})", 15f, bold = true, top = 2)
+        l.notes.take(5).forEach { bullet(c, GOOD, it) }
+        val prog = Updater.progress(a, l.code)
+        val st = prog?.first
+        val btn = android.widget.Button(a).apply {
+            isAllCaps = false; setTextColor(0xFF0F1218.toInt()); setBackgroundResource(R.drawable.chip_on)
+            text = when (st) {
+                DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING, DownloadManager.STATUS_PAUSED -> "Downloading… ${prog.second}%"
+                DownloadManager.STATUS_SUCCESSFUL -> "Install"
+                DownloadManager.STATUS_FAILED -> "Download failed: try again"
+                else -> "Download and install"
+            }
+            setOnClickListener {
+                when (st) {
+                    DownloadManager.STATUS_SUCCESSFUL -> Updater.install(a)
+                    DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING, DownloadManager.STATUS_PAUSED -> Unit
+                    else -> { Updater.startDownload(a, l); onChange() }
+                }
+            }
+        }
+        c.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply { topMargin = dp(10) })
+        if (st == DownloadManager.STATUS_RUNNING || st == DownloadManager.STATUS_PENDING || st == DownloadManager.STATUS_PAUSED)
+            c.postDelayed({ onChange() }, 1000)
+        if (st == DownloadManager.STATUS_SUCCESSFUL && autoInstalled != l.code) { autoInstalled = l.code; c.post { Updater.install(a) } }
+        text(c, "Android asks you to confirm the install. Your widgets and settings stay.", 11.5f, FAINT, top = 6)
     }
 
     /** Differences between your entered numbers and intervals.icu (the app uses yours). */
@@ -1635,6 +1709,11 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         p.slopePerMonth?.let { sl ->
             bullet(n, if (sl > 0.5) GOOD else if (sl < -0.5) WARN else DIM, "eFTP ${if (sl >= 0) "rising" else "falling"} ${fmt1(abs1(sl))} W/month over the last 90 days" +
                 (p.eftp?.let { e -> p.cp3moAgo?.let { " (${delta(e, it)} vs 3 months ago)" } } ?: "") + ".")
+            Prefs.strydCp(a)?.let { sc ->
+                val spread = listOfNotNull(sc, p.cp, p.eftp).let { it.max() - it.min() }
+                bullet(n, if (spread >= 8) WARN else GOOD, "Stryd CP ${sc.roundToInt()} · set FTP ${p.cp.roundToInt()}" + (p.eftp?.let { " · eFTP ${it.roundToInt()}" } ?: "") +
+                    " W: " + (if (spread >= 8) "${spread.roundToInt()} W apart. Check which one your training zones should follow." else "in agreement."))
+            }
             p.eftp?.let { e -> if (abs1(e - p.cp) >= 8) bullet(n, WARN, "eFTP ${e.roundToInt()} W is ${abs1(e - p.cp).roundToInt()} W ${if (e > p.cp) "above" else "below"} your set FTP ${p.cp.roundToInt()} W. Consider ${if (e > p.cp) "a CP test before raising" else "whether"} FTP in intervals.icu needs updating. I won't change it.") }
         }
         p.re?.let { re ->
@@ -1671,7 +1750,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             row(c, listOf(name to TEXT, t(tp) to FormColors.FITNESS, "${(p.cp * share).roundToInt()}" to DIM, (vd?.let { t(it) } ?: "–") to Charts.SUBT, (pb?.let { t(it) } ?: "–") to GOOD),
                 weights = listOf(0.9f, 1.1f, 0.8f, 1.1f, 1.1f))
         }
-        text(c, "Power: time = distance ÷ (RE × W/kg at race power). Race power as % of CP: 5K 104, 10K 100, half 94, marathon ${(fm * 100).roundToInt()} (set in Race model). Where power and VDOT disagree, the gap is usually RE or durability.", 12f, FAINT, top = 8)
+        info(c, "Power: time = distance ÷ (RE × W/kg at race power). Race power as % of CP: 5K 104, 10K 100, half 94, marathon ${(fm * 100).roundToInt()} (set in Race model). Where power and VDOT disagree, the gap is usually RE or durability.")
     }
 
     private fun powerTrends(col: LinearLayout, p: PowerModel.Now, s: Snapshot) {

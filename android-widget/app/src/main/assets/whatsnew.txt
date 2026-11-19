@@ -1,0 +1,8 @@
+- Update check: the app tells you when a new build is ready and installs it with one tap (Today screen)
+- "Why this call?" under today's verdict shows the numbers behind Push / Hold / Back off
+- Explanations are folded behind ⓘ so screens are calmer
+- Settings regrouped into sections, with a new Rules section (plan tolerance, streak bands, marathon power)
+- Stryd CP field: compared with intervals.icu FTP and eFTP, with an alert when they drift apart
+- Backup and restore your settings and numbers to a file
+- Crash reports are kept on the phone and can be sent from Settings
+- Fixed: with no internet, some screens retried downloads in a loop

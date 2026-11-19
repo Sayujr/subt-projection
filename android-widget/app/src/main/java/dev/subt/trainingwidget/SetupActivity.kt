@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.RadioButton
@@ -58,6 +59,7 @@ class SetupActivity : Activity() {
         val fields = listOf(
             Triple(R.id.num_weight, Prefs.weightOverride(this)?.let { String.format(java.util.Locale.US, "%.1f", it) }, autoKg?.let { "auto: %.1f (intervals.icu)".format(it) }),
             Triple(R.id.num_cp, Prefs.cpOverride(this)?.let { it.roundToInt().toString() }, autoCp?.let { "auto: ${it.roundToInt()} W (intervals.icu FTP)" }),
+            Triple(R.id.num_stryd, Prefs.strydCp(this)?.let { it.roundToInt().toString() }, "from the Stryd app (optional)"),
             Triple(R.id.num_rhr, Prefs.rhrOverride(this)?.let { it.roundToInt().toString() }, todayIcu?.rhr?.let { "auto: ${it.roundToInt()} (intervals.icu today)" }),
             Triple(R.id.num_hrv, Prefs.hrvOverride(this)?.let { it.roundToInt().toString() }, todayIcu?.hrv?.let { "auto: ${it.roundToInt()} ms (intervals.icu today)" }),
             Triple(R.id.num_subt, Prefs.subtOverride(this)?.let { Charts.paceText(it) }, autoSubt?.let { "auto: ${Charts.paceText(it)} (latest monthly median)" }),
@@ -121,6 +123,8 @@ class SetupActivity : Activity() {
             findViewById<View>(R.id.widget_hint).visibility = View.GONE
         }
 
+        organiseSections(hasGraphs)
+
         save.setOnClickListener {
             saveNumbers()
             val apiKey = key.text.toString().trim()
@@ -179,7 +183,160 @@ class SetupActivity : Activity() {
         }
     }
 
-    private companion object { val sentToday = mutableMapOf<String, String>() }
+    private companion object {
+        const val REQ_EXPORT = 41
+        const val REQ_IMPORT = 42
+        val sentToday = mutableMapOf<String, String>()
+        val sectionOpen = mutableMapOf<String, Boolean>()
+    }
+
+    /**
+     * Folds Settings into tappable sections: Account, Your numbers, Send to intervals.icu, Rules,
+     * Widgets, Notifications & refresh. Save stays at the bottom.
+     */
+    private fun organiseSections(widgetMode: Boolean) {
+        val root = (findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as ViewGroup).getChildAt(0) as android.widget.LinearLayout
+        val kids = (0 until root.childCount).map { root.getChildAt(it) }
+        fun idxText(t: String) = kids.indexOfFirst { (it as? TextView)?.text?.toString() == t }
+        val iAcc = idxText("Connect intervals.icu"); val iNot = idxText("Notifications")
+        val iWid = kids.indexOfFirst { it.id == R.id.widget_hint }; val iNum = idxText("Your numbers")
+        val iSend = idxText("Send to intervals.icu"); val iEnd = kids.indexOfFirst { it.id == R.id.status }
+        if (listOf(iAcc, iNot, iWid, iNum, iSend, iEnd).any { it < 0 }) return
+        val groups = linkedMapOf(
+            "acc" to kids.subList(iAcc + 1, iNot), "num" to kids.subList(iNum + 1, iSend),
+            "send" to kids.subList(iSend + 1, iEnd), "wid" to kids.subList(iWid, iNum), "not" to kids.subList(iNot + 1, iWid),
+        )
+        val tail = kids.subList(iEnd, kids.size)
+        root.removeAllViews()
+        val d = resources.displayMetrics.density
+        val hasCreds = Prefs.credentials(this) != null
+        val batteryOk = DailyRefresh.batteryUnrestricted(this)
+        fun section(key: String, title: String, sub: String?, open: Boolean, views: List<View>) {
+            val body = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+            views.forEach { body.addView(it) }
+            val isOpen = sectionOpen[key] ?: open
+            body.visibility = if (isOpen) View.VISIBLE else View.GONE
+            val head = TextView(this).apply {
+                fun label(o: Boolean) = (if (o) "▾  " else "▸  ") + title + (sub?.let { "\n     $it" } ?: "")
+                text = label(isOpen)
+                setTextColor(0xFFF2F4F8.toInt()); textSize = 17f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setPadding(0, (18 * d).toInt(), 0, (8 * d).toInt())
+                setOnClickListener {
+                    val o = body.visibility != View.VISIBLE
+                    body.visibility = if (o) View.VISIBLE else View.GONE
+                    sectionOpen[key] = o; text = label(o)
+                }
+            }
+            root.addView(head); root.addView(body)
+            root.addView(View(this).apply { setBackgroundColor(0xFF2C3240.toInt()) }, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
+        }
+        val dev = Deviations.compute(this).size
+        section("acc", "Account", if (hasCreds) "Connected to intervals.icu" else "Not connected yet", !hasCreds, groups["acc"]!!)
+        section("num", "Your numbers", if (dev > 0) "$dev differ from intervals.icu" else "Weight, CP, RHR, HRV, SubT, PBs", !widgetMode, groups["num"]!!)
+        section("send", "Send to intervals.icu", "Optional, asks before each change", false, groups["send"]!!)
+        section("rules", "Rules", "Plan tolerance, streak bands, marathon power", false, rulesViews())
+        section("wid", "Widgets", if (widgetMode) "This widget's graphs and period" else "Long-press a widget to change it", widgetMode, groups["wid"]!!)
+        section("backup", "Backup", "Save or restore your settings and numbers", false, backupViews())
+        val crashes = CrashLog.count(this)
+        section("crash", "Crash reports", if (crashes == 0) "No crashes recorded" else "⚠ $crashes recorded, last ${CrashLog.lastTime(this)}", false, crashViews())
+        section("not", "Notifications & refresh", if (batteryOk) "Background refresh allowed" else "⚠ Battery saving may block refresh", !batteryOk, groups["not"]!!)
+        tail.forEach { root.addView(it) }
+    }
+
+    private fun smallButton(t: String, onClick: () -> Unit) = Button(this).apply {
+        text = t; isAllCaps = false; setTextColor(0xFFF2F4F8.toInt()); setBackgroundResource(R.drawable.input_bg)
+        setOnClickListener { onClick() }
+        layoutParams = android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = (8 * resources.displayMetrics.density).toInt() }
+    }
+
+    private fun note(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7386.toInt()); textSize = 12f; setPadding(0, (6 * resources.displayMetrics.density).toInt(), 0, 0) }
+
+    private fun backupViews(): List<View> = listOf(
+        note("Saves your numbers, PBs, rules, widget looks and notification choices to a file you pick (Drive, Downloads…). Your API key isn't included; paste it again after restoring."),
+        smallButton("Save backup…") {
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
+                .putExtra(Intent.EXTRA_TITLE, "training-today-backup-${java.time.LocalDate.now()}.json"), REQ_EXPORT)
+        },
+        smallButton("Restore from backup…") {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_IMPORT)
+        },
+    )
+
+    private fun crashViews(): List<View> {
+        val log = CrashLog.read(this)
+        if (log == null) return listOf(note("If the app ever crashes, the details are kept here so you can send them."))
+        return listOf(
+            note("The app keeps the last few crashes. Send them (email, chat…) and paste into our conversation so they can be fixed."),
+            smallButton("Send crash report") {
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Training Today crash report")
+                    .putExtra(Intent.EXTRA_TEXT, log.takeLast(60_000)), "Send crash report"))
+            },
+            smallButton("Clear crash reports") { CrashLog.clear(this); recreate() },
+        )
+    }
+
+    @Deprecated("Activity result API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data ?: return
+        if (resultCode != RESULT_OK) return
+        val status = findViewById<TextView>(R.id.status)
+        val r = runCatching {
+            when (requestCode) {
+                REQ_EXPORT -> { contentResolver.openOutputStream(uri, "wt")!!.use { it.write(Backup.export(this).toByteArray()) }; "✓ Backup saved" }
+                REQ_IMPORT -> {
+                    val n = Backup.import(this, contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) })
+                    WidgetRenderer.renderAll(this)
+                    "✓ Restored $n settings. Paste your API key if it's empty, then Save."
+                }
+                else -> null
+            }
+        }
+        status.text = r.fold({ it ?: "" }, { "Couldn't ${if (requestCode == REQ_EXPORT) "save" else "restore"}: ${it.message}" })
+        if (requestCode == REQ_IMPORT && r.isSuccess) {
+            android.widget.Toast.makeText(this, status.text, android.widget.Toast.LENGTH_LONG).show()
+            recreate()
+        }
+    }
+
+    /** −/+ rows for the rule settings the app uses everywhere. */
+    private fun rulesViews(): List<View> {
+        val d = resources.displayMetrics.density
+        fun stepper(label: String, help: String, get: () -> Int, set: (Int) -> Unit, min: Int, max: Int, step: Int, unit: String): View {
+            val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(0, (10 * d).toInt(), 0, 0) }
+            val row = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            val value = TextView(this).apply { setTextColor(0xFFF2F4F8.toInt()); textSize = 16f; gravity = android.view.Gravity.CENTER; minWidth = (64 * d).toInt() }
+            fun refresh() { value.text = "${get()}$unit" }
+            fun btn(t: String, delta: Int) = TextView(this).apply {
+                text = t; textSize = 18f; setTextColor(0xFF4EA1FF.toInt()); gravity = android.view.Gravity.CENTER
+                setBackgroundResource(R.drawable.chip_off)
+                setOnClickListener { set((get() + delta).coerceIn(min, max)); refresh(); WidgetRenderer.renderAll(this@SetupActivity) }
+            }
+            row.addView(TextView(this).apply { text = label; setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f },
+                android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(btn("−", -step), android.widget.LinearLayout.LayoutParams((40 * d).toInt(), (36 * d).toInt()))
+            row.addView(value)
+            row.addView(btn("+", step), android.widget.LinearLayout.LayoutParams((40 * d).toInt(), (36 * d).toInt()))
+            refresh()
+            box.addView(row)
+            box.addView(TextView(this).apply { text = help; setTextColor(0xFF6B7386.toInt()); textSize = 12f })
+            return box
+        }
+        val c = this
+        return listOf(
+            stepper("Plan tolerance", "A day or week within ± this of planned load counts as on plan (✓ on the week bars, on-plan streak weeks).",
+                { Prefs.planTolerance(c) }, { Prefs.setPlanTolerance(c, it) }, 0, 40, 5, "%"),
+            stepper("Fitness floor", "Streaks need Fitness within this % of your reference peak.",
+                { Prefs.fitnessBand(c) }, { Prefs.setFitnessBand(c, it) }, 3, 25, 1, "%"),
+            stepper("Fatigue minimum", "A streak week needs average Fatigue at least this % of Fitness.",
+                { Prefs.fatigueMin(c) }, { Prefs.setFatigueMin(c, it) }, 70, 120, 5, "%"),
+            stepper("Marathon power", "Marathon race power as % of CP, used by the power race model.",
+                { Prefs.fmPct(c) }, { Prefs.setFmPct(c, it) }, 80, 95, 1, "%"),
+        )
+    }
 
     override fun onResume() {
         super.onResume()
@@ -191,7 +348,7 @@ class SetupActivity : Activity() {
         val tv = findViewById<TextView>(R.id.battery_status)
         if (DailyRefresh.batteryUnrestricted(this)) {
             tv.text = "✓ Background refresh allowed: widgets update hourly and every morning"
-            tv.setTextColor(0xFF4ADE80.toInt()); tv.setOnClickListener(null)
+            tv.setTextColor(0xFF3DD68C.toInt()); tv.setOnClickListener(null)
         } else {
             tv.text = "⚠ Battery saving may stop widgets refreshing on their own. Tap to allow background refresh."
             tv.setTextColor(0xFFFFC53D.toInt())
@@ -228,7 +385,7 @@ class SetupActivity : Activity() {
             if (inSync) {
                 box.addView(TextView(this).apply {
                     text = "✓ ${it.label} ${it.mine}: in sync with intervals.icu"
-                    setTextColor(0xFF4ADE80.toInt()); textSize = 14f
+                    setTextColor(0xFF3DD68C.toInt()); textSize = 14f
                     setPadding(0, (8 * resources.displayMetrics.density).toInt(), 0, 0)
                 })
                 continue
@@ -276,6 +433,7 @@ class SetupActivity : Activity() {
         }
         if (txt(R.id.num_weight).isEmpty()) Prefs.setWeightOverride(this, null) else num(R.id.num_weight)?.takeIf { it in 30.0..200.0 }?.let { Prefs.setWeightOverride(this, it) }
         if (txt(R.id.num_cp).isEmpty()) Prefs.setCpOverride(this, null) else num(R.id.num_cp)?.takeIf { it in 80.0..700.0 }?.let { Prefs.setCpOverride(this, it) }
+        if (txt(R.id.num_stryd).isEmpty()) Prefs.setStrydCp(this, null) else num(R.id.num_stryd)?.takeIf { it in 80.0..700.0 }?.let { Prefs.setStrydCp(this, it) }
         if (txt(R.id.num_rhr).isEmpty()) Prefs.setRhrOverride(this, null) else num(R.id.num_rhr)?.takeIf { it in 25.0..120.0 }?.let { Prefs.setRhrOverride(this, it) }
         if (txt(R.id.num_hrv).isEmpty()) Prefs.setHrvOverride(this, null) else num(R.id.num_hrv)?.takeIf { it in 5.0..300.0 }?.let { Prefs.setHrvOverride(this, it) }
         if (txt(R.id.num_subt).isEmpty()) Prefs.setSubtOverride(this, null) else time(R.id.num_subt)?.takeIf { it in 150.0..480.0 }?.let { Prefs.setSubtOverride(this, it / 60) }

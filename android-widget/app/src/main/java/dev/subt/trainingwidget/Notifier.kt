@@ -44,6 +44,15 @@ object Notifier {
         ctx.getSystemService(NotificationManager::class.java).notify(id, n)
     }
 
+    /** "Update ready" once per new build (shown even with alerts off: it's how you get fixes). */
+    fun updateReady(ctx: Context) {
+        val l = Updater.available(ctx) ?: return
+        once(ctx, "update", l.code.toString()) {
+            post(ctx, ALERTS, 40, "Training Today ${l.name} is ready",
+                (l.notes.take(3).joinToString("\n") { "• $it" }).ifEmpty { "Open the app to install it." }, "HOME")
+        }
+    }
+
     private fun once(ctx: Context, key: String, value: String, send: () -> Unit) {
         if (Prefs.lastNotified(ctx, key) == value) return
         send()

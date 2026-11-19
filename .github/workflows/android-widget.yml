@@ -10,9 +10,15 @@ on:
 permissions:
   contents: write   # to publish the APK as a GitHub release
 
+# A newer push replaces a build still running for an older one
+concurrency:
+  group: android-widget-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: android-widget
@@ -65,6 +71,7 @@ jobs:
       # Training-rule tests must pass, or nothing is published. The same run renders every screen
       # and widget from sample data to PNGs (build/screens) for a visual check.
       - name: Check training rules and render screens
+        timeout-minutes: 25
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon testReleaseUnitTest
@@ -103,6 +110,17 @@ jobs:
             --out training-widget.apk "$RUNNER_TEMP/aligned.apk"
           "$BT/apksigner" verify -v --print-certs training-widget.apk | grep -E "Verified using|Number of signers|certificate DN|lineage" || true
 
+      # version.json lets the app spot this build and show its notes ("What's new")
+      - name: Version info for the in-app update check
+        run: |
+          python3 - <<'PY'
+          import json, os
+          notes = [l.strip()[2:] for l in open('app/src/main/assets/whatsnew.txt', encoding='utf-8') if l.strip().startswith('- ')]
+          n = int(os.environ['GITHUB_RUN_NUMBER'])
+          json.dump({"code": n, "name": f"1.{n}", "notes": notes}, open('version.json', 'w'))
+          PY
+          cat version.json
+
       - uses: actions/upload-artifact@v4
         with:
           name: training-widget-apk
@@ -118,6 +136,7 @@ jobs:
           make_latest: false
           files: |
             android-widget/training-widget.apk
+            android-widget/version.json
             android-widget/screens.zip
           body: |
             Android home-screen widget showing today's intervals.icu workouts plus Fitness / Fatigue / Form trends.
