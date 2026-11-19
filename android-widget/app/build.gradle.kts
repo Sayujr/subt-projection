@@ -56,8 +56,8 @@ android {
                 it.systemProperty("robolectric.graphicsMode", "NATIVE")
                 it.systemProperty("screens.dir", rootProject.file("build/screens").absolutePath)
                 it.maxHeapSize = "2g"
-                it.timeout.set(Duration.ofMinutes(20))
-                it.testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+                it.timeout.set(Duration.ofMinutes(10))
+                it.testLogging { events("started", "passed", "failed", "skipped"); showStandardStreams = true; exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
             }
         }
     }

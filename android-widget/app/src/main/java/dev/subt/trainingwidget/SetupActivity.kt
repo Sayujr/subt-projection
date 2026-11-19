@@ -327,14 +327,14 @@ class SetupActivity : Activity() {
         }
         val c = this
         return listOf(
-            stepper("Plan tolerance", "A day or week within ± this of planned load counts as on plan (✓ on the week bars, on-plan streak weeks).",
-                { Prefs.planTolerance(c) }, { Prefs.setPlanTolerance(c, it) }, 0, 40, 5, "%"),
+            stepper("Plan tolerance", "A day or week within ± this of planned load counts as on plan (✓ on the week bars, on-plan streak weeks). 0 = off. Same setting as Streaks → Calibrate.",
+                { Prefs.planTolerance(c) }, { Prefs.setPlanTolerance(c, it) }, 0, 20, 5, "%"),
             stepper("Fitness floor", "Streaks need Fitness within this % of your reference peak.",
-                { Prefs.fitnessBand(c) }, { Prefs.setFitnessBand(c, it) }, 3, 25, 1, "%"),
+                { Prefs.fitnessBand(c) }, { Prefs.setFitnessBand(c, it) }, 5, 20, 5, "%"),
             stepper("Fatigue minimum", "A streak week needs average Fatigue at least this % of Fitness.",
-                { Prefs.fatigueMin(c) }, { Prefs.setFatigueMin(c, it) }, 70, 120, 5, "%"),
+                { Prefs.fatigueMin(c) }, { Prefs.setFatigueMin(c, it) }, 90, 105, 5, "%"),
             stepper("Marathon power", "Marathon race power as % of CP, used by the power race model.",
-                { Prefs.fmPct(c) }, { Prefs.setFmPct(c, it) }, 80, 95, 1, "%"),
+                { Prefs.fmPct(c) }, { Prefs.setFmPct(c, it) }, 84, 90, 2, "%"),
         )
     }
 

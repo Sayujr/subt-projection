@@ -337,8 +337,9 @@ object Charts {
     /** Plan comparison for a finished day: 0 = on plan (± tolerance), 1 = more than planned, 2 = less, null = nothing planned. */
     fun planMark(done: Int, planned: Int, tolPct: Int): Int? = when {
         planned <= 0 -> null
-        done > planned * (1 + tolPct / 100.0) -> 1
-        done < planned * (1 - tolPct / 100.0) -> 2
+        // whole-number maths, so exactly ±tolerance counts as on plan
+        done * 100 > planned * (100 + tolPct) -> 1
+        done * 100 < planned * (100 - tolPct) -> 2
         else -> 0
     }
 

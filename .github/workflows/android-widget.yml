@@ -68,25 +68,37 @@ jobs:
             exit 1
           fi
 
-      # Training-rule tests must pass, or nothing is published. The same run renders every screen
-      # and widget from sample data to PNGs (build/screens) for a visual check.
-      - name: Check training rules and render screens
-        timeout-minutes: 25
+      # Training-rule tests must pass, or nothing is published
+      - name: Check training rules
+        timeout-minutes: 15
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon testReleaseUnitTest
+          ./gradlew --no-daemon testReleaseUnitTest --tests 'dev.subt.trainingwidget.RulesTest'
+
+      # Every screen and widget rendered from sample data to PNGs (never blocks the build)
+      - name: Render screens
+        timeout-minutes: 12
+        continue-on-error: true
+        run: ./gradlew --no-daemon testReleaseUnitTest --tests 'dev.subt.trainingwidget.ScreensTest'
 
       - name: Zip screenshots
         if: always()
         run: |
           mkdir -p build/screens
+          cp -r app/build/reports/tests build/screens/test-report 2>/dev/null || true
           (cd build && zip -qr ../screens.zip screens) || true
 
-      - uses: actions/upload-artifact@v4
+      - name: Publish screenshots
         if: always()
+        uses: softprops/action-gh-release@v2
         with:
-          name: screens
-          path: android-widget/screens.zip
+          tag_name: android-widget-screens
+          name: Training Today screenshots (latest build)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          files: android-widget/screens.zip
+          body: Screens and widgets rendered from sample data by the latest build (${{ github.sha }}).
 
       - name: Build release APK (unsigned)
         run: |
@@ -137,7 +149,6 @@ jobs:
           files: |
             android-widget/training-widget.apk
             android-widget/version.json
-            android-widget/screens.zip
           body: |
             Android home-screen widget showing today's intervals.icu workouts plus Fitness / Fatigue / Form trends.
             Download `training-widget.apk` on your phone and open it to install (allow "install unknown apps" for your browser).

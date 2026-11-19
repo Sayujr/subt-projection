@@ -145,7 +145,8 @@ object Streaks {
         }
 
         // ---- Planned vs actual load (from the Streaks tab's load index; this week from the snapshot)
-        val tol = Prefs.planTolerance(ctx) / 100.0
+        val tolPct = Prefs.planTolerance(ctx)
+        val tol = tolPct / 100.0
         val li = Prefs.loadIndex(ctx)
         val actualByDay = (li?.first.orEmpty()).toMutableMap()
         val plannedByDay = (li?.second.orEmpty()).toMutableMap()
@@ -195,7 +196,7 @@ object Streaks {
             var kind = if (ds.any { it.status == Status.MINI }) "TT mini-taper week" else "build week"
             // Plan adherence: a week run as planned counts, even if Form was deliberately below Grey (a build block)
             val (pl, ac) = loads(mon, minOf(mon.plusDays(6), today))
-            if (!passed && tol > 0 && pl != null && ac != null && pl >= 50 && ac.toDouble() / pl in (1 - tol)..(1 + tol) &&
+            if (!passed && tol > 0 && pl != null && ac != null && pl >= 50 && Charts.planMark(ac, pl, tolPct) == 0 &&
                 exitFloorOk && (avgForm == null || avgForm >= -30)) {
                 passed = true
                 kind = "on-plan build week"
@@ -218,7 +219,7 @@ object Streaks {
             val failed = ws.count { it.complete && it.passed == false }
             val complete = m.plusMonths(1).minusDays(1).isBefore(today)
             val (mp, ma) = loads(m, minOf(m.plusMonths(1).minusDays(1), today))
-            val onPlan = tol > 0 && mp != null && ma != null && mp >= 200 && ma.toDouble() / mp in (1 - tol)..(1 + tol)
+            val onPlan = tol > 0 && mp != null && ma != null && mp >= 200 && Charts.planMark(ma, mp, tolPct) == 0
             // A month run on plan may sit deliberately below Grey (build); it still mustn't hit the high-risk zone
             val formOk = avgForm == null || avgForm in -12.0..5.0 || (onPlan && avgForm >= -30)
             val passed = if (!complete || entry == null || exit == null) null else

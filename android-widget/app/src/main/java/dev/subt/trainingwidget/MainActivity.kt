@@ -459,14 +459,15 @@ class MainActivity : Activity() {
         var items = rangeCache[key]
         if (items == null && isThisWeek && snap != null && snap.today >= monday.toString()) items = snap.week
         val creds = Prefs.credentials(this)
-        if (rangeCache[key] == null && key !in loading && creds != null) {
+        val recentlyFailed = System.currentTimeMillis() - failedAt.getOrDefault("range:$key", 0L) < 5 * 60_000L
+        if (rangeCache[key] == null && key !in loading && creds != null && !recentlyFailed) {
             loading += key
             Thread {
                 val r = runCatching { IcuApi(creds).fetchRange(start, end) }
                 runOnUiThread {
                     loading -= key
                     r.onSuccess { rangeCache[key] = it; rangeError = null }
-                        .onFailure { rangeError = it.message ?: it.javaClass.simpleName }
+                        .onFailure { rangeError = it.message ?: it.javaClass.simpleName; failedAt["range:$key"] = System.currentTimeMillis() }
                     if (tab == Tab.WEEK) drawContent()
                 }
             }.start()

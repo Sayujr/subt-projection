@@ -80,6 +80,7 @@ class ScreensTest {
     }
 
     private fun safely(name: String, block: () -> Unit) {
+        println("screens: $name …")
         try { block() } catch (t: Throwable) { errors.append("$name: ${t.javaClass.simpleName}: ${t.message}\n${t.stackTrace.take(6).joinToString("\n") { "    at $it" }}\n\n") }
     }
 
