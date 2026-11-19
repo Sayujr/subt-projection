@@ -62,9 +62,27 @@ jobs:
             exit 1
           fi
 
-      - name: Build release APK (unsigned)
+      # Training-rule tests must pass, or nothing is published. The same run renders every screen
+      # and widget from sample data to PNGs (build/screens) for a visual check.
+      - name: Check training rules and render screens
         run: |
           chmod +x gradlew
+          ./gradlew --no-daemon testReleaseUnitTest
+
+      - name: Zip screenshots
+        if: always()
+        run: |
+          mkdir -p build/screens
+          (cd build && zip -qr ../screens.zip screens) || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screens
+          path: android-widget/screens.zip
+
+      - name: Build release APK (unsigned)
+        run: |
           ./gradlew --no-daemon assembleRelease
 
       # Key rotation (APK Signature Scheme v3): signed by the old key with a proof that the private
@@ -98,7 +116,9 @@ jobs:
           target_commitish: ${{ github.sha }}
           prerelease: true
           make_latest: false
-          files: android-widget/training-widget.apk
+          files: |
+            android-widget/training-widget.apk
+            android-widget/screens.zip
           body: |
             Android home-screen widget showing today's intervals.icu workouts plus Fitness / Fatigue / Form trends.
             Download `training-widget.apk` on your phone and open it to install (allow "install unknown apps" for your browser).

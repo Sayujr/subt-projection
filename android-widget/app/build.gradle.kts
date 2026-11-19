@@ -46,6 +46,18 @@ android {
         checkReleaseBuilds = false
         abortOnError = false
     }
+    testOptions {
+        unitTests {
+            // Robolectric: real resources + native drawing, so tests can render the screens to PNGs
+            isIncludeAndroidResources = true
+            all {
+                it.systemProperty("robolectric.graphicsMode", "NATIVE")
+                it.systemProperty("screens.dir", rootProject.file("build/screens").absolutePath)
+                it.maxHeapSize = "2g"
+                it.testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+            }
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -57,4 +69,9 @@ android {
 
 dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("androidx.work:work-testing:2.9.1")
 }

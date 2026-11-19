@@ -144,8 +144,12 @@ object WidgetRenderer {
     // ---------------------------------------------------------------- Trends: graphs only
 
     fun renderTrend(ctx: Context, mgr: AppWidgetManager, id: Int) {
-        val s = State(ctx)
         val (widthDp, heightDp) = sizeDp(mgr, id, 300, 140)
+        mgr.updateAppWidget(id, buildTrend(ctx, id, widthDp, heightDp))
+    }
+
+    fun buildTrend(ctx: Context, id: Int, widthDp: Int, heightDp: Int): RemoteViews {
+        val s = State(ctx)
         val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) GraphStyle.ONE else it }
         val period = Prefs.period(ctx, id)
         val views = RemoteViews(ctx.packageName, R.layout.widget_trend)
@@ -158,14 +162,18 @@ object WidgetRenderer {
         )
         views.removeAllViews(R.id.graphs)
         views.addView(R.id.graphs, graphs(ctx, s, style, OneVariant.PLAIN, widthDp - 24, heightDp - 42, period))
-        mgr.updateAppWidget(id, views)
+        return views
     }
 
     // ---------------------------------------------------------------- Compact: scrolling workout strip + graphs
 
     fun renderCompact(ctx: Context, mgr: AppWidgetManager, id: Int) {
-        val s = State(ctx)
         val (widthDp, heightDp) = sizeDp(mgr, id, 300, 150)
+        mgr.updateAppWidget(id, buildCompact(ctx, id, widthDp, heightDp))
+    }
+
+    fun buildCompact(ctx: Context, id: Int, widthDp: Int, heightDp: Int): RemoteViews {
+        val s = State(ctx)
         val style = Prefs.style(ctx, id).let { if (it == GraphStyle.AUTO) GraphStyle.ONE else it }
         val views = RemoteViews(ctx.packageName, R.layout.widget_compact)
 
@@ -178,18 +186,20 @@ object WidgetRenderer {
         // padding 18, header 18, list 26, margin 6
         views.removeAllViews(R.id.graphs)
         views.addView(R.id.graphs, graphs(ctx, s, style, OneVariant.SLIM, widthDp - 22, heightDp - 68, Prefs.period(ctx, id)))
-        mgr.updateAppWidget(id, views)
+        return views
     }
 
     // ---------------------------------------------------------------- Workouts: scrolling list only
 
-    fun renderWorkouts(ctx: Context, mgr: AppWidgetManager, id: Int) {
+    fun renderWorkouts(ctx: Context, mgr: AppWidgetManager, id: Int) = mgr.updateAppWidget(id, buildWorkouts(ctx, id))
+
+    fun buildWorkouts(ctx: Context, id: Int): RemoteViews {
         val s = State(ctx)
         val views = RemoteViews(ctx.packageName, R.layout.widget_workouts)
         views.setTextViewText(R.id.title, titleText(s.today) + (if (s.refreshing) "  ·  updating…" else ""))
         views.setOnClickPendingIntent(R.id.refresh, refreshIntent(ctx, WorkoutsWidgetProvider::class.java))
         setupList(ctx, views, s, id)
-        mgr.updateAppWidget(id, views)
+        return views
     }
 
     /** Wires the scrolling workout list used by the Compact and Workouts widgets. */

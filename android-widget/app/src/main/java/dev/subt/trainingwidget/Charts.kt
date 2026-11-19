@@ -334,6 +334,14 @@ object Charts {
 
     // ---------------------------------------------------------------- week bars
 
+    /** Plan comparison for a finished day: 0 = on plan (± tolerance), 1 = more than planned, 2 = less, null = nothing planned. */
+    fun planMark(done: Int, planned: Int, tolPct: Int): Int? = when {
+        planned <= 0 -> null
+        done > planned * (1 + tolPct / 100.0) -> 1
+        done < planned * (1 - tolPct / 100.0) -> 2
+        else -> 0
+    }
+
     /** Mon–Sun columns for the week widget. */
     fun weekBars(week: List<Workout>, monday: LocalDate, today: LocalDate, w: Int, h: Int, density: Float, tolPct: Int = 10): Bitmap =
         rangeBars(week, monday, monday.plusDays(6), today, w, h, density, tolPct)
@@ -373,7 +381,6 @@ object Charts {
             break
         }
         val max = (0 until n).maxOfOrNull { maxOf(done[it] + missed[it] + todo[it], planned[it]) }?.coerceAtLeast(50) ?: 50
-        val tol = tolPct / 100.0
 
         val label = labelPaint(density).apply { textSize = 10f * density }
         val colW = w / n.toFloat()
@@ -457,14 +464,7 @@ object Charts {
                         labelY -= 11f * density
                     }
                     // Mark only when something was planned
-                    if (pl > 0) {
-                        val kind = when {
-                            dn > pl * (1 + tol) -> 1
-                            dn < pl * (1 - tol) -> 2
-                            else -> 0
-                        }
-                        mark(cx, labelY - markH / 2 + 2f * density, kind)
-                    }
+                    planMark(dn, pl, tolPct)?.let { mark(cx, labelY - markH / 2 + 2f * density, it) }
                 }
             } else {
                 seg(done[i], doneP)

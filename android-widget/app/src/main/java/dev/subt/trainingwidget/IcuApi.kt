@@ -368,7 +368,7 @@ class IcuApi(private val creds: Credentials) {
             .firstOrNull { s -> s.optJSONArray("types")?.let { t -> (0 until t.length()).any { t.optString(it) == "Run" } } == true }
             ?: throw IOException("No Run sport settings found in intervals.icu")
         val id = run.opt("id")?.toString() ?: throw IOException("Run sport settings have no id")
-        val conn = URL("$BASE/athlete/$ath/sport-settings/${URLEncoder.encode(id, "UTF-8")}").openConnection() as HttpURLConnection
+        val conn = Net.open(URL("$BASE/athlete/$ath/sport-settings/${URLEncoder.encode(id, "UTF-8")}"))
         try {
             conn.requestMethod = "PUT"; conn.doOutput = true
             conn.connectTimeout = 15_000; conn.readTimeout = 25_000
@@ -385,7 +385,7 @@ class IcuApi(private val creds: Credentials) {
     /** Sets one wellness field for a day in intervals.icu (used to correct an obviously wrong sleep value). */
     fun updateWellness(date: String, fields: JSONObject) {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
-        val conn = URL("$BASE/athlete/$ath/wellness/${URLEncoder.encode(date, "UTF-8")}").openConnection() as HttpURLConnection
+        val conn = Net.open(URL("$BASE/athlete/$ath/wellness/${URLEncoder.encode(date, "UTF-8")}"))
         try {
             conn.requestMethod = "PUT"
             conn.doOutput = true
@@ -405,7 +405,7 @@ class IcuApi(private val creds: Credentials) {
 
     private fun getText(path: String, params: Map<String, String>): String {
         val query = params.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }
-        val conn = URL("$BASE$path?$query").openConnection() as HttpURLConnection
+        val conn = Net.open(URL("$BASE$path?$query"))
         try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 25_000
@@ -422,7 +422,7 @@ class IcuApi(private val creds: Credentials) {
     }
 
     private fun getObject(path: String): JSONObject {
-        val conn = URL("$BASE$path").openConnection() as HttpURLConnection
+        val conn = Net.open(URL("$BASE$path"))
         try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 25_000
@@ -594,7 +594,7 @@ class IcuApi(private val creds: Credentials) {
         val query = params.entries.joinToString("&") {
             "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}"
         }
-        val conn = URL("$BASE$path?$query").openConnection() as HttpURLConnection
+        val conn = Net.open(URL("$BASE$path?$query"))
         try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 25_000
@@ -623,7 +623,7 @@ object SubtApi {
     const val PAGE_URL = "https://sayujr.github.io/subt-projection/"
 
     fun fetch(today: LocalDate = LocalDate.now()): SubtData {
-        val conn = URL(DATA_URL).openConnection() as HttpURLConnection
+        val conn = Net.open(URL(DATA_URL))
         val body = try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 25_000
@@ -660,4 +660,13 @@ private fun JSONObject.optNum(key: String): Double? {
     if (!has(key) || isNull(key)) return null
     val v = optDouble(key)
     return if (v.isNaN()) null else v
+}
+
+/** All network access goes through here; tests switch it off so screens render from sample data. */
+object Net {
+    @Volatile var offline = false
+    fun open(url: URL): HttpURLConnection {
+        if (offline) throw IOException("offline (test)")
+        return url.openConnection() as HttpURLConnection
+    }
 }
