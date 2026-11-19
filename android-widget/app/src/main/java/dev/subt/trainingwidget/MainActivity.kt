@@ -467,8 +467,9 @@ class MainActivity : Activity() {
         scroll.addView(list)
         col.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         list.addView(TextView(this).apply {
-            text = "Green = load done (number on top). Dashed grey = planned but missed (number inside). Amber = still planned.  " +
-                "✓ on plan (±10%) · ˄ more than planned · ˅ less than planned"
+            val tol = Prefs.planTolerance(this@MainActivity)
+            text = "Green bar = load done (number on top). Dashed outline = load planned: a gap above the bar is how far short you were (number inside). Amber = still to do.  " +
+                "✓ within ±$tol% of plan · ˄ more than planned · ˅ less than planned · no mark = nothing planned"
             setTextColor(0xFF6B7386.toInt())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setPadding(dp(4), dp(2), dp(4), dp(4))

@@ -154,7 +154,7 @@ object ExtraWidgets {
         val chartH = hDp - 24 - 28 - 18 - 6 - listRows * 22 - (if (listRows > 0) 6 else 0)
         v.setImageViewBitmap(
             R.id.week_chart,
-            Charts.weekBars(week, monday, today, px(ctx, wDp - 24), px(ctx, chartH), ctx.resources.displayMetrics.density)
+            Charts.weekBars(week, monday, today, px(ctx, wDp - 24), px(ctx, chartH), ctx.resources.displayMetrics.density, Prefs.planTolerance(ctx))
         )
         return v
     }
@@ -165,12 +165,14 @@ object ExtraWidgets {
         v.removeAllViews(R.id.week_list)
         val t = s.today.toString()
         val done = r.items.filter { it.status == WorkoutStatus.DONE }.sumOf { it.load }
-        val missed = r.items.filter { it.status != WorkoutStatus.DONE && it.date < t }.sumOf { it.load }
+        // Plan for days already past: planned load of what you did + load of what you skipped
+        val planPast = r.items.filter { it.date < t }.sumOf { if (it.status == WorkoutStatus.DONE) it.plannedLoad else it.load }
+        val donePast = r.items.filter { it.date < t && it.status == WorkoutStatus.DONE }.sumOf { it.load }
         val todo = r.items.filter { it.status != WorkoutStatus.DONE && it.date >= t }.sumOf { it.load }
         val parts = mutableListOf<Pair<String, Int?>>()
         if (done > 0 || r.start.toString() <= t) parts += listOf("Done " to R0.DIM, "$done" to R0.UP)
         if (todo > 0 || r.end.toString() >= t) parts += listOf("   To do " to R0.DIM, "$todo" to AMBER)
-        if (missed > 0) parts += listOf("   Missed " to R0.DIM, "$missed" to R0.DIM)
+        if (planPast > 0) parts += listOf("   Planned " to R0.DIM, "$planPast" to R0.TEXT, " (${(donePast * 100.0 / planPast).roundToInt()}%)" to R0.DIM)
         if (r.lastWeekLoad != null) parts += listOf("   Last week " to R0.DIM, "${r.lastWeekLoad}" to R0.TEXT)
         val days = ChronoUnit.DAYS.between(r.start, r.end) + 1
         if (days > 10) parts += listOf("   ${((done + todo) * 7.0 / days).roundToInt()}/wk" to R0.DIM)
@@ -178,7 +180,7 @@ object ExtraWidgets {
         val chartH = hDp - 24 - 28 - 18 - 6
         v.setImageViewBitmap(
             R.id.week_chart,
-            Charts.rangeBars(r.items, r.start, r.end, s.today, px(ctx, wDp - 24), px(ctx, chartH), ctx.resources.displayMetrics.density)
+            Charts.rangeBars(r.items, r.start, r.end, s.today, px(ctx, wDp - 24), px(ctx, chartH), ctx.resources.displayMetrics.density, Prefs.planTolerance(ctx))
         )
         return v
     }

@@ -335,15 +335,15 @@ object Charts {
     // ---------------------------------------------------------------- week bars
 
     /** Mon–Sun columns for the week widget. */
-    fun weekBars(week: List<Workout>, monday: LocalDate, today: LocalDate, w: Int, h: Int, density: Float): Bitmap =
-        rangeBars(week, monday, monday.plusDays(6), today, w, h, density)
+    fun weekBars(week: List<Workout>, monday: LocalDate, today: LocalDate, w: Int, h: Int, density: Float, tolPct: Int = 10): Bitmap =
+        rangeBars(week, monday, monday.plusDays(6), today, w, h, density, tolPct)
 
     /**
      * Load bars over [start]..[end]: one per day up to ~5 weeks, otherwise one per week (Mon–Sun).
      * Completed load is green, missed planned load (before today) a dashed outline, and still-to-do
      * planned load amber. The bar containing today is highlighted.
      */
-    fun rangeBars(items: List<Workout>, start: LocalDate, end: LocalDate, today: LocalDate, w: Int, h: Int, density: Float): Bitmap {
+    fun rangeBars(items: List<Workout>, start: LocalDate, end: LocalDate, today: LocalDate, w: Int, h: Int, density: Float, tolPct: Int = 10): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val nDays = java.time.temporal.ChronoUnit.DAYS.between(start, end).toInt() + 1
@@ -372,7 +372,8 @@ object Charts {
             planned[i] += if (wk.status == WorkoutStatus.DONE) wk.plannedLoad else wk.load
             break
         }
-        val max = (0 until n).maxOfOrNull { done[it] + missed[it] + todo[it] }?.coerceAtLeast(50) ?: 50
+        val max = (0 until n).maxOfOrNull { maxOf(done[it] + missed[it] + todo[it], planned[it]) }?.coerceAtLeast(50) ?: 50
+        val tol = tolPct / 100.0
 
         val label = labelPaint(density).apply { textSize = 10f * density }
         val colW = w / n.toFloat()
@@ -396,7 +397,7 @@ object Charts {
         val base = Paint().apply { color = GRID; strokeWidth = 1f }
         c.drawLine(0f, topPad + chartH, w.toFloat(), topPad + chartH, base)
 
-        /** ✓ = on plan (±10 %), chevron up = more than planned, chevron down = less. No arrow stems. */
+        /** ✓ = on plan (± tolerance), chevron up = more than planned, chevron down = less. No arrow stems. */
         fun mark(cx: Float, y: Float, kind: Int) {
             val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE; strokeWidth = 1.8f * density; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
@@ -424,53 +425,69 @@ object Charts {
             val finished = bucketEnd < t || (isToday && todo[i] == 0 && done[i] > 0)
             if (isToday) c.drawRoundRect(colW * i + 1f, 0f, colW * (i + 1) - 1f, h.toFloat(), 6f * density, 6f * density, todayBg)
             var y = topPad + chartH
+            val baseY = topPad + chartH
+            fun hOf(v: Int) = chartH * v / max
             fun seg(v: Int, p: Paint): Pair<Float, Float>? {
                 if (v <= 0) return null
-                val bh = chartH * v / max
+                val bh = hOf(v)
                 c.drawRoundRect(left, y - bh, right, y, r, r, p)
                 val span = y - bh to y
                 y -= bh
                 return span
             }
-            seg(done[i], doneP)
-            val missSpan = seg(missed[i], missP)
-            val todoSpan = seg(todo[i], planP)
-            if (showNumbers) {
-                // Numbers inside the dashed (missed) and amber (to do) boxes when they fit
-                fun inside(span: Pair<Float, Float>?, v: Int, p: Paint): Boolean {
-                    if (span == null) return false
-                    if (span.second - span.first < 12f * density) return false
-                    val s = v.toString()
-                    c.drawText(s, cx - p.measureText(s) / 2, (span.first + span.second) / 2 + 3.5f * density, p)
-                    return true
-                }
-                val missIn = inside(missSpan, missed[i], missT)
-                val todoIn = inside(todoSpan, todo[i], todoInT)
-                // Above the bar: done in green; if nothing done yet, what's still planned in amber
-                var labelY = y - 3f * density
-                if (done[i] > 0) {
-                    val s = done[i].toString()
-                    c.drawText(s, cx - doneT.measureText(s) / 2, labelY, doneT)
-                    labelY -= 11f * density
-                } else if (todo[i] > 0 && !todoIn) {
-                    val s = todo[i].toString()
-                    c.drawText(s, cx - todoT.measureText(s) / 2, labelY, todoT)
-                    labelY -= 11f * density
-                }
-                if (!missIn && missed[i] > 0 && done[i] == 0) {
-                    val s = missed[i].toString()
-                    c.drawText(s, cx - missT.measureText(s) / 2, labelY, missT)
-                    labelY -= 11f * density
-                }
-                // Plan comparison mark
-                if (finished && (planned[i] > 0 || done[i] > 0)) {
-                    val kind = when {
-                        planned[i] == 0 -> 1
-                        done[i] > planned[i] * 1.1 -> 1
-                        done[i] < planned[i] * 0.9 -> 2
-                        else -> 0
+            var labelY: Float
+            if (finished) {
+                // Finished: the dashed outline is the plan, the green bar is what you did.
+                // Gap above the bar = short of plan; bar above the outline = more than plan.
+                val pl = planned[i]; val dn = done[i]
+                seg(dn, doneP)
+                val planTop = baseY - hOf(pl)
+                if (pl > 0) c.drawRoundRect(left, planTop, right, baseY, r, r, missP)
+                val top = minOf(y, if (pl > 0) planTop else y)
+                labelY = top - 3f * density
+                if (showNumbers) {
+                    val short = pl - dn
+                    if (pl > 0 && short > 0 && (y - planTop) >= 12f * density) {
+                        val sTxt = short.toString()
+                        c.drawText(sTxt, cx - missT.measureText(sTxt) / 2, (planTop + y) / 2 + 3.5f * density, missT)
                     }
-                    mark(cx, labelY - markH / 2 + 2f * density, kind)
+                    if (dn > 0 || pl > 0) {
+                        val sTxt = dn.toString()
+                        c.drawText(sTxt, cx - doneT.measureText(sTxt) / 2, labelY, if (dn > 0) doneT else missT)
+                        labelY -= 11f * density
+                    }
+                    // Mark only when something was planned
+                    if (pl > 0) {
+                        val kind = when {
+                            dn > pl * (1 + tol) -> 1
+                            dn < pl * (1 - tol) -> 2
+                            else -> 0
+                        }
+                        mark(cx, labelY - markH / 2 + 2f * density, kind)
+                    }
+                }
+            } else {
+                seg(done[i], doneP)
+                val missSpan = seg(missed[i], missP)
+                val todoSpan = seg(todo[i], planP)
+                labelY = y - 3f * density
+                if (showNumbers) {
+                    fun inside(span: Pair<Float, Float>?, v: Int, p: Paint): Boolean {
+                        if (span == null) return false
+                        if (span.second - span.first < 12f * density) return false
+                        val sTxt = v.toString()
+                        c.drawText(sTxt, cx - p.measureText(sTxt) / 2, (span.first + span.second) / 2 + 3.5f * density, p)
+                        return true
+                    }
+                    inside(missSpan, missed[i], missT)
+                    val todoIn = inside(todoSpan, todo[i], todoInT)
+                    if (done[i] > 0) {
+                        val sTxt = done[i].toString()
+                        c.drawText(sTxt, cx - doneT.measureText(sTxt) / 2, labelY, doneT)
+                    } else if (todo[i] > 0 && !todoIn) {
+                        val sTxt = todo[i].toString()
+                        c.drawText(sTxt, cx - todoT.measureText(sTxt) / 2, labelY, todoT)
+                    }
                 }
             }
             if (i % k == 0 || isToday) {
