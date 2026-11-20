@@ -354,7 +354,12 @@ class SetupActivity : Activity() {
             if (st == android.app.DownloadManager.STATUS_SUCCESSFUL && installedFor != l.code) { installedFor = l.code; Updater.install(this) }
         }
         render()
-        return listOf(info, notes, btn, note("Android asks you to confirm the install. Your widgets and settings stay."))
+        // Fallback when the phone won't let this app install (e.g. Samsung Auto Blocker greys out the switch)
+        val viaBrowser = smallButton("Or download in your browser") {
+            runCatching { startActivity(WidgetRenderer.browserIntent(this, "https://github.com/Sayujr/subt-projection/releases/download/android-widget-latest/training-widget.apk")) }
+        }
+        return listOf(info, notes, btn, viaBrowser,
+            note("Android asks you to confirm the install. Your widgets and settings stay. If the \"Install unknown apps\" switch is greyed out, Samsung Auto Blocker is on: turn it off for the install, or use the browser button."))
     }
 
     private fun backupViews(): List<View> = listOf(
