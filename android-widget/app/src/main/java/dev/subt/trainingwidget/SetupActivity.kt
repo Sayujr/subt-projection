@@ -186,11 +186,12 @@ class SetupActivity : Activity() {
         }
     }
 
-    private companion object {
-        const val REQ_EXPORT = 41
-        const val REQ_IMPORT = 42
-        val sentToday = mutableMapOf<String, String>()
-        val sectionOpen = mutableMapOf<String, Boolean>()
+    companion object {
+        const val EXTRA_OPEN = "open_section"
+        private const val REQ_EXPORT = 41
+        private const val REQ_IMPORT = 42
+        private val sentToday = mutableMapOf<String, String>()
+        private val sectionOpen = mutableMapOf<String, Boolean>()
     }
 
     /**
@@ -245,6 +246,9 @@ class SetupActivity : Activity() {
             root.addView(head); root.addView(body)
             root.addView(View(this).apply { setBackgroundColor(0xFF2C3240.toInt()) }, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
         }
+        val upd = Updater.available(this)
+        section("update", "App updates", if (upd != null) "⚠ ${upd.name} ready to install (you have ${Updater.currentName(this)})" else "Version ${Updater.currentName(this)}",
+            upd != null || intent?.getStringExtra(EXTRA_OPEN) == "update", updateViews())
         val dev = Deviations.compute(this).size
         section("acc", "Account", if (hasCreds) "Connected to intervals.icu" else "Not connected yet", !hasCreds, groups["acc"]!!)
         section("num", "Your numbers", if (dev > 0) "$dev differ from intervals.icu" else "Weight, CP, RHR, HRV, SubT, PBs", !widgetMode, groups["num"]!!)
@@ -266,6 +270,53 @@ class SetupActivity : Activity() {
     }
 
     private fun note(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7386.toInt()); textSize = 12f; setPadding(0, (6 * resources.displayMetrics.density).toInt(), 0, 0) }
+
+    /** Version, what's new, check for updates, and one-tap download → install (Android confirms). */
+    private fun updateViews(): List<View> {
+        val info = TextView(this).apply { setTextColor(0xFFF2F4F8.toInt()); textSize = 14f; setPadding(0, (4 * resources.displayMetrics.density).toInt(), 0, 0) }
+        val notes = TextView(this).apply { setTextColor(0xFF9AA3B2.toInt()); textSize = 13f; setPadding(0, (4 * resources.displayMetrics.density).toInt(), 0, 0) }
+        val btn = smallButton("") {}
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        var installedFor = 0
+        fun render() {
+            val l = Updater.available(this)
+            if (l == null) {
+                info.text = "You have the latest version (${Updater.currentName(this)})."
+                notes.text = Updater.whatsNew(this).take(6).joinToString("\n") { "• $it" }.let { if (it.isEmpty()) "" else "In this version:\n$it" }
+                btn.text = "Check for updates"
+                btn.setOnClickListener {
+                    btn.text = "Checking…"
+                    Thread {
+                        val r = runCatching { Updater.check(this, force = true) }
+                        runOnUiThread { if (r.isFailure) info.text = "Couldn't check: ${r.exceptionOrNull()?.message}"; render() }
+                    }.start()
+                }
+                return
+            }
+            info.text = "Version ${l.name} is ready (you have ${Updater.currentName(this)})."
+            notes.text = l.notes.take(8).joinToString("\n") { "• $it" }
+            val prog = Updater.progress(this, l.code)
+            val st = prog?.first
+            val running = st == android.app.DownloadManager.STATUS_RUNNING || st == android.app.DownloadManager.STATUS_PENDING || st == android.app.DownloadManager.STATUS_PAUSED
+            btn.text = when {
+                running -> "Downloading… ${prog?.second ?: 0}%"
+                st == android.app.DownloadManager.STATUS_SUCCESSFUL -> "Install ${l.name}"
+                st == android.app.DownloadManager.STATUS_FAILED -> "Download failed: try again"
+                else -> "Download and install ${l.name}"
+            }
+            btn.setOnClickListener {
+                when {
+                    running -> Unit
+                    st == android.app.DownloadManager.STATUS_SUCCESSFUL -> Updater.install(this)
+                    else -> { Updater.startDownload(this, l); render() }
+                }
+            }
+            if (running) handler.postDelayed({ if (!isFinishing) render() }, 1000)
+            if (st == android.app.DownloadManager.STATUS_SUCCESSFUL && installedFor != l.code) { installedFor = l.code; Updater.install(this) }
+        }
+        render()
+        return listOf(info, notes, btn, note("Android asks you to confirm the install. Your widgets and settings stay."))
+    }
 
     private fun backupViews(): List<View> = listOf(
         note("Saves your numbers, PBs, rules, widget looks and notification choices to a file you pick (Drive, Downloads…). Your API key isn't included; paste it again after restoring."),

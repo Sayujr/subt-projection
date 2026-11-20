@@ -1,7 +1,6 @@
 package dev.subt.trainingwidget
 
 import android.app.Activity
-import android.app.DownloadManager
 import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.text.InputType
@@ -30,7 +29,6 @@ import kotlin.math.sqrt
 /** Detailed in-app screens (Race, Recovery, SubT) built from normal views so they can scroll. */
 class AppScreens(private val a: Activity, private val wDp: Int, private val onChange: () -> Unit = {}) {
     companion object {
-        @Volatile var autoInstalled = 0
         /** Which ⓘ notes you've opened (kept while the app runs). */
         val openInfo = mutableSetOf<String>()
     }
@@ -1282,38 +1280,6 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             }
         }
         c.addView(head); c.addView(body)
-    }
-
-    /** "Update ready" with what's new and a one-tap download → install. */
-    fun updateCard(col: LinearLayout) {
-        val l = Updater.available(a) ?: return
-        val c = card(col)
-        label(c, "Update ready", GOOD)
-        text(c, "Version ${l.name}  (you have ${Updater.currentName(a)})", 15f, bold = true, top = 2)
-        l.notes.take(5).forEach { bullet(c, GOOD, it) }
-        val prog = Updater.progress(a, l.code)
-        val st = prog?.first
-        val btn = android.widget.Button(a).apply {
-            isAllCaps = false; setTextColor(0xFF0F1218.toInt()); setBackgroundResource(R.drawable.chip_on)
-            text = when (st) {
-                DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING, DownloadManager.STATUS_PAUSED -> "Downloading… ${prog?.second ?: 0}%"
-                DownloadManager.STATUS_SUCCESSFUL -> "Install"
-                DownloadManager.STATUS_FAILED -> "Download failed: try again"
-                else -> "Download and install"
-            }
-            setOnClickListener {
-                when (st) {
-                    DownloadManager.STATUS_SUCCESSFUL -> Updater.install(a)
-                    DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING, DownloadManager.STATUS_PAUSED -> Unit
-                    else -> { Updater.startDownload(a, l); onChange() }
-                }
-            }
-        }
-        c.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply { topMargin = dp(10) })
-        if (st == DownloadManager.STATUS_RUNNING || st == DownloadManager.STATUS_PENDING || st == DownloadManager.STATUS_PAUSED)
-            c.postDelayed({ onChange() }, 1000)
-        if (st == DownloadManager.STATUS_SUCCESSFUL && autoInstalled != l.code) { autoInstalled = l.code; c.post { Updater.install(a) } }
-        text(c, "Android asks you to confirm the install. Your widgets and settings stay.", 11.5f, FAINT, top = 6)
     }
 
     /** Differences between your entered numbers and intervals.icu (the app uses yours). */

@@ -1,3 +1,4 @@
+- App updates live in Settings → App updates: check for updates, see what's new, download and install
 - Today chart: gold dot on the period's peak Fitness, plus average Fitness and Form with a trend arrow
 - Race screen: tap A / B / C race to change a race's priority in intervals.icu (asks first)
 - "Why this call?" load now shows each of the last 3 days by name, straight from intervals.icu

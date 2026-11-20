@@ -28,8 +28,10 @@ object Notifier {
     private fun post(ctx: Context, channel: String, id: Int, title: String, text: String, tab: String) {
         if (!allowed(ctx)) return
         channels(ctx)
+        val target = if (tab == "SETTINGS") Intent(ctx, SetupActivity::class.java).putExtra(SetupActivity.EXTRA_OPEN, "update")
+            else Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, tab)
         val pi = PendingIntent.getActivity(
-            ctx, id, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, tab)
+            ctx, id, target
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
@@ -49,7 +51,7 @@ object Notifier {
         val l = Updater.available(ctx) ?: return
         once(ctx, "update", l.code.toString()) {
             post(ctx, ALERTS, 40, "Training Today ${l.name} is ready",
-                (l.notes.take(3).joinToString("\n") { "• $it" }).ifEmpty { "Open the app to install it." }, "HOME")
+                (l.notes.take(3).joinToString("\n") { "• $it" }).ifEmpty { "Tap to install it from Settings." }, "SETTINGS")
         }
     }
 
