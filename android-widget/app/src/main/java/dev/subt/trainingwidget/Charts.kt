@@ -313,6 +313,8 @@ object Charts {
             }
         }
 
+        if (labels && split >= 9) periodStats(c, ft, top, bottom, ctl, form, split, density, bg)
+
         if (highlight != null && highlight in days.indices) {
             val x = ft.x(highlight)
             val line = Paint().apply { color = 0x99FFFFFF.toInt(); strokeWidth = 1.2f * density }
@@ -322,6 +324,73 @@ object Charts {
             dot(c, x, fb.y(form[highlight]), FormZone.of(form[highlight]).color, density, bg)
         }
         return bmp
+    }
+
+    /** Rise over the period from a least-squares line: +1 up, −1 down, 0 flat (|change| below [flat]). */
+    fun trend(v: List<Double>, flat: Double): Int {
+        if (v.size < 3) return 0
+        val n = v.size; val mx = (n - 1) / 2.0; val my = v.average()
+        var num = 0.0; var den = 0.0
+        for (i in v.indices) { num += (i - mx) * (v[i] - my); den += (i - mx) * (i - mx) }
+        val change = if (den == 0.0) 0.0 else num / den * (n - 1)
+        return if (change > flat) 1 else if (change < -flat) -1 else 0
+    }
+
+    /** Stemless chevron: up, down, or a short dash for flat. */
+    private fun chevron(c: Canvas, cx: Float, cy: Float, dir: Int, color: Int, density: Float) {
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.7f * density; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; this.color = color
+        }
+        val s = 3.4f * density
+        val path = Path()
+        when (dir) {
+            1 -> { path.moveTo(cx - s, cy + s / 2); path.lineTo(cx, cy - s / 2); path.lineTo(cx + s, cy + s / 2) }
+            -1 -> { path.moveTo(cx - s, cy - s / 2); path.lineTo(cx, cy + s / 2); path.lineTo(cx + s, cy - s / 2) }
+            else -> { path.moveTo(cx - s, cy); path.lineTo(cx + s, cy) }
+        }
+        c.drawPath(path, p)
+    }
+
+    /**
+     * Period extras for the multi-week views: a gold dot on the period's peak Fitness, and small
+     * "avg" tags at the right with a stemless trend chevron for Fitness and Form (history only).
+     */
+    private fun periodStats(c: Canvas, ft: Frame, top: RectF, @Suppress("UNUSED_PARAMETER") bottom: RectF, ctl: List<Double>, form: List<Double>, split: Int, density: Float, bg: Int) {
+        val gold = 0xFFFFC53D.toInt()
+        val hist = ctl.subList(0, split + 1)
+        val pi = hist.indices.maxByOrNull { hist[it] } ?: return
+        val px = ft.x(pi); val py = ft.y(hist[pi])
+        val pt = labelPaint(density).apply { color = gold; textSize = 9.5f * density; isFakeBoldText = true }
+        val ptxt = "peak ${hist[pi].roundToInt()}"
+        val tx = (px - pt.measureText(ptxt) / 2).coerceIn(top.left + 2f * density, top.right - pt.measureText(ptxt) - 2f * density)
+        c.drawText(ptxt, tx, (py - 7f * density).coerceAtLeast(top.top + 9f * density), pt)
+        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bg }
+        c.drawCircle(px, py, 4.6f * density, ring)
+        ring.color = gold
+        c.drawCircle(px, py, 3.4f * density, ring)
+
+        // Averages + trend, as small tags at the right edge
+        val fHist = form.subList(0, split + 1)
+        fun tag(y: Float, name: String, value: String, valueColor: Int, dir: Int, dirColor: Int) {
+            val lp = labelPaint(density).apply { textSize = 9.5f * density }
+            val vp = labelPaint(density).apply { textSize = 10.5f * density; color = valueColor; isFakeBoldText = true }
+            val wName = lp.measureText(name); val wVal = vp.measureText(value); val wChev = 9f * density
+            val padH = 5f * density
+            val w = padH + wName + 3f * density + wVal + 4f * density + wChev + padH
+            val right = top.right - 3f * density
+            val rect = RectF(right - w, y - 9.5f * density, right, y + 4f * density)
+            c.drawRoundRect(rect, 4f * density, 4f * density, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(bg, 0xDD) })
+            var x = rect.left + padH
+            c.drawText(name, x, y, lp); x += wName + 3f * density
+            c.drawText(value, x, y, vp); x += wVal + 4f * density
+            chevron(c, x + wChev / 2 - 1f * density, y - 3.5f * density, dir, dirColor, density)
+        }
+        val avgF = hist.average(); val fd = trend(hist, 1.0)
+        tag(top.top + 24f * density, "avg Fitness", avgF.roundToInt().toString(), FormColors.FITNESS, fd,
+            if (fd > 0) 0xFF3DD68C.toInt() else if (fd < 0) 0xFFFF7A7A.toInt() else LABEL)
+        val avgForm = fHist.average(); val md = trend(fHist, 2.0)
+        val fz = FormZone.of(avgForm)
+        tag(top.top + 41f * density, "avg Form", (if (avgForm > 0.5) "+" else "") + avgForm.roundToInt(), fz.color, md, fz.color)
     }
 
     /** Which day a touch at [x] (in bitmap pixels) falls on, matching [combined]'s layout. */

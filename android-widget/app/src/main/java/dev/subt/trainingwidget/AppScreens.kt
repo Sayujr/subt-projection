@@ -210,6 +210,26 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             (if (daysTo == 0L) "Today" else "$daysTo days") to TEXT,
             "  ·  ${rd.format(edm)}${race.type.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""}" to DIM,
         ), 16f, top = 2)
+        // Priority: tap A / B / C to change it in intervals.icu (asks first)
+        val cats = listOf("RACE_A", "RACE_B", "RACE_C")
+        val creds = Prefs.credentials(a)
+        if (race.eventId != null && creds != null) chipRow(h, listOf("A race", "B race", "C race"), cats.indexOf(race.category)) { i ->
+            val cat = cats[i]
+            if (cat == race.category) return@chipRow
+            AlertDialog.Builder(a)
+                .setTitle("Make ${race.name.take(40)} ${"ABC"[i]} priority?")
+                .setMessage("This changes the race in your intervals.icu calendar. The taper targets here switch to ${"ABC"[i]}-race numbers.")
+                .setPositiveButton("Change") { _, _ ->
+                    Thread {
+                        val r = runCatching { IcuApi(creds).updateEventCategory(race.eventId, cat) }
+                        a.runOnUiThread {
+                            android.widget.Toast.makeText(a, r.fold({ "✓ Now an ${"ABC"[i]} race. Refreshing…" }, { "Couldn't change it: ${it.message}" }), android.widget.Toast.LENGTH_LONG).show()
+                            if (r.isSuccess) Refresh.now(a, replace = true)
+                        }
+                    }.start()
+                }
+                .setNegativeButton("Cancel", null).show()
+        }
 
         // Series: history + projection, from 90 days before the race to race eve
         val series = (s.days + s.proj).distinctBy { it.date }.sortedBy { it.date }

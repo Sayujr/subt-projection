@@ -1,8 +1,5 @@
-- Update check: the app tells you when a new build is ready and installs it with one tap (Today screen)
-- "Why this call?" under today's verdict shows the numbers behind Push / Hold / Back off
-- Explanations are folded behind ⓘ so screens are calmer
-- Settings regrouped into sections, with a new Rules section (plan tolerance, streak bands, marathon power)
-- Backup and restore your settings and numbers to a file
-- Crash reports are kept on the phone and can be sent from Settings
+- Today chart: gold dot on the period's peak Fitness, plus average Fitness and Form with a trend arrow
+- Race screen: tap A / B / C race to change a race's priority in intervals.icu (asks first)
+- "Why this call?" load now shows each of the last 3 days by name, straight from intervals.icu
+- Fixed: scrubbing the chart could crash the app
 - 9:00 recovery check (resting HR, HRV, sleep, Form); 16:00 workout reminder only if today's session isn't done
-- Fixed: with no internet, some screens retried downloads in a loop

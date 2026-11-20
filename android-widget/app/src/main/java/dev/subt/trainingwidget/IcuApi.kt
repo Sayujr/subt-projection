@@ -144,6 +144,7 @@ class IcuApi(private val creds: Credentials) {
                 projCtl = p?.first,
                 projAtl = p?.second,
                 distanceM = e.optNum("distance")?.takeIf { it > 0 },
+                eventId = e.optLong("id", 0L).takeIf { it > 0 },
             )
         }
 
@@ -384,6 +385,23 @@ class IcuApi(private val creds: Credentials) {
     }
 
     /** Sets one wellness field for a day in intervals.icu (used to correct an obviously wrong sleep value). */
+    /** Changes a race's priority (RACE_A / RACE_B / RACE_C), only when you confirm it on the Race screen. */
+    fun updateEventCategory(eventId: Long, category: String) {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val conn = Net.open(URL("$BASE/athlete/$ath/events/$eventId"))
+        try {
+            conn.requestMethod = "PUT"; conn.doOutput = true
+            conn.connectTimeout = 15_000; conn.readTimeout = 25_000
+            val token = Base64.encodeToString("API_KEY:${creds.apiKey}".toByteArray(), Base64.NO_WRAP)
+            conn.setRequestProperty("Authorization", "Basic $token")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.outputStream.use { it.write(JSONObject().put("category", category).toString().toByteArray()) }
+            val code = conn.responseCode
+            if (code == 401 || code == 403) throw AuthException()
+            if (code !in 200..299) throw IOException("intervals.icu returned HTTP $code")
+        } finally { conn.disconnect() }
+    }
+
     fun updateWellness(date: String, fields: JSONObject) {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
         val conn = Net.open(URL("$BASE/athlete/$ath/wellness/${URLEncoder.encode(date, "UTF-8")}"))

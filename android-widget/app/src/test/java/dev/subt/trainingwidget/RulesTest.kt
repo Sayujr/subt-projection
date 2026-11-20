@@ -51,6 +51,23 @@ class RulesTest {
         assertEquals("short of plan", 2, Charts.planMark(65, 87, tol))
     }
 
+    // ---- Period trend arrows on the Today chart
+    @Test fun periodTrend() {
+        assertEquals(1, Charts.trend((0..27).map { 50.0 + it * 0.2 }, 1.0))     // +5.4 over 4 weeks → up
+        assertEquals(-1, Charts.trend((0..27).map { 60.0 - it * 0.2 }, 1.0))
+        assertEquals(0, Charts.trend((0..27).map { 55.0 + (it % 2) * 0.5 }, 1.0)) // noise only → flat
+    }
+
+    // ---- Daily load survives the app's cache
+    @Test fun dayLoadRoundTrip() {
+        val t = LocalDate.now().toString()
+        val snap = Snapshot(1L, t, listOf(Day(t, 50.0, 45.0, load = 47.0)), emptyList(),
+            races = listOf(Race(t, "Half", "Run", "RACE_A", distanceM = 21097.0, eventId = 104230892L)))
+        val back = Snapshot.fromJson(snap.toJson())!!
+        assertEquals(47.0, back.days.first().load!!, 1e-9)
+        assertEquals(104230892L, back.races.first().eventId)
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {

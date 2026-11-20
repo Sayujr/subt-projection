@@ -44,6 +44,8 @@ data class Race(
     val projAtl: Double? = null,
     /** Planned race distance in metres, when the event has one. */
     val distanceM: Double? = null,
+    /** intervals.icu calendar event id (to change its priority). */
+    val eventId: Long? = null,
 ) {
     val projForm: Double? get() = if (projCtl != null && projAtl != null) projCtl - projAtl else null
 }
@@ -131,7 +133,7 @@ data class Snapshot(
             races.forEach {
                 put(
                     JSONObject().put("d", it.date).put("n", it.name).put("t", it.type).put("c", it.category)
-                        .putOpt("pc", it.projCtl).putOpt("pa", it.projAtl).putOpt("dm", it.distanceM)
+                        .putOpt("pc", it.projCtl).putOpt("pa", it.projAtl).putOpt("dm", it.distanceM).putOpt("id", it.eventId)
                 )
             }
         })
@@ -201,6 +203,7 @@ data class Snapshot(
                     Race(
                         x.getString("d"), x.getString("n"), x.optString("t"), x.optString("c"),
                         x.optNullableDouble("pc"), x.optNullableDouble("pa"), x.optNullableDouble("dm"),
+                        x.optLong("id", 0L).takeIf { it > 0 },
                     )
                 },
             )
