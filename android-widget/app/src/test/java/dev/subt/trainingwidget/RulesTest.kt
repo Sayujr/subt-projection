@@ -152,8 +152,23 @@ class RulesTest {
     }
 
     // ---- Streaks: steady balanced training passes every week; a week gone fresh fails
-    private fun seedSeries(days: List<Day>) {
-        Prefs.saveSnapshot(ctx, Snapshot(System.currentTimeMillis(), LocalDate.now().toString(), days, emptyList()), days.size)
+    private fun seedSeries(days: List<Day>, races: List<Race> = emptyList()) {
+        Prefs.saveSnapshot(ctx, Snapshot(System.currentTimeMillis(), LocalDate.now().toString(), days, emptyList(), races = races), days.size)
+    }
+
+    @Test fun taperNeverEndsStreaks() {
+        val t = LocalDate.now()
+        // Steady block, then a 10-day B-race taper where Fitness drops well below the race floor
+        val race = Race(t.plusDays(2).toString(), "Half", "Run", "RACE_B")
+        seedSeries((150 downTo 0).map {
+            val d = t.minusDays(it.toLong())
+            val taper = it <= 8
+            Day(d.toString(), if (taper) 50.0 - (9 - it) * 1.5 else 50.0, if (taper) 25.0 else 52.0)
+        }, listOf(race))
+        val s = Streaks.compute(ctx)!!
+        assertTrue("day streak survives the taper: ${s.dayStreak}", s.dayStreak >= 100)
+        assertTrue("taper days are neutral", s.days.takeLast(8).none { it.status == Streaks.Status.RED })
+        assertTrue("no week fails because of the taper", s.weeks.filter { it.kind == "taper / race week" }.none { it.passed == false })
     }
 
     @Test fun steadyWeeksPass() {

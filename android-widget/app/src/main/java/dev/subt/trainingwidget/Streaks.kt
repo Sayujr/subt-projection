@@ -18,7 +18,8 @@ import java.time.temporal.TemporalAdjusters
  * Excluded from the averages (Fitness floor still applies):
  *   • TT mini-tapers: 2 days before a scheduled TT, the TT day and the day after
  *   • race tapers (A 14 · B 10 · C 5 days before), race day and the 3 days after
- * A week that's mostly taper / race is judged only on keeping Fitness above the race floor (0.88 × reference).
+ * Taper and race days (and weeks that are mostly taper / race) aren't judged: they never end a streak
+ * and don't add to it. A Fitness dip below the race floor (0.88 × reference) is noted, not counted.
  *
  * Month passes when: average Form −12…+5, exit Fitness ≥ 97 % of entry (90 % with a race), ≤ 1 failed week.
  */
@@ -173,9 +174,8 @@ object Streaks {
             if (exit == null) return@map WeekResult(mon, ds, null, green, complete, null, null, null, null, null, "no data", emptyList())
             val exitDay = exit.day!!; val ref = exit.ref ?: exitDay.ctl
             if (taperish >= 4) {
-                val ok = withData.none { it.status == Status.TAPER_MISS }
-                if (!ok) reasons += "Fitness dipped below the race floor"
-                return@map WeekResult(mon, ds, ok, green, complete, null, null, exitDay.ctl, exitDay.form, 0.88 * ref, "taper / race week", reasons)
+                if (withData.any { it.status == Status.TAPER_MISS }) reasons += "Fitness dipped below the race floor (noted, not counted)"
+                return@map WeekResult(mon, ds, null, green, complete, null, null, exitDay.ctl, exitDay.form, 0.88 * ref, "taper / race week", reasons)
             }
             val floor = (1 - band) * ref
             val avgForm = normal.mapNotNull { it.day?.form }.takeIf { it.isNotEmpty() }?.average()
@@ -227,12 +227,17 @@ object Streaks {
             MonthResult(m, ws, passed, avgForm, entry, exit, failed, hadRace, onPlan)
         }
         // Day streak (consecutive passing days up to the latest day with data)
-        fun dayPass(r: DayResult) = r.status != Status.RED && r.status != Status.TAPER_MISS
+        // Taper / race / recovery days are neutral: they neither end a day streak nor add to it
+        fun dayPass(r: DayResult): Boolean? = when (r.status) {
+            Status.TAPER_OK, Status.TAPER_MISS, Status.EXEMPT -> null
+            Status.RED -> false
+            else -> true
+        }
         val judgedDays = dayResults.filter { it.status != Status.NONE }
         var dStreak = 0
-        for (r in judgedDays.reversed()) { if (dayPass(r)) dStreak++ else break }
+        for (r in judgedDays.reversed()) { val p = dayPass(r) ?: continue; if (p) dStreak++ else break }
         var bestD = 0; var runD = 0
-        for (r in judgedDays) { if (dayPass(r)) { runD++; bestD = maxOf(bestD, runD) } else runD = 0 }
+        for (r in judgedDays) { when (dayPass(r)) { true -> { runD++; bestD = maxOf(bestD, runD) }; false -> runD = 0; null -> Unit } }
         val dayRuns = runs(judgedDays, { it.date }, { it.date }, { dayPass(it) }, { it.notes.firstOrNull { n -> !n.startsWith("Fatigue") && !n.startsWith("Form outside") } ?: "missed the day rules" })
         val weekRuns = runs(done, { it.monday }, { it.monday.plusDays(6) }, { it.passed }, { it.reasons.joinToString(" · ").ifBlank { "missed" } })
         val monthRuns = runs(months.filter { it.passed != null }, { it.month }, { it.month.plusMonths(1).minusDays(1) }, { it.passed }, { m ->

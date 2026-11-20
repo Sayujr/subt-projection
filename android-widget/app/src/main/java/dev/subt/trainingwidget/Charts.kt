@@ -392,26 +392,26 @@ object Charts {
 
         // Averages + trend, as small tags at the right edge
         val fHist = form.subList(0, split + 1)
+        // Just the period averages in their colours, each with its trend chevron (Fitness above, Form below)
+        @Suppress("UNUSED_PARAMETER")
         fun tag(y: Float, name: String, value: String, valueColor: Int, dir: Int, dirColor: Int) {
-            val lp = labelPaint(density).apply { textSize = 9.5f * density }
-            val vp = labelPaint(density).apply { textSize = 10.5f * density; color = valueColor; isFakeBoldText = true }
-            val wName = lp.measureText(name); val wVal = vp.measureText(value); val wChev = 9f * density
-            val padH = 5f * density
-            val w = padH + wName + 3f * density + wVal + 4f * density + wChev + padH
+            val vp = labelPaint(density).apply { textSize = 11f * density; color = valueColor; isFakeBoldText = true }
+            val wVal = vp.measureText(value); val wChev = 9f * density
+            val padH = 4f * density
+            val w = padH + wVal + 3f * density + wChev + padH
             val right = top.right - 3f * density
-            val rect = RectF(right - w, y - 9.5f * density, right, y + 4f * density)
-            c.drawRoundRect(rect, 4f * density, 4f * density, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(bg, 0xDD) })
-            var x = rect.left + padH
-            c.drawText(name, x, y, lp); x += wName + 3f * density
-            c.drawText(value, x, y, vp); x += wVal + 4f * density
-            chevron(c, x + wChev / 2 - 1f * density, y - 3.5f * density, dir, dirColor, density)
+            val rect = RectF(right - w, y - 10f * density, right, y + 4f * density)
+            c.drawRoundRect(rect, 4f * density, 4f * density, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(bg, 0xCC) })
+            val x = rect.left + padH
+            c.drawText(value, x, y, vp)
+            chevron(c, x + wVal + 3f * density + wChev / 2, y - 3.8f * density, dir, dirColor, density)
         }
         val avgF = hist.average(); val fd = trend(hist, 1.0)
         tag(top.top + 24f * density, "avg Fitness", avgF.roundToInt().toString(), FormColors.FITNESS, fd,
             if (fd > 0) 0xFF3DD68C.toInt() else if (fd < 0) 0xFFFF7A7A.toInt() else LABEL)
         val avgForm = fHist.average(); val md = trend(fHist, 2.0)
         val fz = FormZone.of(avgForm)
-        tag(top.top + 41f * density, "avg Form", (if (avgForm > 0.5) "+" else "") + avgForm.roundToInt(), fz.color, md, fz.color)
+        tag(top.top + 38f * density, "avg Form", (if (avgForm > 0.5) "+" else "") + avgForm.roundToInt(), fz.color, md, fz.color)
     }
 
     /** Which day a touch at [x] (in bitmap pixels) falls on, matching [combined]'s layout. */

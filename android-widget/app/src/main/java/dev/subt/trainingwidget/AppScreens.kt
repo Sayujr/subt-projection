@@ -1362,10 +1362,10 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
     }
 
     private fun statusColor(st: Streaks.Status) = when (st) {
-        Streaks.Status.GREEN, Streaks.Status.TAPER_OK -> GOOD
+        Streaks.Status.GREEN -> GOOD
         Streaks.Status.AMBER -> WARN
-        Streaks.Status.RED, Streaks.Status.TAPER_MISS -> BAD
-        Streaks.Status.EXEMPT -> 0xFF5EC8FF.toInt()
+        Streaks.Status.RED -> BAD
+        Streaks.Status.EXEMPT, Streaks.Status.TAPER_OK, Streaks.Status.TAPER_MISS -> 0xFF5EC8FF.toInt()
         Streaks.Status.MINI -> 0xFF8C9EFF.toInt()
         Streaks.Status.NONE -> 0xFF2C3240.toInt()
     }
@@ -1494,7 +1494,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         text(rules, "• Fitness stays within $band% of your reference peak\n• the 3-day average Form is −15 to +8, so one rest or recovery day is fine\n• TT, taper and race days pass if the floor holds", 13.5f, DIM, top = 2)
         text(rules, spans("Lighter rules:" to TEXT), 14f, bold = true, top = 12)
         text(rules, "• TT / race / CP-test days: any workout or activity whose name contains race, TT, time trial, parkrun, CP or CPT (\"race pace\" doesn't count). The 2 days before, the day itself and the day after are left out of the Form and Fatigue averages, but the Fitness floor still applies\n" +
-            "• Race taper (A 14 · B 10 · C 5 days): judged only on Fitness staying above the race floor. Race day and the 3 days after aren't judged", 13.5f, DIM, top = 2)
+            "• Race taper (A 14 · B 10 · C 5 days), race day and the 3 days after aren't judged: they never end a streak", 13.5f, DIM, top = 2)
         text(rules, spans("Day dots: " to FAINT, "● all build rules  " to GOOD, "● day streak OK  " to WARN, "● day streak broken  " to BAD, "● TT mini-taper  " to 0xFF8C9EFF.toInt(), "● race / taper" to 0xFF5EC8FF.toInt()), 11.5f, top = 10)
     }
 
@@ -1554,7 +1554,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val tw = st.thisWeek ?: return
         text(c, "This week", 14f, TEXT, bold = true, top = 12)
         if (tw.kind == "taper / race week") {
-            bullet(c, 0xFF5EC8FF.toInt(), "Taper / race week: judged only on Fitness staying above the race floor" + (tw.floor?.let { " (${it.roundToInt()})" } ?: "") + ". Form and Fatigue don't count, so rest up.")
+            bullet(c, 0xFF5EC8FF.toInt(), "Taper / race week: not judged, so it can't end your streaks. Rest up.")
             return
         }
         val sunday = tw.monday.plusDays(6).toString()
@@ -1633,7 +1633,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             // Year summary
             val yd = st.days.filter { it.date.year == y && it.status != Streaks.Status.NONE }
             val green = yd.count { it.status == Streaks.Status.GREEN }
-            val dayOk = yd.count { it.status != Streaks.Status.RED && it.status != Streaks.Status.TAPER_MISS }
+            val dayOk = yd.count { it.status != Streaks.Status.RED }
             val wk = st.weeks.filter { it.monday.year == y && it.complete && it.passed != null }
             val bestDay = st.dayRuns.filter { it.start.year == y || it.end.year == y }.maxOfOrNull { it.length } ?: 0
             val bestWeek = st.weekRuns.filter { it.start.year == y || it.end.year == y }.maxOfOrNull { it.length } ?: 0
