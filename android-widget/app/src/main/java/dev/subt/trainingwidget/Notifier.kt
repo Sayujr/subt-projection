@@ -64,9 +64,14 @@ object Notifier {
         val today = LocalDate.now().toString()
         if (s.today != today) return
         val v = Verdict.compute(s, Prefs.rhrOverride(ctx), Prefs.hrvOverride(ctx))
+        // Nothing before 9:00: overnight data (resting HR, HRV, sleep) is often still syncing.
+        // Alerts held back here aren't lost; they go out with the first refresh after 9.
+        val now = LocalTime.now()
+        if (now.hour < 9) return
+        val rhrIn = Prefs.rhrOverride(ctx) != null || s.days.lastOrNull()?.takeIf { it.date == today }?.rhr != null
 
-        // Morning summary (first refresh after 6:00)
-        if (Prefs.notifyMorning(ctx) && LocalTime.now().hour in 6..11 && v != null) {
+        // Morning summary: from 9:00, once today's resting HR is in (or 11:00 at the latest)
+        if (Prefs.notifyMorning(ctx) && now.hour in 9..13 && v != null && (rhrIn || now.hour >= 11)) {
             once(ctx, "morning", today) {
                 val key = s.workouts.filter { it.status != WorkoutStatus.DONE }.maxByOrNull { it.load }
                 val session = key?.let { k -> k.name + (k.steps?.let { " · $it" } ?: "") } ?: "No session planned"

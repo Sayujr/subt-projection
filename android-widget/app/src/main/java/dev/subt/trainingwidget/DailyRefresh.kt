@@ -13,11 +13,11 @@ import java.time.ZoneId
 
 /**
  * Safety net on top of the hourly WorkManager job, so widgets always roll over to the new day:
- * an alarm just after midnight and another early morning redraws the widgets at once and pulls
+ * alarms just after midnight, at 5:30 and at 9:00 (notifications) redraw the widgets at once and pulls
  * fresh data. Re-armed after every alarm, reboot, app update and clock/time-zone change.
  */
 object DailyRefresh {
-    private val TIMES = listOf(LocalTime.of(0, 5), LocalTime.of(5, 30))
+    private val TIMES = listOf(LocalTime.of(0, 5), LocalTime.of(5, 30), LocalTime.of(9, 0))
 
     fun arm(ctx: Context) {
         val now = LocalDateTime.now()

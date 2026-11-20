@@ -4,4 +4,5 @@
 - Settings regrouped into sections, with a new Rules section (plan tolerance, streak bands, marathon power)
 - Backup and restore your settings and numbers to a file
 - Crash reports are kept on the phone and can be sent from Settings
+- Notifications wait until 9:00, and the morning summary waits for today's resting HR
 - Fixed: with no internet, some screens retried downloads in a loop
