@@ -17,11 +17,13 @@ import java.time.ZoneId
  * fresh data. Re-armed after every alarm, reboot, app update and clock/time-zone change.
  */
 object DailyRefresh {
-    private val TIMES = listOf(LocalTime.of(0, 5), LocalTime.of(5, 30), LocalTime.of(9, 0), LocalTime.of(16, 0))
+    private val TIMES = listOf(LocalTime.of(0, 5), LocalTime.of(5, 30), LocalTime.of(9, 0))
 
     fun arm(ctx: Context) {
         val now = LocalDateTime.now()
-        val next = (TIMES.map { LocalDate.now().atTime(it) } + TIMES.map { LocalDate.now().plusDays(1).atTime(it) })
+        // Fixed refreshes plus your notification times (a minute early, so data is fresh when they're due)
+        val times = (TIMES + NotifySettings.wakeTimes(ctx).map { it.minusMinutes(1) }).distinct()
+        val next = (times.map { LocalDate.now().atTime(it) } + times.map { LocalDate.now().plusDays(1).atTime(it) })
             .filter { it.isAfter(now) }.minOrNull() ?: return
         val at = next.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val pi = PendingIntent.getBroadcast(
@@ -29,8 +31,10 @@ object DailyRefresh {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val am = ctx.getSystemService(AlarmManager::class.java) ?: return
-        // Inexact but allowed while the phone is dozing; needs no special permission
-        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+        // On time when Android allows exact alarms; otherwise as close as it lets us while dozing
+        val exact = android.os.Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()
+        if (exact) runCatching { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) }.onFailure { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) }
+        else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
     }
 
     /** Called from the app, widgets and receiver: hourly job + daily alarms are in place. */

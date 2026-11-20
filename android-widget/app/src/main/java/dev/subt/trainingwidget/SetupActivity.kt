@@ -41,18 +41,7 @@ class SetupActivity : Activity() {
         val styleGroup = findViewById<RadioGroup>(R.id.style_group)
         val periodGroup = findViewById<RadioGroup>(R.id.period_group)
 
-        findViewById<android.widget.CheckBox>(R.id.notify_morning).apply {
-            isChecked = Prefs.notifyMorning(this@SetupActivity)
-            setOnCheckedChangeListener { _, on -> Prefs.setNotifyMorning(this@SetupActivity, on) }
-        }
-        findViewById<android.widget.CheckBox>(R.id.notify_workout).apply {
-            isChecked = Prefs.notifyWorkout(this@SetupActivity)
-            setOnCheckedChangeListener { _, on -> Prefs.setNotifyWorkout(this@SetupActivity, on) }
-        }
-        findViewById<android.widget.CheckBox>(R.id.notify_alerts).apply {
-            isChecked = Prefs.notifyAlerts(this@SetupActivity)
-            setOnCheckedChangeListener { _, on -> Prefs.setNotifyAlerts(this@SetupActivity, on) }
-        }
+        buildNotifyRows()
         // Your numbers: show entered values, with the automatic value as the hint
         fun tm(sec: Double) = SubtModel.time(sec)
         val autoPb = Prefs.pbs(this)
@@ -270,6 +259,56 @@ class SetupActivity : Activity() {
     }
 
     private fun note(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7386.toInt()); textSize = 12f; setPadding(0, (6 * resources.displayMetrics.density).toInt(), 0, 0) }
+
+    /** One row per notification category: switch, what it is, and its time (tap to change). */
+    private fun buildNotifyRows() {
+        val box = findViewById<android.widget.LinearLayout>(R.id.notify_rows)
+        box.removeAllViews()
+        val d = resources.displayMetrics.density
+        val N = NotifySettings
+        fun timeChip(min: Int, onPick: (Int) -> Unit) = TextView(this).apply {
+            text = N.fmt(min); textSize = 14f; setTextColor(0xFF4EA1FF.toInt())
+            setBackgroundResource(R.drawable.chip_off); gravity = android.view.Gravity.CENTER
+            setPadding((12 * d).toInt(), (6 * d).toInt(), (12 * d).toInt(), (6 * d).toInt())
+            setOnClickListener {
+                android.app.TimePickerDialog(this@SetupActivity, { _, h, m -> onPick(h * 60 + m); DailyRefresh.ensure(this@SetupActivity); buildNotifyRows() },
+                    min / 60, min % 60, true).show()
+            }
+        }
+        fun row(title: String, help: String, checked: Boolean, onToggle: (Boolean) -> Unit, time: Int?, onTime: ((Int) -> Unit)?) {
+            val r = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, (8 * d).toInt(), 0, (2 * d).toInt())
+            }
+            val sw = android.widget.CheckBox(this).apply { isChecked = checked; setOnCheckedChangeListener { _, on -> onToggle(on); DailyRefresh.ensure(this@SetupActivity) } }
+            val txt = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+            txt.addView(TextView(this).apply { text = title; setTextColor(0xFFF2F4F8.toInt()); textSize = 15f })
+            txt.addView(TextView(this).apply { text = help; setTextColor(0xFF6B7386.toInt()); textSize = 12f })
+            r.addView(sw); r.addView(txt, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (time != null && onTime != null) r.addView(timeChip(time, onTime))
+            box.addView(r)
+        }
+        fun header(t: String) = box.addView(TextView(this).apply {
+            text = t.uppercase(); setTextColor(0xFF9AA3B2.toInt()); textSize = 11f; letterSpacing = 0.08f
+            setPadding(0, (14 * d).toInt(), 0, 0)
+        })
+        header("Workout")
+        for (k in listOf("workout", "reminder")) { val c = N.cat(k); row(c.label, c.help, N.isOn(this, c), { N.setOn(this, c, it) }, N.time(this, c)) { N.setTime(this, c, it) } }
+        header("Recovery")
+        for (k in listOf("recovery", "rhr")) { val c = N.cat(k); row(c.label, c.help, N.isOn(this, c), { N.setOn(this, c, it) }, if (c.defaultTime != null) N.time(this, c) else null, if (c.defaultTime != null) ({ v: Int -> N.setTime(this, c, v) }) else null) }
+        row("Pause near races", "No recovery notifications from 2 days before a race through race day", N.pauseNearRace(this), { N.setPauseNearRace(this, it) }, null, null)
+        header("Alerts")
+        row("Alerts not before", "Alerts that come up earlier wait until this time", true, {}, N.alertsFrom(this)) { N.setAlertsFrom(this, it) }
+        (box.getChildAt(box.childCount - 1) as android.widget.LinearLayout).getChildAt(0).visibility = View.INVISIBLE
+        for (k in listOf("deviations", "eftp", "taper", "streak", "update")) { val c = N.cat(k); row(c.label, c.help, N.isOn(this, c), { N.setOn(this, c, it) }, null, null) }
+        if (android.os.Build.VERSION.SDK_INT >= 31 && getSystemService(android.app.AlarmManager::class.java)?.canScheduleExactAlarms() == false) {
+            box.addView(TextView(this).apply {
+                text = "⚠ Android may deliver these a few minutes late. Tap to allow exact times."
+                setTextColor(0xFFFFC53D.toInt()); textSize = 13f; setPadding(0, (10 * d).toInt(), 0, 0)
+                setOnClickListener { runCatching { startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:$packageName"))) } }
+            })
+        }
+    }
 
     /** Version, what's new, check for updates, and one-tap download → install (Android confirms). */
     private fun updateViews(): List<View> {

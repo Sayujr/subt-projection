@@ -99,7 +99,7 @@ class ScreensTest {
             val labels = (0 until chips.childCount).mapNotNull { (chips.getChildAt(it) as? TextView)?.text?.toString() }
                 .filter { it !in setOf("‹", "›", "Now", "Custom…") && !it.endsWith("…") }
             for ((i, label) in labels.withIndex()) {
-                if (i == 0 && t != "WEEK") continue
+                if (i == 0 && t != "WEEK" && t != "HOME") continue
                 if (t == "HOME" && i > 1) break
                 safely("app_${t}_$label") {
                     val cg = act.findViewById<ViewGroup>(R.id.chips)

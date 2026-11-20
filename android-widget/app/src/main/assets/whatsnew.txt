@@ -1,6 +1,7 @@
 - App updates live in Settings → App updates: check for updates, see what's new, download and install
-- Today chart: gold dot on the period's peak Fitness, plus average Fitness and Form with a trend arrow
+- Today chart: gold dot on the period's peak Fitness with its date on the axis, plus average Fitness and Form with a trend arrow
+- This week / 2 weeks charts show every day's date
+- Notifications: each type has its own switch and time (today's workout 04:00, recovery check 09:00, alerts not before 09:00); recovery ones pause from 2 days before a race
 - Race screen: tap A / B / C race to change a race's priority in intervals.icu (asks first)
 - "Why this call?" load now shows each of the last 3 days by name, straight from intervals.icu
 - Fixed: scrubbing the chart could crash the app
-- 9:00 recovery check (resting HR, HRV, sleep, Form); 16:00 workout reminder only if today's session isn't done

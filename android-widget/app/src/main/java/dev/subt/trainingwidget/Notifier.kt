@@ -18,7 +18,7 @@ object Notifier {
 
     private fun channels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(DAILY, "Daily check-ins", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(DAILY, "Workout and recovery", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(ALERTS, "Training alerts", NotificationManager.IMPORTANCE_DEFAULT))
     }
 
@@ -48,6 +48,7 @@ object Notifier {
 
     /** "Update ready" once per new build (shown even with alerts off: it's how you get fixes). */
     fun updateReady(ctx: Context) {
+        if (!NotifySettings.isOn(ctx, NotifySettings.cat("update"))) return
         val l = Updater.available(ctx) ?: return
         once(ctx, "update", l.code.toString()) {
             post(ctx, ALERTS, 40, "Training Today ${l.name} is ready",
@@ -65,48 +66,60 @@ object Notifier {
         val s = Prefs.snapshot(ctx) ?: return
         val today = LocalDate.now().toString()
         if (s.today != today) return
-        val v = Verdict.compute(s, Prefs.rhrOverride(ctx), Prefs.hrvOverride(ctx))
-        // Nothing before 9:00: overnight data (resting HR, HRV, sleep) is often still syncing.
-        // Alerts held back here aren't lost; they go out with the first refresh after 9.
+        val N = NotifySettings
         val now = LocalTime.now()
-        if (now.hour < 9) return
+        fun on(key: String) = N.isOn(ctx, N.cat(key))
+        fun at(key: String) = N.time(ctx, N.cat(key))
+        // Recovery-type notifications pause from 2 days before a race through race day
+        val pausedFor = if (N.pauseNearRace(ctx)) N.pausingRace(LocalDate.now(), s.races) else null
+        val v = Verdict.compute(s, Prefs.rhrOverride(ctx), Prefs.hrvOverride(ctx))
         val rhrIn = Prefs.rhrOverride(ctx) != null || s.days.lastOrNull()?.takeIf { it.date == today }?.rhr != null
 
-        // 9:00 recovery check: today's call from resting HR, HRV, sleep and Form
-        // (waits for today's resting HR, or 11:00 at the latest)
-        if (Prefs.notifyMorning(ctx) && now.hour in 9..13 && v != null && (rhrIn || now.hour >= 11)) {
+        // Today's workout (default 04:00)
+        if (on("workout") && N.inWindow(now, at("workout"), 8)) {
+            val todo = s.workouts.filter { it.status != WorkoutStatus.DONE }
+            if (todo.isNotEmpty()) once(ctx, "workout_am", today) {
+                val k = todo.maxByOrNull { it.load }!!
+                val more = if (todo.size > 1) " (+${todo.size - 1} more)" else ""
+                post(ctx, DAILY, 8, "Today: ${k.name}$more", listOfNotNull(k.steps, WidgetRenderer.meta(k).takeIf { it.isNotBlank() }).joinToString("\n").ifEmpty { "Planned for today" }, "HOME")
+            }
+        }
+        // Workout not done yet (off by default)
+        if (on("reminder") && N.inWindow(now, at("reminder"), 5)) {
+            val waiting = s.workouts.filter { it.status != WorkoutStatus.DONE }
+            if (waiting.isNotEmpty() && s.workouts.none { it.status == WorkoutStatus.DONE && it.type == waiting.first().type }) once(ctx, "workout", today) {
+                val k = waiting.maxByOrNull { it.load }!!
+                post(ctx, DAILY, 7, "Workout waiting: ${k.name}", listOfNotNull(k.steps, WidgetRenderer.meta(k).takeIf { it.isNotBlank() }).joinToString("\n").ifEmpty { "Planned for today" }, "HOME")
+            }
+        }
+        // Recovery check (default 09:00): waits up to 2 h for today's resting HR
+        if (on("recovery") && pausedFor == null && v != null && N.inWindow(now, at("recovery"), 5) &&
+            (rhrIn || !N.inWindow(now, at("recovery"), 2))) {
             once(ctx, "morning", today) {
                 post(ctx, DAILY, 1, "${v.call.label}: ${v.headline}", v.reasons.joinToString("\n") { "• ${it.second}" }, "HOME")
             }
         }
-        // 16:00 workout reminder: only if today's planned session isn't done yet
-        if (Prefs.notifyWorkout(ctx) && now.hour in 16..20) {
-            val waiting = s.workouts.filter { it.status != WorkoutStatus.DONE }
-            if (waiting.isNotEmpty() && s.workouts.none { it.status == WorkoutStatus.DONE && it.type == waiting.first().type }) once(ctx, "workout", today) {
-                val k = waiting.maxByOrNull { it.load }!!
-                val more = if (waiting.size > 1) " (+${waiting.size - 1} more)" else ""
-                post(ctx, DAILY, 7, "Workout waiting: ${k.name}$more", listOfNotNull(k.steps, WidgetRenderer.meta(k).takeIf { it.isNotBlank() }).joinToString("\n").ifEmpty { "Planned for today" }, "HOME")
-            }
-        }
-        if (!Prefs.notifyAlerts(ctx)) return
+
+        // Alerts: not before the "alerts from" time
+        if ((now.hour * 60 + now.minute) < N.alertsFrom(ctx)) return
 
         // Your numbers vs intervals.icu (once each time the set of differences changes)
         val dev = Deviations.compute(ctx)
-        if (dev.isNotEmpty()) once(ctx, "deviations", dev.joinToString("|").hashCode().toString()) {
+        if (on("deviations") && dev.isNotEmpty()) once(ctx, "deviations", dev.joinToString("|").hashCode().toString()) {
             post(ctx, ALERTS, 6, "Your numbers differ from intervals.icu", dev.joinToString("\n") + "\nThe app uses yours. Update intervals.icu if it should match.", "HOME")
         }
 
         // Resting HR spike
         val rhr = s.days.mapNotNull { it.rhr }
         val last = Prefs.rhrOverride(ctx) ?: s.days.last().rhr
-        if (last != null && rhr.size >= 10) {
+        if (on("rhr") && pausedFor == null && last != null && rhr.size >= 10) {
             val base = rhr.dropLast(1).takeLast(42).average()
             if (last - base >= 5) once(ctx, "rhr", today) {
                 post(ctx, ALERTS, 2, "Resting HR is up ${(last - base).roundToInt()} bpm", "Resting HR ${last.roundToInt()} vs your normal ${base.roundToInt()}. Consider an easy day and check sleep, hydration and illness.", "RECOVERY")
             }
         }
         // New CP high
-        PowerModel.now(ctx)?.let { p ->
+        if (on("eftp")) PowerModel.now(ctx)?.let { p ->
             val e = p.eftp ?: return@let
             val prevMax = s.runs.dropLast(1).mapNotNull { it.cp }.maxOrNull()
             if (prevMax != null && e >= prevMax + 2) once(ctx, "cp", e.roundToInt().toString()) {
@@ -114,7 +127,7 @@ object Notifier {
             }
         }
         // Taper drifting off target (race within 7 days)
-        s.races.firstOrNull { it.date >= today }?.let { r ->
+        if (on("taper")) s.races.firstOrNull { it.date >= today }?.let { r ->
             val rd = LocalDate.parse(r.date)
             if (java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), rd) in 1..7) {
                 val series = (s.days + s.proj).distinctBy { it.date }.sortedBy { it.date }
@@ -126,7 +139,7 @@ object Notifier {
             }
         }
         // Weekly streak result (sent once each Monday)
-        if (LocalDate.now().dayOfWeek == java.time.DayOfWeek.MONDAY) {
+        if (on("streak") && LocalDate.now().dayOfWeek == java.time.DayOfWeek.MONDAY) {
             Streaks.compute(ctx)?.let { st ->
                 val lastWeek = st.weeks.lastOrNull { it.complete } ?: return@let
                 once(ctx, "week", lastWeek.monday.toString()) {

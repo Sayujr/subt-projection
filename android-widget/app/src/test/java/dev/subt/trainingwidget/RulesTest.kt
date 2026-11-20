@@ -68,6 +68,20 @@ class RulesTest {
         assertEquals(104230892L, back.races.first().eventId)
     }
 
+    // ---- Notifications: time windows and the pre-race pause
+    @Test fun notifyRules() {
+        val t = java.time.LocalTime.of(4, 0)
+        assertTrue(NotifySettings.inWindow(t, 4 * 60))
+        assertFalse(NotifySettings.inWindow(java.time.LocalTime.of(3, 59), 4 * 60))
+        assertFalse(NotifySettings.inWindow(java.time.LocalTime.of(10, 0), 4 * 60, 6))
+        val today = LocalDate.of(2026, 11, 19)
+        val race = Race("2026-11-21", "Half", "Run", "RACE_A")
+        assertNotNull("2 days before pauses", NotifySettings.pausingRace(today, listOf(race)))
+        assertNotNull("race day pauses", NotifySettings.pausingRace(today.plusDays(2), listOf(race)))
+        assertNull("3 days before doesn't", NotifySettings.pausingRace(today.minusDays(1), listOf(race)))
+        assertNull("day after doesn't", NotifySettings.pausingRace(today.plusDays(3), listOf(race)))
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {

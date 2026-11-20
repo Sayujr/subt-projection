@@ -81,6 +81,7 @@
 
         <CheckBox
             android:id="@+id/notify_morning"
+            android:visibility="gone"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="9:00 recovery check: today's call from resting HR, HRV, sleep and Form"
@@ -88,6 +89,7 @@
 
         <CheckBox
             android:id="@+id/notify_workout"
+            android:visibility="gone"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="16:00 workout reminder, if today's session isn't done yet"
@@ -95,10 +97,17 @@
 
         <CheckBox
             android:id="@+id/notify_alerts"
+            android:visibility="gone"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Alerts (from 9:00): resting-HR spike, new eFTP high, taper off target, weekly streak"
             android:textColor="@color/text" />
+
+        <LinearLayout
+            android:id="@+id/notify_rows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
 
         <TextView
             android:id="@+id/battery_status"

@@ -213,14 +213,19 @@ object Charts {
     private fun drawGrid(c: Canvas, f: Frame, days: List<Day>, chartBottom: Float, h: Int, w: Int, density: Float, labels: Boolean) {
         val grid = Paint().apply { color = GRID; strokeWidth = 1f }
         val text = labelPaint(density)
-        val step = gridStep(days.size)
+        // Short ranges (This week, 2 weeks): a line and a weekday + date label for every day
+        val daily = days.size <= 16
+        val step = if (daily) 1 else gridStep(days.size)
         var lastLeft = Float.MAX_VALUE
-        var i = days.lastIndex - step
-        while (i > 0) {
+        var i = if (daily) days.lastIndex else days.lastIndex - step
+        val first = if (daily) 0 else 1
+        val wd = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
+        while (i >= first) {
             val x = f.x(i)
-            c.drawLine(x, 0f, x, chartBottom, grid)
+            if (!daily || (i in 1 until days.lastIndex)) c.drawLine(x, 0f, x, chartBottom, grid)
             if (labels) {
-                val label = shortDate(days[i].date)
+                val label = if (daily) runCatching { LocalDate.parse(days[i].date).let { d -> d.format(wd).take(2) + " " + d.dayOfMonth } }.getOrDefault(days[i].date)
+                    else shortDate(days[i].date)
                 val tw = text.measureText(label)
                 val left = x - tw / 2
                 // walking right-to-left: skip labels that would collide with the previous one or the edges
@@ -313,7 +318,7 @@ object Charts {
             }
         }
 
-        if (labels && split >= 9) periodStats(c, ft, top, bottom, ctl, form, split, density, bg)
+        if (labels && split >= 9) periodStats(c, ft, top, bottom, ctl, form, split, density, bg, days, chartH, h)
 
         if (highlight != null && highlight in days.indices) {
             val x = ft.x(highlight)
@@ -355,7 +360,10 @@ object Charts {
      * Period extras for the multi-week views: a gold dot on the period's peak Fitness, and small
      * "avg" tags at the right with a stemless trend chevron for Fitness and Form (history only).
      */
-    private fun periodStats(c: Canvas, ft: Frame, top: RectF, @Suppress("UNUSED_PARAMETER") bottom: RectF, ctl: List<Double>, form: List<Double>, split: Int, density: Float, bg: Int) {
+    private fun periodStats(
+        c: Canvas, ft: Frame, top: RectF, @Suppress("UNUSED_PARAMETER") bottom: RectF, ctl: List<Double>, form: List<Double>, split: Int,
+        density: Float, bg: Int, days: List<Day>, chartBottom: Float, h: Int,
+    ) {
         val gold = 0xFFFFC53D.toInt()
         val hist = ctl.subList(0, split + 1)
         val pi = hist.indices.maxByOrNull { hist[it] } ?: return
@@ -364,6 +372,19 @@ object Charts {
         val ptxt = "peak ${hist[pi].roundToInt()}"
         val tx = (px - pt.measureText(ptxt) / 2).coerceIn(top.left + 2f * density, top.right - pt.measureText(ptxt) - 2f * density)
         c.drawText(ptxt, tx, (py - 7f * density).coerceAtLeast(top.top + 9f * density), pt)
+        // Dotted gold drop line to the date axis, and the peak's date there in gold
+        val drop = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = withAlpha(gold, 0xB0); strokeWidth = 1.2f * density; style = Paint.Style.STROKE
+            pathEffect = DashPathEffect(floatArrayOf(2f * density, 3f * density), 0f)
+        }
+        c.drawLine(px, py + 4f * density, px, chartBottom, drop)
+        val dl = labelPaint(density).apply { color = gold; isFakeBoldText = true }
+        val dtxt = shortDate(days[pi].date)
+        val dw = dl.measureText(dtxt)
+        val dx = (px - dw / 2).coerceIn(top.left, top.right - dw)
+        // cover any regular date label underneath, then write the peak date
+        c.drawRect(dx - 3f * density, chartBottom + 0.5f * density, dx + dw + 3f * density, h.toFloat(), Paint().apply { color = bg })
+        c.drawText(dtxt, dx, h - 2f * density, dl)
         val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bg }
         c.drawCircle(px, py, 4.6f * density, ring)
         ring.color = gold
