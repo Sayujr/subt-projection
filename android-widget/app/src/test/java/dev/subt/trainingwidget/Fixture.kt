@@ -68,8 +68,8 @@ object Fixture {
             workouts = wk.filter { it.date == today.toString() }.ifEmpty { listOf(wk[4].copy(date = today.toString())) },
             week = wk, lastWeekLoad = 290,
             races = listOf(
-                Race(today.plusDays(10).toString(), "Parkrun 5K", "Run", "RACE_C", distanceM = 5000.0),
-                Race(today.plusDays(120).toString(), "Spring Marathon", "Run", "RACE_A", days.last().ctl + 12, days.last().ctl - 2, 42195.0),
+                Race(today.plusDays(10).toString(), "Parkrun 5K", "Run", "RACE_C", distanceM = 5000.0, eventId = 11L),
+                Race(today.plusDays(120).toString(), "Spring Marathon", "Run", "RACE_A", days.last().ctl + 12, days.last().ctl - 2, 42195.0, eventId = 12L),
             ),
             proj = proj, runs = runs, weight = 81.2, runFtp = 351.0, curveCp = 345.0,
         )
