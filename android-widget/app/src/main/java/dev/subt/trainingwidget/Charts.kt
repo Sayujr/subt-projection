@@ -210,7 +210,7 @@ object Charts {
     }
 
     /** Vertical grid lines counting back from today; dates along the bottom when [labels]. */
-    private fun drawGrid(c: Canvas, f: Frame, days: List<Day>, chartBottom: Float, h: Int, w: Int, density: Float, labels: Boolean) {
+    private fun drawGrid(c: Canvas, f: Frame, days: List<Day>, chartBottom: Float, h: Int, w: Int, density: Float, labels: Boolean, avoid: ClosedFloatingPointRange<Float>? = null) {
         val grid = Paint().apply { color = GRID; strokeWidth = 1f }
         val text = labelPaint(density)
         // Short ranges (This week, 2 weeks): a line and a weekday + date label for every day
@@ -229,7 +229,8 @@ object Charts {
                 val tw = text.measureText(label)
                 val left = x - tw / 2
                 // walking right-to-left: skip labels that would collide with the previous one or the edges
-                if (left > 0 && x + tw / 2 < w && x + tw / 2 + 4f * density < lastLeft) {
+                val clash = avoid != null && left < avoid.endInclusive && left + tw > avoid.start
+                if (!clash && left > 0 && x + tw / 2 < w && x + tw / 2 + 4f * density < lastLeft) {
                     c.drawText(label, left, h - 2f * density, text)
                     lastLeft = left
                 }
@@ -303,7 +304,14 @@ object Charts {
         val atl = days.map { it.atl }
         val ft = Frame(top, days.size, 4f * density, min(ctl.min(), atl.min()), max(ctl.max(), atl.max()))
         if (labels) drawValueGrid(c, ft, top, density)
-        drawGrid(c, ft, days, chartH, h, w, density, labels)
+        // Keep regular date labels clear of the gold peak date
+        val peakAvoid = if (labels && split >= 9) {
+            val pi = (0..split).maxByOrNull { ctl[it] }!!
+            val dw = labelPaint(density).apply { isFakeBoldText = true }.measureText(shortDate(days[pi].date))
+            val dx = (ft.x(pi) - dw / 2).coerceIn(top.left, top.right - dw)
+            (dx - 4f * density)..(dx + dw + 4f * density)
+        } else null
+        drawGrid(c, ft, days, chartH, h, w, density, labels, peakAvoid)
         drawFitFat(c, top, days, density, bg, labels = false, split = split)
         val fb = drawForm(c, bottom, form, density, bg, labels, split)
         if (split < days.lastIndex) {
@@ -382,8 +390,6 @@ object Charts {
         val dtxt = shortDate(days[pi].date)
         val dw = dl.measureText(dtxt)
         val dx = (px - dw / 2).coerceIn(top.left, top.right - dw)
-        // cover any regular date label underneath, then write the peak date
-        c.drawRect(dx - 3f * density, chartBottom + 0.5f * density, dx + dw + 3f * density, h.toFloat(), Paint().apply { color = bg })
         c.drawText(dtxt, dx, h - 2f * density, dl)
         val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bg }
         c.drawCircle(px, py, 4.6f * density, ring)
