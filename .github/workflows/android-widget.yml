@@ -35,6 +35,12 @@ jobs:
           # keep the dependency cache on this branch too (fewer Maven Central downloads / 429s)
           cache-read-only: false
 
+      # Robolectric's Android jars (downloaded from Maven Central on first use): keep them between builds
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-android-all-34-v1
+
       - name: Use the private signing key from secrets
         env:
           KS: ${{ secrets.SIGNING_KEYSTORE_B64 }}
@@ -73,7 +79,8 @@ jobs:
         timeout-minutes: 15
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon testReleaseUnitTest --tests 'dev.subt.trainingwidget.RulesTest'
+          # one retry if Maven Central rate-limits the first download (HTTP 429)
+          ./gradlew --no-daemon testReleaseUnitTest --tests 'dev.subt.trainingwidget.RulesTest' || { sleep 45; ./gradlew --no-daemon testReleaseUnitTest --tests 'dev.subt.trainingwidget.RulesTest'; }
 
       # Every screen and widget rendered from sample data to PNGs (never blocks the build)
       - name: Render screens
