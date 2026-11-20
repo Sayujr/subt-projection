@@ -45,6 +45,10 @@ class SetupActivity : Activity() {
             isChecked = Prefs.notifyMorning(this@SetupActivity)
             setOnCheckedChangeListener { _, on -> Prefs.setNotifyMorning(this@SetupActivity, on) }
         }
+        findViewById<android.widget.CheckBox>(R.id.notify_workout).apply {
+            isChecked = Prefs.notifyWorkout(this@SetupActivity)
+            setOnCheckedChangeListener { _, on -> Prefs.setNotifyWorkout(this@SetupActivity, on) }
+        }
         findViewById<android.widget.CheckBox>(R.id.notify_alerts).apply {
             isChecked = Prefs.notifyAlerts(this@SetupActivity)
             setOnCheckedChangeListener { _, on -> Prefs.setNotifyAlerts(this@SetupActivity, on) }

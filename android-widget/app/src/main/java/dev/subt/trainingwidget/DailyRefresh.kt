@@ -17,7 +17,7 @@ import java.time.ZoneId
  * fresh data. Re-armed after every alarm, reboot, app update and clock/time-zone change.
  */
 object DailyRefresh {
-    private val TIMES = listOf(LocalTime.of(0, 5), LocalTime.of(5, 30), LocalTime.of(9, 0))
+    private val TIMES = listOf(LocalTime.of(0, 5), LocalTime.of(5, 30), LocalTime.of(9, 0), LocalTime.of(16, 0))
 
     fun arm(ctx: Context) {
         val now = LocalDateTime.now()

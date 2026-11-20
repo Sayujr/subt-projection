@@ -83,14 +83,21 @@
             android:id="@+id/notify_morning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Morning summary: verdict, key session, streak"
+            android:text="9:00 recovery check: today's call from resting HR, HRV, sleep and Form"
+            android:textColor="@color/text" />
+
+        <CheckBox
+            android:id="@+id/notify_workout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="16:00 workout reminder, if today's session isn't done yet"
             android:textColor="@color/text" />
 
         <CheckBox
             android:id="@+id/notify_alerts"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Alerts: resting-HR spike, new CP, taper off target, weekly streak"
+            android:text="Alerts (from 9:00): resting-HR spike, new eFTP high, taper off target, weekly streak"
             android:textColor="@color/text" />
 
         <TextView

@@ -11,14 +11,14 @@ import java.time.LocalDate
 import java.time.LocalTime
 import kotlin.math.roundToInt
 
-/** Morning summary + a few alerts; each goes out at most once per day (or per new value). */
+/** 9:00 recovery check, 16:00 workout reminder, and a few alerts; each goes out at most once per day (or per new value). */
 object Notifier {
     private const val DAILY = "daily"
     private const val ALERTS = "alerts"
 
     private fun channels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(DAILY, "Morning summary", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(DAILY, "Daily check-ins", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(ALERTS, "Training alerts", NotificationManager.IMPORTANCE_DEFAULT))
     }
 
@@ -70,14 +70,20 @@ object Notifier {
         if (now.hour < 9) return
         val rhrIn = Prefs.rhrOverride(ctx) != null || s.days.lastOrNull()?.takeIf { it.date == today }?.rhr != null
 
-        // Morning summary: from 9:00, once today's resting HR is in (or 11:00 at the latest)
+        // 9:00 recovery check: today's call from resting HR, HRV, sleep and Form
+        // (waits for today's resting HR, or 11:00 at the latest)
         if (Prefs.notifyMorning(ctx) && now.hour in 9..13 && v != null && (rhrIn || now.hour >= 11)) {
             once(ctx, "morning", today) {
-                val key = s.workouts.filter { it.status != WorkoutStatus.DONE }.maxByOrNull { it.load }
-                val session = key?.let { k -> k.name + (k.steps?.let { " · $it" } ?: "") } ?: "No session planned"
-                val st = Streaks.compute(ctx)
-                val streak = st?.let { " · streak ${it.dayStreak} d / ${it.weekStreak} wk" } ?: ""
-                post(ctx, DAILY, 1, "${v.call.label}: ${v.headline}", "$session\n${v.reasons.take(3).joinToString(" · ") { it.second }}$streak", "HOME")
+                post(ctx, DAILY, 1, "${v.call.label}: ${v.headline}", v.reasons.joinToString("\n") { "• ${it.second}" }, "HOME")
+            }
+        }
+        // 16:00 workout reminder: only if today's planned session isn't done yet
+        if (Prefs.notifyWorkout(ctx) && now.hour in 16..20) {
+            val waiting = s.workouts.filter { it.status != WorkoutStatus.DONE }
+            if (waiting.isNotEmpty() && s.workouts.none { it.status == WorkoutStatus.DONE && it.type == waiting.first().type }) once(ctx, "workout", today) {
+                val k = waiting.maxByOrNull { it.load }!!
+                val more = if (waiting.size > 1) " (+${waiting.size - 1} more)" else ""
+                post(ctx, DAILY, 7, "Workout waiting: ${k.name}$more", listOfNotNull(k.steps, WidgetRenderer.meta(k).takeIf { it.isNotBlank() }).joinToString("\n").ifEmpty { "Planned for today" }, "HOME")
             }
         }
         if (!Prefs.notifyAlerts(ctx)) return

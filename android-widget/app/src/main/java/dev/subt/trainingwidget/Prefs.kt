@@ -102,6 +102,8 @@ object Prefs {
     // ---- notifications
     fun notifyMorning(ctx: Context): Boolean = sp(ctx).getBoolean("notify_morning", true)
     fun setNotifyMorning(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("notify_morning", on).apply()
+    fun notifyWorkout(ctx: Context): Boolean = sp(ctx).getBoolean("notify_workout", true)
+    fun setNotifyWorkout(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("notify_workout", on).apply()
     fun notifyAlerts(ctx: Context): Boolean = sp(ctx).getBoolean("notify_alerts", true)
     fun setNotifyAlerts(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("notify_alerts", on).apply()
     /** Remembers which notification was last sent, so each goes out at most once per day / value. */
