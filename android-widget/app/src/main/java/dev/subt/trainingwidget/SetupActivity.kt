@@ -235,9 +235,6 @@ class SetupActivity : Activity() {
             root.addView(head); root.addView(body)
             root.addView(View(this).apply { setBackgroundColor(0xFF2C3240.toInt()) }, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
         }
-        val upd = Updater.available(this)
-        section("update", "App updates", if (upd != null) "⚠ ${upd.name} ready to install (you have ${Updater.currentName(this)})" else "Version ${Updater.currentName(this)}",
-            upd != null || intent?.getStringExtra(EXTRA_OPEN) == "update", updateViews())
         val dev = Deviations.compute(this).size
         section("acc", "Account", if (hasCreds) "Connected to intervals.icu" else "Not connected yet", !hasCreds, groups["acc"]!!)
         section("num", "Your numbers", if (dev > 0) "$dev differ from intervals.icu" else "Weight, CP, RHR, HRV, SubT, PBs", !widgetMode, groups["num"]!!)
@@ -248,6 +245,9 @@ class SetupActivity : Activity() {
         val crashes = CrashLog.count(this)
         section("crash", "Crash reports", if (crashes == 0) "No crashes recorded" else "⚠ $crashes recorded, last ${CrashLog.lastTime(this)}", false, crashViews())
         section("not", "Notifications & refresh", if (batteryOk) "Background refresh allowed" else "⚠ Battery saving may block refresh", !batteryOk, groups["not"]!!)
+        val upd = Updater.available(this)
+        section("update", "App updates", if (upd != null) "⚠ ${upd.name} ready to install (you have ${Updater.currentName(this)})" else "Version ${Updater.currentName(this)}",
+            upd != null || intent?.getStringExtra(EXTRA_OPEN) == "update", updateViews())
         tail.forEach { root.addView(it) }
     }
 
