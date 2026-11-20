@@ -166,7 +166,9 @@ class RulesTest {
             Day(d.toString(), if (taper) 50.0 - (9 - it) * 1.5 else 50.0, if (taper) 25.0 else 52.0)
         }, listOf(race))
         val s = Streaks.compute(ctx)!!
-        assertTrue("day streak survives the taper: ${s.dayStreak}", s.dayStreak >= 100)
+        // ~91 judged days, 9 of them taper (neutral): the streak runs unbroken through the taper
+        assertTrue("day streak survives the taper: ${s.dayStreak}", s.dayStreak >= 80)
+        assertEquals("never broken", s.bestDayStreak, s.dayStreak)
         assertTrue("taper days are neutral", s.days.takeLast(8).none { it.status == Streaks.Status.RED })
         assertTrue("no week fails because of the taper", s.weeks.filter { it.kind == "taper / race week" }.none { it.passed == false })
     }
