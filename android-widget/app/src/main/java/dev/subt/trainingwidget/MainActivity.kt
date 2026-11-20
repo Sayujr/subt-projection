@@ -684,6 +684,12 @@ class MainActivity : Activity() {
                     sv.addView(col)
                     val cardH = minOf(hDp, 340)
                     applyInto(col, ExtraWidgets.buildSubt(this, wDp, cardH, inApp = true), dp(cardH))
+                    // SubT pace chart: touch and drag to read each month
+                    col.getChildAt(col.childCount - 1)?.findViewById<android.widget.ImageView>(R.id.subt_chart)?.let { iv ->
+                        val bmp = (iv.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                        val hits = ChartHits.named("subt")
+                        if (bmp != null && hits != null) Scrub.attach(iv, bmp, hits)
+                    }
                     col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
                     AppScreens(this, wDp).subtExtras(col)
                     content.addView(sv, full)

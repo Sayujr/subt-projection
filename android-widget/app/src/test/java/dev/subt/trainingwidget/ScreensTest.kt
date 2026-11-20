@@ -129,6 +129,20 @@ class ScreensTest {
             capture("app_home_after_scrub", act.window.decorView)
             ctl.pause().stop().destroy()
         }
+        // Scrub the SubT pace chart and hold mid-way, so the screenshot shows the label
+        safely("scrub_subt") {
+            val ctl = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "SUBT")).setup()
+            settle()
+            val act = ctl.get()
+            val iv = act.window.decorView.findViewById<View>(R.id.subt_chart) ?: error("no SubT chart")
+            check(iv.width > 0) { "SubT chart not laid out" }
+            fun ev(a: Int, x: Float) = android.view.MotionEvent.obtain(0, 0, a, x, iv.height / 2f, 0).also { iv.dispatchTouchEvent(it); it.recycle() }
+            ev(android.view.MotionEvent.ACTION_DOWN, 5f)
+            ev(android.view.MotionEvent.ACTION_MOVE, iv.width * 0.6f)
+            capture("app_subt_scrubbing", act.window.decorView)
+            ev(android.view.MotionEvent.ACTION_UP, iv.width * 0.6f)
+            ctl.pause().stop().destroy()
+        }
         safely("settings") {
             val ctl = Robolectric.buildActivity(SetupActivity::class.java).setup()
             settle()

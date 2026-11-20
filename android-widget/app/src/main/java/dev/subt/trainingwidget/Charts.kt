@@ -679,6 +679,12 @@ object Charts {
                 fill.color = color; c.drawCircle(f.x(i), yy(i), (if (i == months.lastIndex) 3f else 2.2f) * density, fill)
             }
         }
+        val mf = DateTimeFormatter.ofPattern("MMM yyyy", Locale.getDefault())
+        ChartHits.put(bmp, months.indices.map { i ->
+            val m = months[i]
+            val ml = runCatching { LocalDate.parse(m.month + "-01").format(mf) }.getOrDefault(m.month)
+            ChartHits.Hit(f.x(i), yy(i), "$ml · ${paceText(m.pace)}/km · ${m.laps} laps" + (m.hr?.let { " · ${it.roundToInt()} bpm" } ?: "") + (if (m.outlier) " (outlier)" else ""), color)
+        }, name = "subt")
         return bmp
     }
 
@@ -783,6 +789,8 @@ object Charts {
         }
         val last = sorted.last()
         dot(c, x(last.first), y(last.second), lineColor, density, bg)
+        val df = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+        ChartHits.put(bmp, sorted.map { (dd, v) -> ChartHits.Hit(x(dd), y(v), "${dd.format(df)} · ${fmt(v)}", lineColor) })
         return bmp
     }
 

@@ -87,6 +87,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
     private fun image(parent: LinearLayout, bmp: Bitmap, hDp: Int) {
         val iv = ImageView(a).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.FIT_XY }
         parent.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(hDp)).apply { topMargin = dp(8) })
+        ChartHits.get(bmp)?.let { Scrub.attach(iv, bmp, it) }   // touch and drag to read values
     }
 
     private fun spans(vararg parts: Pair<String, Int>): CharSequence {
