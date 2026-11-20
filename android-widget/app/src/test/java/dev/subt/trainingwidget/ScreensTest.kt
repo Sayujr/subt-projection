@@ -110,6 +110,25 @@ class ScreensTest {
             }
             ctl.pause().stop().destroy()
         }
+        // Scrub the Today chart end to end (into the plan days), then lift the finger
+        safely("scrub") {
+            val ctl = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup()
+            settle()
+            val act = ctl.get()
+            val iv = act.window.decorView.findViewById<View>(R.id.trend_chart) ?: error("no chart on Today")
+            val w = iv.width.toFloat(); val y = iv.height / 2f
+            check(w > 0) { "chart not laid out" }
+            fun ev(a: Int, x: Float) = android.view.MotionEvent.obtain(0, 0, a, x, y, 0).also { iv.dispatchTouchEvent(it); it.recycle() }
+            ev(android.view.MotionEvent.ACTION_DOWN, 2f)
+            var x = 2f
+            while (x < w - 1) { ev(android.view.MotionEvent.ACTION_MOVE, x); x += w / 60 }
+            ev(android.view.MotionEvent.ACTION_MOVE, w + 50)   // past the edge
+            capture("app_home_scrubbing", act.window.decorView)
+            ev(android.view.MotionEvent.ACTION_UP, w - 1)
+            settle()
+            capture("app_home_after_scrub", act.window.decorView)
+            ctl.pause().stop().destroy()
+        }
         safely("settings") {
             val ctl = Robolectric.buildActivity(SetupActivity::class.java).setup()
             settle()

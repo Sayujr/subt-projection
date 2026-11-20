@@ -42,6 +42,7 @@ class IcuApi(private val creds: Credentials) {
                 hrv = o.optNum("hrv")?.takeIf { it > 0 },
                 rhr = o.optNum("restingHR")?.takeIf { it > 0 },
                 sleepSecs = o.optNum("sleepSecs")?.takeIf { it > 0 },
+                load = o.optNum("ctlLoad"),
             )
         }.sortedBy { it.date }
 

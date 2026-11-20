@@ -581,19 +581,24 @@ class MainActivity : Activity() {
         val snap = Prefs.snapshot(this) ?: return
         val (days, future) = WidgetRenderer.chartSeries(snap, period, snap.today == LocalDate.now().toString())
         if (days.size < 2) return
-        val all = days + future
         val d = resources.displayMetrics.density
         val ctlV = root.findViewById<TextView>(R.id.ctl_value); val ctlD = root.findViewById<TextView>(R.id.ctl_delta)
         val atlV = root.findViewById<TextView>(R.id.atl_value); val atlD = root.findViewById<TextView>(R.id.atl_delta)
         val formV = root.findViewById<TextView>(R.id.form_value); val formZ = root.findViewById<TextView>(R.id.form_zone)
         val df = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+        // The chart draws history + only the future days after the last history day
+        val chartDays = days + future.filter { it.date > days.last().date }
+        var lastI = -1
         iv.setOnTouchListener { v, e ->
             val labels = v.height / d >= 110
+            if (v.width <= 0 || v.height <= 0) return@setOnTouchListener false
             when (e.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_MOVE -> {
+                android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_MOVE -> try {
                     v.parent?.requestDisallowInterceptTouchEvent(true)
-                    val i = Charts.combinedIndexAt(e.x, all.size, v.width, d, labels)
-                    val day = all[i]
+                    val i = Charts.combinedIndexAt(e.x, chartDays.size, v.width, d, labels)
+                    if (i == lastI) return@setOnTouchListener true
+                    lastI = i
+                    val day = chartDays[i]
                     iv.setImageBitmap(Charts.combined(days, v.width, v.height, d, WidgetRenderer.TILE_BG, labels, highlight = i, future = future))
                     val z = FormZone.of(day.form)
                     ctlV?.text = day.ctl.roundToInt().toString()
@@ -603,8 +608,9 @@ class MainActivity : Activity() {
                     formV?.text = (if (day.form > 0) "+" else "") + day.form.roundToInt(); formV?.setTextColor(z.color)
                     formZ?.text = z.label; formZ?.setTextColor(z.color)
                     true
-                }
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { drawContent(); true }
+                } catch (t: Throwable) { true }
+                // Rebuild after the touch has finished (removing views mid-touch crashes Android)
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { lastI = -1; content.post { drawContent() }; true }
                 else -> true
             }
         }

@@ -11,6 +11,8 @@ data class Day(
     val hrv: Double? = null,
     val rhr: Double? = null,
     val sleepSecs: Double? = null,
+    /** Training load done that day (intervals.icu wellness ctlLoad). */
+    val load: Double? = null,
 ) {
     val form: Double get() = ctl - atl
 }
@@ -104,7 +106,7 @@ data class Snapshot(
             days.forEach {
                 put(
                     JSONObject().put("d", it.date).put("c", it.ctl).put("a", it.atl)
-                        .putOpt("h", it.hrv).putOpt("r", it.rhr).putOpt("s", it.sleepSecs)
+                        .putOpt("h", it.hrv).putOpt("r", it.rhr).putOpt("s", it.sleepSecs).putOpt("l", it.load)
                 )
             }
         })
@@ -172,6 +174,7 @@ data class Snapshot(
                     Day(
                         x.getString("d"), x.getDouble("c"), x.getDouble("a"),
                         x.optNullableDouble("h"), x.optNullableDouble("r"), x.optNullableDouble("s"),
+                        x.optNullableDouble("l"),
                     )
                 },
                 workouts = parseWorkouts(o.getJSONArray("workouts")),

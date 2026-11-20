@@ -111,9 +111,15 @@ object Verdict {
         val sl = d.sleepSecs?.div(3600)?.takeIf { it <= 14 }
         val sl7 = s.days.takeLast(7).mapNotNull { it.sleepSecs?.div(3600)?.takeIf { h -> h <= 14 } }
         if (sl != null || sl7.isNotEmpty()) out += "Sleep" to listOfNotNull(sl?.let { "%.1f h last night".format(it) }, sl7.takeIf { it.size >= 3 }?.let { "%.1f h 7-day average".format(it.average()) }).joinToString("  ·  ")
-        if (loads != null) {
+        run {
             val t = LocalDate.now()
-            val l3 = (3 downTo 1).map { loads[t.minusDays(it.toLong()).toString()] ?: 0 }
+            val byDate = s.days.associateBy { it.date }
+            val fmt = java.time.format.DateTimeFormatter.ofPattern("EEE", java.util.Locale.getDefault())
+            val l3 = (3 downTo 1).map { k ->
+                val day = t.minusDays(k.toLong())
+                val l = byDate[day.toString()]?.load?.roundToInt() ?: loads?.get(day.toString())
+                "${day.format(fmt)} ${l ?: "–"}"
+            }
             out += "Load last 3 days" to l3.joinToString(" · ")
         }
         val drift = s.runs.filter { it.seconds >= 1800 }.mapNotNull { it.decoupling }.takeLast(3)
