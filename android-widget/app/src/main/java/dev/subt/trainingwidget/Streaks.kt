@@ -18,8 +18,8 @@ import java.time.temporal.TemporalAdjusters
  * Excluded from the averages (Fitness floor still applies):
  *   • TT mini-tapers: 2 days before a scheduled TT, the TT day and the day after
  *   • race tapers (A 14 · B 10 · C 5 days before), race day and the 3 days after
- * Taper and race days (and weeks that are mostly taper / race) aren't judged: they never end a streak
- * and don't add to it. A Fitness dip below the race floor (0.88 × reference) is noted, not counted.
+ * Taper and race days (and weeks that are mostly taper / race) always count as passed: they keep the
+ * streak going and add to it. A Fitness dip below the race floor (0.88 × reference) is noted, not counted.
  *
  * Month passes when: average Form −12…+5, exit Fitness ≥ 97 % of entry (90 % with a race), ≤ 1 failed week.
  */
@@ -175,7 +175,7 @@ object Streaks {
             val exitDay = exit.day!!; val ref = exit.ref ?: exitDay.ctl
             if (taperish >= 4) {
                 if (withData.any { it.status == Status.TAPER_MISS }) reasons += "Fitness dipped below the race floor (noted, not counted)"
-                return@map WeekResult(mon, ds, null, green, complete, null, null, exitDay.ctl, exitDay.form, 0.88 * ref, "taper / race week", reasons)
+                return@map WeekResult(mon, ds, true, green, complete, null, null, exitDay.ctl, exitDay.form, 0.88 * ref, "taper / race week", reasons)
             }
             val floor = (1 - band) * ref
             val avgForm = normal.mapNotNull { it.day?.form }.takeIf { it.isNotEmpty() }?.average()
@@ -227,9 +227,9 @@ object Streaks {
             MonthResult(m, ws, passed, avgForm, entry, exit, failed, hadRace, onPlan)
         }
         // Day streak (consecutive passing days up to the latest day with data)
-        // Taper / race / recovery days are neutral: they neither end a day streak nor add to it
+        // Taper / race / recovery days always count as passed
         fun dayPass(r: DayResult): Boolean? = when (r.status) {
-            Status.TAPER_OK, Status.TAPER_MISS, Status.EXEMPT -> null
+            Status.TAPER_OK, Status.TAPER_MISS, Status.EXEMPT -> true
             Status.RED -> false
             else -> true
         }
