@@ -344,9 +344,14 @@ data class SubtMonth(val month: String, val pace: Double, val laps: Int, val out
     val efficiency: Double? get() = hr?.let { (1000.0 / pace) / it }
 }
 
-data class SubtData(val fetchedAt: Long, val months: List<SubtMonth>, val lapsLast30d: Int, val lastLapDate: String) {
+data class SubtData(
+    val fetchedAt: Long, val months: List<SubtMonth>, val lapsLast30d: Int, val lastLapDate: String,
+    /** "workouts" = your SubT workouts' reps (intervals.icu); "page" = the projection page's data.json. */
+    val source: String = "page",
+) {
     fun toJson(): String = JSONObject().apply {
         put("fetchedAt", fetchedAt)
+        put("src", source)
         put("lapsLast30d", lapsLast30d)
         put("lastLapDate", lastLapDate)
         put("months", JSONArray().apply {
@@ -369,6 +374,7 @@ data class SubtData(val fetchedAt: Long, val months: List<SubtMonth>, val lapsLa
                 },
                 o.getInt("lapsLast30d"),
                 o.getString("lastLapDate"),
+                o.optString("src", "page"),
             )
         } catch (e: Exception) {
             null

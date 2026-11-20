@@ -775,7 +775,35 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
 
     // ---------------------------------------------------------------- SubT extras (below the widget card)
 
+    /** SubT split by rep length (short 3′ / medium 6′ / long 10′+) with each one's trend. */
+    private fun subtKindsCard(col: LinearLayout) {
+        val reps = Prefs.subtReps(a)?.second.orEmpty()
+        if (reps.isEmpty()) return
+        val c = card(col)
+        label(c, "SubT by rep length")
+        val series = SubtWorkouts.Kind.entries.map { k -> k to SubtWorkouts.months(reps, k) }.filter { it.second.isNotEmpty() }
+        image(c, Charts.subtKinds(series, chartW(), dp(170), d, TILE), 170)
+        val cutoff = LocalDate.now().minusDays(30).toString()
+        row(c, listOf("" to DIM, "LATEST" to DIM, "REPS 30D" to DIM, "TREND /MO" to DIM), header = true, weights = listOf(1.5f, 1f, 1f, 1.2f))
+        for ((k, ms) in series) {
+            val reg = ms.filter { !it.outlier }
+            val latest = (reg.lastOrNull() ?: ms.last())
+            val n30 = reps.count { SubtWorkouts.kind(it.seconds) == k && it.date >= cutoff }
+            val tr = SubtWorkouts.trend(ms)
+            val trTxt = tr?.let { t -> val s = (t * 60).roundToInt(); if (s < 0) "˄ ${-s}s faster" else if (s > 0) "˅ ${s}s slower" else "– flat" } ?: "–"
+            val trCol = tr?.let { if (it < -0.5 / 60) GOOD else if (it > 0.5 / 60) BAD else DIM } ?: DIM
+            row(c, listOf(k.label to k.color, (Charts.paceText(latest.pace) + " ${monthShort(latest.month)}") to TEXT, n30.toString() to TEXT, trTxt to trCol),
+                weights = listOf(1.5f, 1f, 1f, 1.2f))
+        }
+        info(c, "SubT pace = the average pace of every work rep in your SubT workouts (runs named like \"3'x10\", \"6'x5\", \"10'x3 repeats\", or Sub-T plans), " +
+            "as total time ÷ total distance per month. Short reps are under 4½ min, medium 4½–8, long 8+. CP tests and time trials in the same run are left out. " +
+            "Months with fewer than 3 reps are faded. Trend = change per month over the last six months. Touch the chart to read a month.")
+    }
+
+    private fun monthShort(m: String) = runCatching { LocalDate.parse("$m-01").format(DateTimeFormatter.ofPattern("MMM", loc)) }.getOrDefault(m)
+
     fun subtExtras(col: LinearLayout) {
+        subtKindsCard(col)
         val sub = Prefs.subt(a) ?: return
         val months = sub.months.filter { !it.outlier }
         val cur = SubtModel.currentPace(a) ?: return

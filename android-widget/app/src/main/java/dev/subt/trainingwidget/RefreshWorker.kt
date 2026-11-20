@@ -41,10 +41,19 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                 runCatching { IcuApi(creds).fetchPbs() }.onSuccess { Prefs.savePbs(ctx, it) }
             }
         }
-        // SubT data comes from the repo (updated every few days) and needs no login
-        val subt = Prefs.subt(ctx)
-        if (subt == null || System.currentTimeMillis() - subt.fetchedAt > 6 * 3600_000L || inputData.getBoolean(FORCE, false)) {
-            runCatching { SubtApi.fetch() }.onSuccess { Prefs.saveSubt(ctx, it) }
+        // SubT: from the reps in your SubT workouts (refreshed every 6 h); the projection page's data only as a fallback
+        val force = inputData.getBoolean(FORCE, false)
+        val reps = Prefs.subtReps(ctx)
+        if (creds != null && (reps == null || System.currentTimeMillis() - reps.first > 6 * 3600_000L || force)) {
+            runCatching { IcuApi(creds).fetchSubtReps(cached = reps?.second.orEmpty()) }.onSuccess { Prefs.saveSubtReps(ctx, it) }
+        }
+        val haveReps = Prefs.subtReps(ctx)?.second.orEmpty()
+        if (haveReps.isNotEmpty()) Prefs.saveSubt(ctx, SubtWorkouts.toSubtData(haveReps))
+        else {
+            val subt = Prefs.subt(ctx)
+            if (subt == null || System.currentTimeMillis() - subt.fetchedAt > 6 * 3600_000L || force) {
+                runCatching { SubtApi.fetch() }.onSuccess { Prefs.saveSubt(ctx, it) }
+            }
         }
         runCatching { Updater.check(ctx, force = inputData.getBoolean(FORCE, false)) }
         Prefs.setRefreshing(ctx, false)

@@ -351,7 +351,7 @@ object ExtraWidgets {
         }.getOrDefault(last.month)
         val narrow = wDp < 250
         val parts = mutableListOf<Pair<String, Int?>>(
-            (if (narrow) "$monthName · ${last.laps} laps" else "$monthName median · ${last.laps} laps") to R0.DIM
+            (if (narrow) "$monthName · ${last.laps} laps" else "$monthName ${if (data?.source == "workouts") "avg" else "median"} · ${last.laps} ${if (data?.source == "workouts") "reps" else "laps"}") to R0.DIM
         )
         if (prev != null) {
             val diff = ((last.pace - prev.pace) * 60).roundToInt()

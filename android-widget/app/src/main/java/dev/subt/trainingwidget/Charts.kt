@@ -688,6 +688,55 @@ object Charts {
         return bmp
     }
 
+    /** SubT by rep length: one line per kind (short / medium / long), faster plotted higher. */
+    fun subtKinds(series: List<Pair<SubtWorkouts.Kind, List<SubtMonth>>>, w: Int, h: Int, density: Float, bg: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val months = series.flatMap { it.second.map { m -> m.month } }.distinct().sorted().takeLast(18)
+        if (months.size < 2) return bmp
+        val c = Canvas(bmp)
+        val axisH = 13f * density; val leftPad = 30f * density
+        val r = RectF(leftPad, 6f * density, w - 4f * density, h - axisH)
+        val vals = series.flatMap { (_, l) -> l.filter { it.month in months && !it.outlier }.map { -it.pace } }.ifEmpty { series.flatMap { (_, l) -> l.map { -it.pace } } }
+        val f = Frame(r, months.size, 6f * density, vals.min(), vals.max(), minSpan = 0.15)
+        val text = labelPaint(density)
+        val grid = Paint().apply { color = GRID; strokeWidth = 1f }
+        for (k in 0..3) {
+            val v = f.lo + (f.hi - f.lo) * k / 3
+            c.drawLine(r.left, f.y(v), r.right, f.y(v), grid)
+            c.drawText(paceText(-v), 0f, f.y(v) + 3.5f * density, text)
+        }
+        var last = -1f
+        months.forEachIndexed { i, m ->
+            val lbl = runCatching { LocalDate.parse("$m-01").month.getDisplayName(java.time.format.TextStyle.NARROW, Locale.getDefault()) }.getOrDefault("")
+            val x = f.x(i) - text.measureText(lbl) / 2
+            if (x > last + 2f * density) { c.drawText(lbl, x, h - 2f * density, text); last = x + text.measureText(lbl) }
+        }
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        for ((kind, l) in series) {
+            val pts = l.filter { it.month in months }.map { months.indexOf(it.month) to it }
+            val path = Path(); var started = false
+            for ((i, m) in pts) {
+                val x = f.x(i); val y = f.y(-m.pace).coerceIn(r.top, r.bottom)
+                if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
+            }
+            c.drawPath(path, stroke(kind.color, density, 1.8f))
+            for ((i, m) in pts) {
+                val x = f.x(i); val y = f.y(-m.pace).coerceIn(r.top, r.bottom)
+                fill.color = bg; c.drawCircle(x, y, 3.2f * density, fill)
+                fill.color = if (m.outlier) withAlpha(kind.color, 0x77) else kind.color; c.drawCircle(x, y, 2.2f * density, fill)
+            }
+        }
+        // Scrub: each month with all three paces
+        val mf = DateTimeFormatter.ofPattern("MMM yy", Locale.getDefault())
+        ChartHits.put(bmp, months.indices.mapNotNull { i ->
+            val parts = series.mapNotNull { (k, l) -> l.firstOrNull { it.month == months[i] }?.let { "${k.name.first()} ${paceText(it.pace)}" } }
+            val first = series.firstNotNullOfOrNull { (_, l) -> l.firstOrNull { it.month == months[i] } } ?: return@mapNotNull null
+            ChartHits.Hit(f.x(i), f.y(-first.pace).coerceIn(r.top, r.bottom),
+                (runCatching { LocalDate.parse(months[i] + "-01").format(mf) }.getOrDefault(months[i])) + " · " + parts.joinToString(" · "), 0xFFFF9F5A.toInt())
+        })
+        return bmp
+    }
+
     /** Least-squares slope (min/km per month) over the last six regular months, or null. */
     fun subtTrendPerMonth(months: List<SubtMonth>): Double? {
         val reg = months.withIndex().filter { !it.value.outlier }.takeLast(6)

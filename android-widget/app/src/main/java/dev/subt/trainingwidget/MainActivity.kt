@@ -361,10 +361,10 @@ class MainActivity : Activity() {
         repsLoading = true
         repsError = null
         Thread {
-            val r = runCatching { IcuApi(creds).fetchSubtReps() }
+            val r = runCatching { IcuApi(creds).fetchSubtReps(cached = cached?.second.orEmpty()) }
             runOnUiThread {
                 repsLoading = false
-                r.onSuccess { Prefs.saveSubtReps(this, it) }.onFailure { repsError = it.message ?: it.javaClass.simpleName; failedAt["reps"] = System.currentTimeMillis() }
+                r.onSuccess { Prefs.saveSubtReps(this, it); if (it.isNotEmpty()) Prefs.saveSubt(this, SubtWorkouts.toSubtData(it)) }.onFailure { repsError = it.message ?: it.javaClass.simpleName; failedAt["reps"] = System.currentTimeMillis() }
                 if (tab == Tab.SUBT && subtView == SubtView.ANALYSIS) drawContent()
             }
         }.start()

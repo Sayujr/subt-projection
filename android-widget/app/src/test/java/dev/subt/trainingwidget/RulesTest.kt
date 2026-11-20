@@ -82,6 +82,36 @@ class RulesTest {
         assertNull("day after doesn't", NotifySettings.pausingRace(today.plusDays(3), listOf(race)))
     }
 
+    // ---- SubT from SubT workouts
+    @Test fun subtWorkoutNames() {
+        assertEquals(listOf(3.0), SubtWorkouts.repLengths("3'x10 repeats"))
+        assertEquals(listOf(6.0), SubtWorkouts.repLengths("6'x5 repeats"))
+        assertEquals(listOf(3.0, 10.0), SubtWorkouts.repLengths("3'x3 + 10'x3 repeats cpt"))
+        assertEquals("12' cpt isn't a SubT rep", listOf(3.0), SubtWorkouts.repLengths("3'x3, 12' cpt repeats"))
+        assertTrue(SubtWorkouts.isSubtWorkout("3' repeats & 5k TT 🎃"))
+        assertTrue(SubtWorkouts.isSubtWorkout("Philadelphia - NSM Flex Sub-Ts 160-165"))
+        assertFalse(SubtWorkouts.isSubtWorkout("18 x 45/15 repeats"))
+        assertFalse(SubtWorkouts.isSubtWorkout("400s, 800 repeats cpt"))
+        assertFalse(SubtWorkouts.isSubtWorkout("1h easy"))
+        assertEquals(SubtWorkouts.Kind.SHORT, SubtWorkouts.kind(180))
+        assertEquals(SubtWorkouts.Kind.MEDIUM, SubtWorkouts.kind(360))
+        assertEquals(SubtWorkouts.Kind.LONG, SubtWorkouts.kind(600))
+        assertTrue(SubtWorkouts.matchesRep(185.0, listOf(3.0)))
+        assertFalse("a 12-min CP effort isn't a 3' rep", SubtWorkouts.matchesRep(720.0, listOf(3.0)))
+    }
+
+    @Test fun subtAverageAndTestEfforts() {
+        fun rep(i: Int, sec: Int, pace: Double) = SubtRep("a1", "2026-11-03", "3'x4 repeats", i, sec, pace, 160.0, 165.0, null)
+        val reps = listOf(rep(1, 180, 4.40), rep(2, 180, 4.36), rep(3, 180, 4.38), rep(4, 180, 3.95))   // last one = a test effort
+        val kept = SubtWorkouts.dropTestEfforts(reps)
+        assertEquals(3, kept.size)
+        // time-weighted average pace = total time / total distance
+        val avg = SubtWorkouts.avgPace(listOf(rep(1, 600, 4.0), rep(2, 300, 5.0)))
+        assertEquals(900.0 / (600 / 4.0 + 300 / 5.0), avg, 1e-9)
+        val m = SubtWorkouts.months(kept)
+        assertEquals(1, m.size); assertEquals(3, m[0].laps); assertFalse(m[0].outlier)
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {

@@ -104,8 +104,15 @@ object Fixture {
             RaceResult(today.minusMonths(11).toString(), "Autumn Half", "RACE_B", 21097.0, 97 * 60.0, 168.0, 50.0, 36.0, 52.0, 51.0, 49.0),
             RaceResult(today.minusMonths(5).toString(), "Spring Half", "RACE_A", 21097.0, 95 * 60.0, 170.0, 54.0, 35.0, 57.0, 56.0, 54.0),
         ))
-        Prefs.saveSubtReps(ctx, (0 until 30).map { i ->
-            SubtRep("a$i", today.minusDays((i * 5).toLong()).toString(), "3x10' SubT", i % 3, 600, 4.55 - 0.002 * (30 - i), 162.0, 168.0, 318.0)
-        })
+        // Reps over ~18 months: short (3'), medium (6') and long (10') sessions, each kind getting faster
+        val reps = (0 until 160).map { i ->
+            val k = i % 3
+            val sec = listOf(180, 360, 600)[k]
+            val name = listOf("3'x10 repeats", "6'x5 repeats", "10'x3 repeats")[k]
+            val base = listOf(4.40, 4.50, 4.60)[k]
+            SubtRep("a${i / 3}", today.minusDays((i * 3).toLong()).toString(), name, i % 5, sec, base + 0.0012 * i, 160.0 + k, 166.0, 318.0)
+        }
+        Prefs.saveSubtReps(ctx, reps)
+        Prefs.saveSubt(ctx, SubtWorkouts.toSubtData(reps))
     }
 }
