@@ -384,7 +384,7 @@ object ExtraWidgets {
                 else -> {
                     val sec = (slope * 60).roundToInt()
                     val trend = if (sec < 0) "${-sec}s/km faster" else if (sec > 0) "${sec}s/km slower" else "flat"
-                    if (narrow) "Trend $trend /mo" else "Trend: $trend per month · ${data!!.lapsLast30d} laps in 30 days"
+                    if (narrow) "Trend $trend /mo" else "Trend: $trend per month · ${data!!.lapsLast30d} ${if (data.source == "page") "laps" else "reps"} in 30 days"
                 }
             }
         )
