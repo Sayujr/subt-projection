@@ -101,10 +101,14 @@ class RulesTest {
     }
 
     @Test fun subtAverageAndTestEfforts() {
-        fun rep(i: Int, sec: Int, pace: Double) = SubtRep("a1", "2026-11-03", "3'x4 repeats", i, sec, pace, 160.0, 165.0, null)
-        val reps = listOf(rep(1, 180, 4.40), rep(2, 180, 4.36), rep(3, 180, 4.38), rep(4, 180, 3.95))   // last one = a test effort
+        fun rep(i: Int, sec: Int, pace: Double, w: Double? = null) = SubtRep("a1", "2026-11-03", "3'x4 repeats", i, sec, pace, 160.0, 165.0, w)
+        // A fast rep alone isn't dropped any more…
+        assertEquals(4, SubtWorkouts.dropTestEfforts(listOf(rep(1, 180, 4.40), rep(2, 180, 4.36), rep(3, 180, 4.38), rep(4, 180, 3.95))).size)
+        // …only one with power 50 W+ above its siblings
+        val reps = listOf(rep(1, 180, 4.40, 315.0), rep(2, 180, 4.36, 318.0), rep(3, 180, 4.38, 320.0), rep(4, 180, 3.95, 372.0))
         val kept = SubtWorkouts.dropTestEfforts(reps)
         assertEquals(3, kept.size)
+        assertEquals("49 W above stays", 4, SubtWorkouts.dropTestEfforts(reps.dropLast(1) + rep(4, 180, 4.0, 367.0)).size)
         // time-weighted average pace = total time / total distance
         val avg = SubtWorkouts.avgPace(listOf(rep(1, 600, 4.0), rep(2, 300, 5.0)))
         assertEquals(900.0 / (600 / 4.0 + 300 / 5.0), avg, 1e-9)

@@ -6,7 +6,7 @@ package dev.subt.trainingwidget
  *   short  ≈ 3′ (under 4½ min) · medium ≈ 6′ (4½–8 min) · long ≈ 10′+ (8 min and over).
  * SubT pace = average pace over all reps (total time ÷ total distance), per month.
  * CP tests / time trials in the same session are left out: named efforts like "12' cpt" aren't
- * SubT reps, and any rep more than 5 % faster than its siblings is treated as a test effort.
+ * SubT reps, and a rep whose power is 50 W or more above its siblings' is treated as a test effort.
  */
 object SubtWorkouts {
     /**
@@ -41,10 +41,13 @@ object SubtWorkouts {
     fun matchesRep(seconds: Double, lengths: List<Double>) =
         if (lengths.isEmpty()) seconds in 120.0..900.0 else lengths.any { seconds in it * 60 * 0.75..it * 60 * 1.3 }
 
-    /** Drops test efforts: reps over 5 % faster than the median of their kind in the same workout. */
+    /** Drops test efforts: reps with power 50 W+ above the median power of their kind in the same workout (only when power is recorded). */
     fun dropTestEfforts(reps: List<SubtRep>): List<SubtRep> = reps.groupBy { it.activityId to kind(it.seconds) }.values.flatMap { g ->
-        val med = g.map { it.pace }.sorted().let { it[it.size / 2] }
-        g.filter { it.pace >= med * 0.95 }
+        val watts = g.mapNotNull { it.watts }.sorted()
+        if (watts.size < 2) g else {
+            val med = watts[watts.size / 2]
+            g.filter { it.watts == null || it.watts < med + 50 }
+        }
     }
 
     /** Average pace over reps: total time ÷ total distance (min/km). */

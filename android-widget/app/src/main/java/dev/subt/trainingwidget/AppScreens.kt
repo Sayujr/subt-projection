@@ -796,7 +796,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 weights = listOf(1.5f, 1f, 1f, 1.2f))
         }
         info(c, "From May 2026: SubT pace = the average pace of every work rep in your SubT workouts (runs named like \"3'x10\", \"6'x5\", \"10'x3 repeats\", or Sub-T plans), " +
-            "as total time ÷ total distance per month. Short reps are under 4½ min, medium 4½–8, long 8+. CP tests and time trials in the same run are left out. " +
+            "as total time ÷ total distance per month. Short reps are under 4½ min, medium 4½–8, long 8+. CP tests and time trials in the same run are left out (named efforts, or a rep 50 W+ above its siblings). " +
             "Months with fewer than 3 reps are faded. Trend = change per month over the last six months. Touch the chart to read a month. " +
             "Before May 2026 the SubT chart uses the original rule: laps with average HR over 160, max HR up to 172, 1.5–15 min, monthly median.")
     }
