@@ -361,10 +361,11 @@ class MainActivity : Activity() {
         repsLoading = true
         repsError = null
         Thread {
-            val r = runCatching { IcuApi(creds).fetchSubtReps(cached = cached?.second.orEmpty()) }
+            val days = ChronoUnit.DAYS.between(SubtWorkouts.fetchFrom(), LocalDate.now()) + 1
+            val r = runCatching { IcuApi(creds).fetchSubtReps(daysBack = days, cached = cached?.second.orEmpty()) }
             runOnUiThread {
                 repsLoading = false
-                r.onSuccess { Prefs.saveSubtReps(this, it); if (it.isNotEmpty()) Prefs.saveSubt(this, SubtWorkouts.toSubtData(it)) }.onFailure { repsError = it.message ?: it.javaClass.simpleName; failedAt["reps"] = System.currentTimeMillis() }
+                r.onSuccess { Prefs.saveSubtReps(this, it); SubtWorkouts.merge(Prefs.subtPage(this), it)?.let { d -> Prefs.saveSubt(this, d) } }.onFailure { repsError = it.message ?: it.javaClass.simpleName; failedAt["reps"] = System.currentTimeMillis() }
                 if (tab == Tab.SUBT && subtView == SubtView.ANALYSIS) drawContent()
             }
         }.start()

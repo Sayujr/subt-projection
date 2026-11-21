@@ -795,9 +795,10 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             row(c, listOf(k.label to k.color, (Charts.paceText(latest.pace) + " ${monthShort(latest.month)}") to TEXT, n30.toString() to TEXT, trTxt to trCol),
                 weights = listOf(1.5f, 1f, 1f, 1.2f))
         }
-        info(c, "SubT pace = the average pace of every work rep in your SubT workouts (runs named like \"3'x10\", \"6'x5\", \"10'x3 repeats\", or Sub-T plans), " +
+        info(c, "From May 2026: SubT pace = the average pace of every work rep in your SubT workouts (runs named like \"3'x10\", \"6'x5\", \"10'x3 repeats\", or Sub-T plans), " +
             "as total time ÷ total distance per month. Short reps are under 4½ min, medium 4½–8, long 8+. CP tests and time trials in the same run are left out. " +
-            "Months with fewer than 3 reps are faded. Trend = change per month over the last six months. Touch the chart to read a month.")
+            "Months with fewer than 3 reps are faded. Trend = change per month over the last six months. Touch the chart to read a month. " +
+            "Before May 2026 the SubT chart uses the original rule: laps with average HR over 160, max HR up to 172, 1.5–15 min, monthly median.")
     }
 
     private fun monthShort(m: String) = runCatching { LocalDate.parse("$m-01").format(DateTimeFormatter.ofPattern("MMM", loc)) }.getOrDefault(m)

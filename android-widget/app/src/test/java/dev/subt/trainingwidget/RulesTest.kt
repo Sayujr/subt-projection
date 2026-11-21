@@ -112,6 +112,21 @@ class RulesTest {
         assertEquals(1, m.size); assertEquals(3, m[0].laps); assertFalse(m[0].outlier)
     }
 
+    @Test fun subtRuleSwitch() {
+        val page = SubtData(1L, listOf(
+            SubtMonth("2026-03", 4.90, 8, false), SubtMonth("2026-04", 4.85, 9, false),
+            SubtMonth("2026-05", 5.20, 7, false), SubtMonth("2026-06", 5.10, 6, false),
+        ), 5, "2026-06-20")
+        fun rep(d: String, p: Double) = SubtRep("x$d", d, "6'x5 repeats", 1, 360, p, 158.0, 164.0, null)
+        val reps = listOf(rep("2026-05-05", 4.60), rep("2026-05-12", 4.62), rep("2026-05-19", 4.58), rep("2026-06-02", 4.55),
+            rep("2026-03-10", 9.99))  // a pre-switch rep is ignored
+        val m = SubtWorkouts.merge(page, reps, LocalDate.of(2026, 6, 10))!!
+        assertEquals(listOf("2026-03", "2026-04", "2026-05", "2026-06"), m.months.map { it.month })
+        assertEquals("old rule kept before May", 4.85, m.months[1].pace, 1e-9)
+        assertEquals("reps from May", SubtWorkouts.avgPace(reps.subList(0, 3)), m.months[2].pace, 1e-9)
+        assertEquals("no reps yet → page data", page, SubtWorkouts.merge(page, emptyList()))
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {

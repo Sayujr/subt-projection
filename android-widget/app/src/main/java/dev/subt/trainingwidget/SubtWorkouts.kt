@@ -9,6 +9,13 @@ package dev.subt.trainingwidget
  * SubT reps, and any rep more than 5 % faster than its siblings is treated as a test effort.
  */
 object SubtWorkouts {
+    /**
+     * Your approach changed in spring 2026. Months before this use the original rule (projection
+     * page: laps with avg HR > 160, max HR ≤ 172, 1.5–15 min, monthly median); from this month on,
+     * the reps in your named SubT workouts (monthly average).
+     */
+    const val SWITCH_MONTH = "2026-05"
+
     enum class Kind(val label: String, val color: Int) {
         SHORT("Short (3′)", 0xFFFFC53D.toInt()),
         MEDIUM("Medium (6′)", 0xFFFF9F5A.toInt()),
@@ -54,6 +61,19 @@ object SubtWorkouts {
         val cutoff = today.minusDays(30).toString()
         return SubtData(System.currentTimeMillis(), months(reps), reps.count { it.date >= cutoff }, reps.maxOfOrNull { it.date } ?: "", source = "workouts")
     }
+
+    /** Old rule before [SWITCH_MONTH] (page data), SubT-workout reps from then on. */
+    fun merge(page: SubtData?, reps: List<SubtRep>, today: java.time.LocalDate = java.time.LocalDate.now()): SubtData? {
+        val newReps = reps.filter { it.date.take(7) >= SWITCH_MONTH }
+        if (page == null && newReps.isEmpty()) return null
+        if (newReps.isEmpty()) return page
+        val w = toSubtData(newReps, today)
+        val before = page?.months.orEmpty().filter { it.month < SWITCH_MONTH }
+        return SubtData(System.currentTimeMillis(), before + w.months, w.lapsLast30d, w.lastLapDate, source = "mixed")
+    }
+
+    /** First day the new rule needs reps from. */
+    fun fetchFrom(): java.time.LocalDate = java.time.LocalDate.parse("$SWITCH_MONTH-01")
 
     /** Pace change per month (negative = faster) over the last six regular months, or null. */
     fun trend(months: List<SubtMonth>): Double? = Charts.subtTrendPerMonth(months)

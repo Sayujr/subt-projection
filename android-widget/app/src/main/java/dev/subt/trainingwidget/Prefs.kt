@@ -47,6 +47,9 @@ object Prefs {
     fun subt(ctx: Context): SubtData? = sp(ctx).getString("subt", null)?.let { SubtData.fromJson(it) }
 
     fun saveSubt(ctx: Context, d: SubtData) = sp(ctx).edit().putString("subt", d.toJson()).apply()
+    /** The projection page's data.json (the original SubT rule), kept for months before the switch. */
+    fun subtPage(ctx: Context): SubtData? = sp(ctx).getString("subt_page", null)?.let { SubtData.fromJson(it) }
+    fun saveSubtPage(ctx: Context, d: SubtData) = sp(ctx).edit().putString("subt_page", d.toJson()).apply()
 
     fun error(ctx: Context): String? = sp(ctx).getString("error", null)
 

@@ -113,6 +113,7 @@ object Fixture {
             SubtRep("a${i / 3}", today.minusDays((i * 3).toLong()).toString(), name, i % 5, sec, base + 0.0012 * i, 160.0 + k, 166.0, 318.0)
         }
         Prefs.saveSubtReps(ctx, reps)
-        Prefs.saveSubt(ctx, SubtWorkouts.toSubtData(reps))
+        Prefs.saveSubtPage(ctx, subt())
+        Prefs.saveSubt(ctx, SubtWorkouts.merge(subt(), reps)!!)
     }
 }

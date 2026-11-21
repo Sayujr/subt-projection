@@ -41,20 +41,18 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                 runCatching { IcuApi(creds).fetchPbs() }.onSuccess { Prefs.savePbs(ctx, it) }
             }
         }
-        // SubT: from the reps in your SubT workouts (refreshed every 6 h); the projection page's data only as a fallback
+        // SubT: the original rule (projection page data) before the switch month, your SubT workouts' reps after
         val force = inputData.getBoolean(FORCE, false)
+        val page = Prefs.subtPage(ctx)
+        if (page == null || System.currentTimeMillis() - page.fetchedAt > 6 * 3600_000L || force) {
+            runCatching { SubtApi.fetch() }.onSuccess { Prefs.saveSubtPage(ctx, it) }
+        }
         val reps = Prefs.subtReps(ctx)
         if (creds != null && (reps == null || System.currentTimeMillis() - reps.first > 6 * 3600_000L || force)) {
-            runCatching { IcuApi(creds).fetchSubtReps(cached = reps?.second.orEmpty()) }.onSuccess { Prefs.saveSubtReps(ctx, it) }
+            val days = java.time.temporal.ChronoUnit.DAYS.between(SubtWorkouts.fetchFrom(), java.time.LocalDate.now()) + 1
+            runCatching { IcuApi(creds).fetchSubtReps(daysBack = days, cached = reps?.second.orEmpty()) }.onSuccess { Prefs.saveSubtReps(ctx, it) }
         }
-        val haveReps = Prefs.subtReps(ctx)?.second.orEmpty()
-        if (haveReps.isNotEmpty()) Prefs.saveSubt(ctx, SubtWorkouts.toSubtData(haveReps))
-        else {
-            val subt = Prefs.subt(ctx)
-            if (subt == null || System.currentTimeMillis() - subt.fetchedAt > 6 * 3600_000L || force) {
-                runCatching { SubtApi.fetch() }.onSuccess { Prefs.saveSubt(ctx, it) }
-            }
-        }
+        SubtWorkouts.merge(Prefs.subtPage(ctx), Prefs.subtReps(ctx)?.second.orEmpty())?.let { Prefs.saveSubt(ctx, it) }
         runCatching { Updater.check(ctx, force = inputData.getBoolean(FORCE, false)) }
         Prefs.setRefreshing(ctx, false)
         WidgetRenderer.renderAll(ctx)

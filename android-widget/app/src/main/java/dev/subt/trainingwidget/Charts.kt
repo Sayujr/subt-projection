@@ -649,6 +649,16 @@ object Charts {
             }
         }
 
+        // Where the SubT rule changed (HR-filtered laps → SubT-workout reps)
+        val sw = months.indexOfFirst { it.month >= SubtWorkouts.SWITCH_MONTH }
+        if (sw > 0) {
+            val xs = (f.x(sw - 1) + f.x(sw)) / 2
+            c.drawLine(xs, r.top, xs, r.bottom, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0x55FFFFFF; strokeWidth = 1f * density; pathEffect = DashPathEffect(floatArrayOf(2f * density, 3f * density), 0f)
+            })
+            if (labels) c.drawText("reps →", xs + 3f * density, r.top + 9f * density, labelPaint(density))
+        }
+
         val regular = months.indices.filter { !months[it].outlier }
         val path = Path()
         regular.forEachIndexed { k, i -> if (k == 0) path.moveTo(f.x(i), yy(i)) else path.lineTo(f.x(i), yy(i)) }
