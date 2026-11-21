@@ -654,7 +654,7 @@ object Charts {
         if (sw > 0) {
             val xs = (f.x(sw - 1) + f.x(sw)) / 2
             c.drawLine(xs, r.top, xs, r.bottom, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0x55FFFFFF; strokeWidth = 1f * density; pathEffect = DashPathEffect(floatArrayOf(2f * density, 3f * density), 0f)
+                this.color = 0x55FFFFFF; strokeWidth = 1f * density; pathEffect = DashPathEffect(floatArrayOf(2f * density, 3f * density), 0f)
             })
             if (labels) c.drawText("reps →", xs + 3f * density, r.top + 9f * density, labelPaint(density))
         }
