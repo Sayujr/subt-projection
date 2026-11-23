@@ -789,15 +789,24 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             val reg = ms.filter { !it.outlier }
             val latest = (reg.lastOrNull() ?: ms.last())
             val n30 = reps.count { SubtWorkouts.kind(it.seconds) == k && it.date >= cutoff }
-            val tr = SubtWorkouts.trend(ms)
-            val trTxt = tr?.let { t -> val s = (t * 60).roundToInt(); if (s < 0) "˄ ${-s}s faster" else if (s > 0) "˅ ${s}s slower" else "– flat" } ?: "–"
-            val trCol = tr?.let { if (it < -0.5 / 60) GOOD else if (it > 0.5 / 60) BAD else DIM } ?: DIM
+            val tr = SubtWorkouts.trendWithError(ms)
+            val trTxt = SubtWorkouts.trendText(tr)
+            // green / red only when the trend is bigger than its error (a real change, not noise)
+            val trCol = tr?.let { (sl, se) -> if (sl < 0 && -sl > se) GOOD else if (sl > 0 && sl > se) BAD else DIM } ?: DIM
             row(c, listOf(k.label to k.color, (Charts.paceText(latest.pace) + " ${monthShort(latest.month)}") to TEXT, n30.toString() to TEXT, trTxt to trCol),
                 weights = listOf(1.5f, 1f, 1f, 1.2f))
         }
+        // Speed per heartbeat: the same pace at a lower HR (or faster at the same HR) = fitter
+        val effSeries = series.map { (k, ms) -> k to ms.filter { it.efficiency != null } }.filter { it.second.size >= 2 }
+        if (effSeries.isNotEmpty()) {
+            text(c, "Speed per heartbeat (m/beat) · higher = fitter", 12.5f, DIM, top = 12)
+            image(c, Charts.subtKinds(effSeries, chartW(), dp(130), d, TILE, value = { it.efficiency }, fmt = { String.format(loc, "%.2f", it) }), 130)
+        }
         info(c, "From May 2026: SubT pace = the average pace of every work rep in your SubT workouts (runs named like \"3'x10\", \"6'x5\", \"10'x3 repeats\", or Sub-T plans), " +
             "as total time ÷ total distance per month. Short reps are under 4½ min, medium 4½–8, long 8+. CP tests and time trials in the same run are left out (named efforts, or a rep 50 W+ above its siblings). " +
-            "Months with fewer than 3 reps are faded. Trend = change per month over the last six months. Touch the chart to read a month. " +
+            "Months with fewer than 3 reps are faded. Trend = change per month over the last six months, ± its error: green or red only when the change is bigger than the error. " +
+            "Your headline SubT is the last 28 days, adjusted for rep mix (each length's usual gap to your average is taken out), so doing more 3′ reps doesn't make it look faster. " +
+            "Speed per heartbeat = metres per beat on the reps: it rises when you get faster at the same HR, and isn't fooled by an easy-paced hot day. Touch a chart to read a month. " +
             "Before May 2026 the SubT chart uses the original rule: laps with average HR over 160, max HR up to 172, 1.5–15 min, monthly median.")
     }
 

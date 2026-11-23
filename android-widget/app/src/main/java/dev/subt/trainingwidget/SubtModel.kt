@@ -38,7 +38,9 @@ object SubtModel {
 
     /** Current SubT pace: your Settings value if entered, else the latest regular monthly median. */
     fun currentPace(ctx: android.content.Context): Double? =
-        Prefs.subtOverride(ctx) ?: Prefs.subt(ctx)?.months?.lastOrNull { !it.outlier }?.pace
+        Prefs.subtOverride(ctx)
+            ?: Prefs.subtReps(ctx)?.second?.let { SubtWorkouts.current(it)?.first }
+            ?: Prefs.subt(ctx)?.months?.lastOrNull { !it.outlier }?.pace
 
     /** SubT in the month a PB was set (or the latest month). */
     fun subtAt(ctx: android.content.Context, date: String?): Double? {

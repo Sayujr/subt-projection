@@ -345,30 +345,52 @@ object ExtraWidgets {
         }
         val last = months.last()
         val prev = months.dropLast(1).lastOrNull { !it.outlier }
-        v.setTextViewText(R.id.subt_value, Charts.paceText(last.pace))
-        val monthName = runCatching {
-            LocalDate.parse(last.month + "-01").format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault()))
-        }.getOrDefault(last.month)
-        val narrow = wDp < 250
-        val parts = mutableListOf<Pair<String, Int?>>(
-            (if (narrow) "$monthName · ${last.laps} laps" else "$monthName ${if (last.month >= SubtWorkouts.SWITCH_MONTH && data?.source != "page") "avg" else "median"} · ${last.laps} ${if (last.month >= SubtWorkouts.SWITCH_MONTH && data?.source != "page") "reps" else "laps"}") to R0.DIM
-        )
-        if (prev != null) {
-            val diff = ((last.pace - prev.pace) * 60).roundToInt()
-            val prevName = runCatching {
-                LocalDate.parse(prev.month + "-01").format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault()))
-            }.getOrDefault(prev.month)
-            parts += " · " to R0.DIM
-            parts += when {
-                narrow && diff < 0 -> "▲${-diff}s" to R0.UP
-                narrow && diff > 0 -> "▼${diff}s" to R0.DOWN
-                narrow -> "＝" to R0.DIM
-                diff < 0 -> "${-diff}s faster than $prevName" to R0.UP
-                diff > 0 -> "${diff}s slower than $prevName" to R0.DOWN
-                else -> "same as $prevName" to R0.DIM
+        // From the rule switch on: current SubT = last 28 days (mix-adjusted), compared with the 4 weeks before
+        val reps = Prefs.subtReps(ctx)?.second.orEmpty()
+        val cur = if (data?.source != "page") SubtWorkouts.current(reps) else null
+        if (cur != null) {
+            v.setTextViewText(R.id.subt_value, Charts.paceText(cur.first))
+            val before = SubtWorkouts.current(reps, LocalDate.now().minusDays(28))
+            val parts = mutableListOf<Pair<String, Int?>>((if ((wDp < 250)) "28 d · ${cur.second} reps" else "Last 28 days · ${cur.second} reps") to R0.DIM)
+            if (before != null) {
+                val diff = ((cur.first - before.first) * 60).roundToInt()
+                parts += " · " to R0.DIM
+                parts += when {
+                    (wDp < 250) && diff < 0 -> "▲${-diff}s" to R0.UP
+                    (wDp < 250) && diff > 0 -> "▼${diff}s" to R0.DOWN
+                    (wDp < 250) -> "＝" to R0.DIM
+                    diff < 0 -> "${-diff}s faster than the 4 weeks before" to R0.UP
+                    diff > 0 -> "${diff}s slower than the 4 weeks before" to R0.DOWN
+                    else -> "same as the 4 weeks before" to R0.DIM
+                }
             }
+            v.setTextViewText(R.id.subt_sub, spans(*parts.toTypedArray()))
+        } else v.setTextViewText(R.id.subt_value, Charts.paceText(last.pace))
+        val narrow = wDp < 250
+        if (cur == null) {
+            val monthName = runCatching {
+                LocalDate.parse(last.month + "-01").format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault()))
+            }.getOrDefault(last.month)
+            val parts = mutableListOf<Pair<String, Int?>>(
+                (if (narrow) "$monthName · ${last.laps} laps" else "$monthName ${if (last.month >= SubtWorkouts.SWITCH_MONTH && data?.source != "page") "avg" else "median"} · ${last.laps} ${if (last.month >= SubtWorkouts.SWITCH_MONTH && data?.source != "page") "reps" else "laps"}") to R0.DIM
+            )
+            if (prev != null) {
+                val diff = ((last.pace - prev.pace) * 60).roundToInt()
+                val prevName = runCatching {
+                    LocalDate.parse(prev.month + "-01").format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault()))
+                }.getOrDefault(prev.month)
+                parts += " · " to R0.DIM
+                parts += when {
+                    narrow && diff < 0 -> "▲${-diff}s" to R0.UP
+                    narrow && diff > 0 -> "▼${diff}s" to R0.DOWN
+                    narrow -> "＝" to R0.DIM
+                    diff < 0 -> "${-diff}s faster than $prevName" to R0.UP
+                    diff > 0 -> "${diff}s slower than $prevName" to R0.DOWN
+                    else -> "same as $prevName" to R0.DIM
+                }
+            }
+            v.setTextViewText(R.id.subt_sub, spans(*parts.toTypedArray()))
         }
-        v.setTextViewText(R.id.subt_sub, spans(*parts.toTypedArray()))
 
         val shown = months.takeLast(if (wDp >= 250) 18 else 12)
         val chartH = hDp - 24 - 20 - 36 - 16 - 6 - 16

@@ -53,17 +53,69 @@ object SubtWorkouts {
     /** Average pace over reps: total time ÷ total distance (min/km). */
     fun avgPace(reps: List<SubtRep>): Double = reps.sumOf { it.seconds.toDouble() } / reps.sumOf { it.seconds / it.pace }
 
+    /**
+     * Rep-mix adjustment: each kind's usual gap to your overall SubT pace (over all reps). Short reps run
+     * faster than long ones, so a month with more 3′ reps would look faster without this. Each rep is
+     * shifted by its kind's gap, then averaged: the headline then moves only when you get faster.
+     */
+    fun kindOffsets(reps: List<SubtRep>): Map<Kind, Double> {
+        if (reps.isEmpty()) return emptyMap()
+        val all = avgPace(reps)
+        return Kind.entries.associateWith { k -> reps.filter { kind(it.seconds) == k }.takeIf { it.isNotEmpty() }?.let { avgPace(it) - all } ?: 0.0 }
+    }
+    fun mixAdjusted(reps: List<SubtRep>, offsets: Map<Kind, Double> = kindOffsets(reps)): List<SubtRep> =
+        reps.map { it.copy(pace = it.pace - (offsets[kind(it.seconds)] ?: 0.0)) }
+
     /** Monthly SubT for [reps] (optionally one kind). Months with fewer than 3 reps are marked as outliers. */
     fun months(reps: List<SubtRep>, kind: Kind? = null): List<SubtMonth> =
         reps.filter { kind == null || kind(it.seconds) == kind }.groupBy { it.date.take(7) }.toSortedMap().map { (m, l) ->
-            val t = l.sumOf { it.seconds.toDouble() }
-            SubtMonth(m, avgPace(l), l.size, outlier = l.size < 3, hr = l.sumOf { it.avgHr * it.seconds } / t)
+            val withHr = l.filter { it.avgHr > 0 }
+            val hr = if (withHr.isEmpty()) null else withHr.sumOf { it.avgHr * it.seconds } / withHr.sumOf { it.seconds.toDouble() }
+            SubtMonth(m, avgPace(l), l.size, outlier = l.size < 3, hr = hr)
         }
 
     fun toSubtData(reps: List<SubtRep>, today: java.time.LocalDate = java.time.LocalDate.now()): SubtData {
         val cutoff = today.minusDays(30).toString()
-        return SubtData(System.currentTimeMillis(), months(reps), reps.count { it.date >= cutoff }, reps.maxOfOrNull { it.date } ?: "", source = "workouts")
+        return SubtData(System.currentTimeMillis(), months(mixAdjusted(reps)), reps.count { it.date >= cutoff }, reps.maxOfOrNull { it.date } ?: "", source = "workouts")
     }
+
+    /**
+     * Current SubT: mix-adjusted average of the reps in the [days] days up to [end] (needs 3+ reps).
+     * Updates after every session instead of once a month.
+     */
+    fun current(reps: List<SubtRep>, end: java.time.LocalDate = java.time.LocalDate.now(), days: Long = 28): Pair<Double, Int>? {
+        val newReps = reps.filter { it.date.take(7) >= SWITCH_MONTH }
+        if (newReps.isEmpty()) return null
+        val from = end.minusDays(days - 1).toString(); val to = end.toString()
+        val win = mixAdjusted(newReps, kindOffsets(newReps)).filter { it.date in from..to }
+        return if (win.size >= 3) avgPace(win) to win.size else null
+    }
+
+    /**
+     * Trend over the last six regular months: pace change per month (negative = faster) and its
+     * standard error, so a real trend can be told from noise.
+     */
+    fun trendWithError(months: List<SubtMonth>): Pair<Double, Double>? {
+        val reg = months.withIndex().filter { !it.value.outlier }.takeLast(6)
+        if (reg.size < 3) return null
+        val xs = reg.map { it.index.toDouble() }; val ys = reg.map { it.value.pace }
+        val mx = xs.average(); val my = ys.average()
+        val sxx = xs.sumOf { (it - mx) * (it - mx) }
+        if (sxx == 0.0) return null
+        val slope = xs.indices.sumOf { (xs[it] - mx) * (ys[it] - my) } / sxx
+        val resid = xs.indices.sumOf { val e = ys[it] - (my + slope * (xs[it] - mx)); e * e }
+        val se = if (reg.size > 2) kotlin.math.sqrt(resid / (reg.size - 2) / sxx) else 0.0
+        return slope to se
+    }
+
+    /** "˄ 2s faster ±1" style text for a trend (s/km per month). */
+    fun trendText(t: Pair<Double, Double>?): String {
+        if (t == null) return "–"
+        val s = (t.first * 60).roundToIntSafe(); val e = (t.second * 60).roundToIntSafe()
+        val pm = if (e > 0) " ±$e" else ""
+        return when { s < 0 -> "˄ ${-s}s faster$pm"; s > 0 -> "˅ ${s}s slower$pm"; else -> "– flat$pm" }
+    }
+    private fun Double.roundToIntSafe() = if (isNaN()) 0 else Math.round(this).toInt()
 
     /** Old rule before [SWITCH_MONTH] (page data), SubT-workout reps from then on. */
     fun merge(page: SubtData?, reps: List<SubtRep>, today: java.time.LocalDate = java.time.LocalDate.now()): SubtData? {

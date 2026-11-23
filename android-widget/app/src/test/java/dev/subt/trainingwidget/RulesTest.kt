@@ -131,6 +131,30 @@ class RulesTest {
         assertEquals("no reps yet → page data", page, SubtWorkouts.merge(page, emptyList()))
     }
 
+    @Test fun subtMixAdjustedAndRolling() {
+        fun rep(d: String, sec: Int, pace: Double) = SubtRep("a$d$sec", d, "x", 1, sec, pace, 160.0, 165.0, null)
+        // Same fitness: short reps always 4:20, long reps always 4:40. Month A mostly long, month B mostly short.
+        val a = List(6) { rep("2026-06-0${it + 1}", 600, 4 + 40 / 60.0) } + List(2) { rep("2026-06-1${it}", 180, 4 + 20 / 60.0) }
+        val b = List(2) { rep("2026-07-0${it + 1}", 600, 4 + 40 / 60.0) } + List(6) { rep("2026-07-1${it}", 180, 4 + 20 / 60.0) }
+        val raw = SubtWorkouts.months(a + b)
+        assertTrue("raw average is fooled by the mix", raw[1].pace < raw[0].pace - 3 / 60.0)
+        val adj = SubtWorkouts.toSubtData(a + b, LocalDate.of(2026, 7, 20)).months
+        assertEquals("mix-adjusted months match", adj[0].pace, adj[1].pace, 0.5 / 60)
+        // rolling 28 days needs 3+ reps
+        assertNotNull(SubtWorkouts.current(a + b, LocalDate.of(2026, 7, 20)))
+        assertNull(SubtWorkouts.current(a + b, LocalDate.of(2026, 9, 30)))
+    }
+
+    @Test fun trendError() {
+        val steady = (0..5).map { SubtMonth("2026-0${it + 5}", 4.6 - it * 2 / 60.0, 6, false) }
+        val (sl, se) = SubtWorkouts.trendWithError(steady)!!
+        assertEquals(-2.0, sl * 60, 0.01); assertEquals(0.0, se * 60, 0.01)
+        assertEquals("˄ 2s faster", SubtWorkouts.trendText(sl to se))
+        val noisy = listOf(4.60, 4.50, 4.62, 4.52, 4.61, 4.53).mapIndexed { i, p -> SubtMonth("2026-0${i + 5}", p, 6, false) }
+        val (sl2, se2) = SubtWorkouts.trendWithError(noisy)!!
+        assertTrue("noise: error bigger than the slope", se2 > kotlin.math.abs(sl2))
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {
