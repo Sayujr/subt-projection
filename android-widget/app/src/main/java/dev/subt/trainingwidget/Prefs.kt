@@ -198,6 +198,9 @@ object Prefs {
     fun marathonTarget(ctx: Context): Int = sp(ctx).getInt("marathon_target", SubtModel.SUB3.toInt())
     fun setMarathonTarget(ctx: Context, sec: Int) = sp(ctx).edit().putInt("marathon_target", sec).apply()
 
+    /** Runs already read for SubT laps (so runs without any aren't fetched again). */
+    fun subtScanned(ctx: Context): Set<String> = sp(ctx).getStringSet("subt_scanned_v2", emptySet()) ?: emptySet()
+    fun saveSubtScanned(ctx: Context, ids: Set<String>) = sp(ctx).edit().putStringSet("subt_scanned_v2", HashSet(ids)).apply()
     fun subtReps(ctx: Context): Pair<Long, List<SubtRep>>? = sp(ctx).getString("subt_reps", null)?.let { SubtRep.listFromJson(it) }
     fun saveSubtReps(ctx: Context, reps: List<SubtRep>) =
         sp(ctx).edit().putString("subt_reps", SubtRep.listToJson(reps, System.currentTimeMillis())).apply()

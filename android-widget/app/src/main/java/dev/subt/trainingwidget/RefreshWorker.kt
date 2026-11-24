@@ -48,9 +48,9 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             runCatching { SubtApi.fetch() }.onSuccess { Prefs.saveSubtPage(ctx, it) }
         }
         val reps = Prefs.subtReps(ctx)
-        if (creds != null && (reps == null || System.currentTimeMillis() - reps.first > 6 * 3600_000L || force)) {
-            val days = java.time.temporal.ChronoUnit.DAYS.between(SubtWorkouts.fetchFrom(), java.time.LocalDate.now()) + 1
-            runCatching { IcuApi(creds).fetchSubtReps(daysBack = days, cached = reps?.second.orEmpty()) }.onSuccess { Prefs.saveSubtReps(ctx, it) }
+        if (creds != null && (reps == null || System.currentTimeMillis() - reps.first > 6 * 3600_000L || force || Prefs.subtScanned(ctx).isEmpty())) {
+            runCatching { IcuApi(creds).fetchSubtReps(cached = reps?.second.orEmpty(), scanned = Prefs.subtScanned(ctx)) }
+                .onSuccess { Prefs.saveSubtReps(ctx, it.reps); Prefs.saveSubtScanned(ctx, it.scanned) }
         }
         SubtWorkouts.merge(Prefs.subtPage(ctx), Prefs.subtReps(ctx)?.second.orEmpty())?.let { Prefs.saveSubt(ctx, it) }
         runCatching { Updater.check(ctx, force = inputData.getBoolean(FORCE, false)) }

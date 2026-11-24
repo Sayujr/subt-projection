@@ -22,6 +22,19 @@ object SubtWorkouts {
         LONG("Long (10′+)", 0xFFFF7A90.toInt()),
     }
 
+    /** Reps slower than this aren't SubT (jogs, aborted reps, GPS glitches): 5:45 /km. */
+    const val SLOWEST = 5.75
+
+    /**
+     * Before [SWITCH_MONTH] (HR-capped SubT): any lap in any run with average HR 155–172 lasting 2–12 min,
+     * no slower than 5:45 /km.
+     */
+    fun oldRuleLap(avgHr: Double?, seconds: Double, pace: Double) =
+        avgHr != null && avgHr in 155.0..172.0 && seconds in 120.0..720.0 && pace in 3.3..SLOWEST
+
+    /** From [SWITCH_MONTH] (3-6-10 at power targets): work reps of the named lengths, no slower than 5:45 /km. */
+    fun newRuleRep(seconds: Double, pace: Double, lengths: List<Double>) = matchesRep(seconds, lengths) && pace in 3.3..SLOWEST
+
     /** "3'x10", "6′ x 5", "10'x3 repeats", "3' repeats": the rep lengths in minutes. */
     private val REP = Regex("(\\d+(?:\\.\\d+)?)\\s*['’′]\\s*(?:x\\s*\\d+|repeats|reps)", RegexOption.IGNORE_CASE)
     private val NOT_SUBT = Regex("45\\s*/\\s*15|hill|\\b(200|400|800)s?\\b|stride|fartlek", RegexOption.IGNORE_CASE)
@@ -117,18 +130,26 @@ object SubtWorkouts {
     }
     private fun Double.roundToIntSafe() = if (isNaN()) 0 else Math.round(this).toInt()
 
-    /** Old rule before [SWITCH_MONTH] (page data), SubT-workout reps from then on. */
+    /**
+     * Both rules on one timeline: months before [SWITCH_MONTH] from the HR-rule laps (average pace),
+     * months after from the SubT-workout reps (rep-mix adjusted). Falls back to the projection page's
+     * data for the early months only if no early laps have been read yet.
+     */
     fun merge(page: SubtData?, reps: List<SubtRep>, today: java.time.LocalDate = java.time.LocalDate.now()): SubtData? {
         val newReps = reps.filter { it.date.take(7) >= SWITCH_MONTH }
-        if (page == null && newReps.isEmpty()) return null
-        if (newReps.isEmpty()) return page
-        val w = toSubtData(newReps, today)
-        val before = page?.months.orEmpty().filter { it.month < SWITCH_MONTH }
-        return SubtData(System.currentTimeMillis(), before + w.months, w.lapsLast30d, w.lastLapDate, source = "mixed")
+        val oldReps = reps.filter { it.date.take(7) < SWITCH_MONTH }
+        if (page == null && reps.isEmpty()) return null
+        if (reps.isEmpty()) return page
+        val before = if (oldReps.isNotEmpty()) months(oldReps) else page?.months.orEmpty().filter { it.month < SWITCH_MONTH }
+        val after = if (newReps.isNotEmpty()) months(mixAdjusted(newReps)) else emptyList()
+        val cutoff = today.minusDays(30).toString()
+        return SubtData(System.currentTimeMillis(), before + after, reps.count { it.date >= cutoff }, reps.maxOfOrNull { it.date } ?: "", source = "mixed")
     }
 
     /** First day the new rule needs reps from. */
     fun fetchFrom(): java.time.LocalDate = java.time.LocalDate.parse("$SWITCH_MONTH-01")
+    /** How far back the HR rule is read (the charts show about 18 months). */
+    const val HISTORY_DAYS = 560L
 
     /** Pace change per month (negative = faster) over the last six regular months, or null. */
     fun trend(months: List<SubtMonth>): Double? = Charts.subtTrendPerMonth(months)

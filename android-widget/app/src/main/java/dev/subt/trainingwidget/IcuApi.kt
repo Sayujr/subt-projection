@@ -176,47 +176,61 @@ class IcuApi(private val creds: Credentials) {
      * SubT reps from runs in the last [daysBack] days, using the same lap filter as the projection
      * page (refresh_data.py): avg HR > 160, max HR ≤ 172, 1.5–15 min, pace 3:30–9:00 /km.
      */
+    data class SubtScan(val reps: List<SubtRep>, val scanned: Set<String>)
+
     /**
-     * Every rep from your SubT workouts over [daysBack] days (see [SubtWorkouts]). Workouts already in
-     * [cached] aren't fetched again, except the last few days (in case a run was renamed or re-split).
+     * SubT laps / reps over the last [SubtWorkouts.HISTORY_DAYS]: before the switch month, laps from any
+     * run that hit 155+ bpm (HR rule); from the switch month, reps from named SubT workouts (3-6-10).
+     * Runs already read ([scanned]) aren't fetched again, except the last few days.
      */
-    fun fetchSubtReps(daysBack: Long = 560, today: LocalDate = LocalDate.now(), cached: List<SubtRep> = emptyList()): List<SubtRep> {
+    fun fetchSubtReps(today: LocalDate = LocalDate.now(), cached: List<SubtRep> = emptyList(), scanned: Set<String> = emptySet()): SubtScan {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val switch = SubtWorkouts.fetchFrom().toString()
         val acts = getArray(
             "/athlete/$ath/activities",
-            mapOf("oldest" to today.minusDays(daysBack).toString(), "newest" to today.plusDays(1).toString()),
-        ).objects().filter { it.optString("type").contains("Run", ignoreCase = true) && SubtWorkouts.isSubtWorkout(it.optString("name")) }
+            mapOf("oldest" to today.minusDays(SubtWorkouts.HISTORY_DAYS).toString(), "newest" to today.plusDays(1).toString()),
+        ).objects().filter { it.optString("type").contains("Run", ignoreCase = true) }
+            .filter { a ->
+                if (date(a) < switch) (a.optNum("max_heartrate") ?: 999.0) >= 155   // no lap can average 155+ otherwise
+                else SubtWorkouts.isSubtWorkout(a.optString("name"))
+            }
         val recent = today.minusDays(4).toString()
-        val cachedById = cached.groupBy { it.activityId }
-        val keep = acts.filter { cachedById.containsKey(it.optString("id")) && date(it) < recent }.flatMap { cachedById[it.optString("id")].orEmpty() }
-        val toFetch = acts.filter { !(cachedById.containsKey(it.optString("id")) && date(it) < recent) }
+        val ids = acts.map { it.optString("id") }.toSet()
+        val toFetch = acts.filter { it.optString("id") !in scanned || date(it) >= recent }
+        val fetchIds = toFetch.map { it.optString("id") }.toSet()
+        val keep = cached.filter { it.activityId in ids && it.activityId !in fetchIds }
         val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
         try {
             val futures = toFetch.map { act ->
-                pool.submit<List<SubtRep>> {
+                pool.submit<Pair<String, List<SubtRep>>?> {
                     val id = act.optString("id")
+                    val old = date(act) < switch
                     val lengths = SubtWorkouts.repLengths(act.optString("name"))
                     val o = runCatching { getObject("/activity/${URLEncoder.encode(id, "UTF-8")}/intervals") }.getOrNull()
-                        ?: return@submit emptyList()
+                        ?: return@submit null
                     val ivs = o.optJSONArray("icu_intervals")?.objects().orEmpty()
                     val reps = ivs.mapIndexedNotNull { i, iv ->
                         val type = iv.optString("type")
-                        if (type.isNotEmpty() && !type.equals("WORK", ignoreCase = true)) return@mapIndexedNotNull null
                         val el = iv.optNum("moving_time") ?: iv.optNum("elapsed_time") ?: return@mapIndexedNotNull null
                         val sp = iv.optNum("average_speed") ?: return@mapIndexedNotNull null
-                        if (sp <= 0 || !SubtWorkouts.matchesRep(el, lengths)) return@mapIndexedNotNull null
+                        if (sp <= 0) return@mapIndexedNotNull null
                         val pace = (1000 / sp) / 60
-                        if (pace !in 3.3..7.5) return@mapIndexedNotNull null
+                        val hr = iv.optNum("average_heartrate")
+                        val ok = if (old) SubtWorkouts.oldRuleLap(hr, el, pace)
+                            else (type.isEmpty() || type.equals("WORK", ignoreCase = true)) && SubtWorkouts.newRuleRep(el, pace, lengths)
+                        if (!ok) return@mapIndexedNotNull null
                         SubtRep(
                             id, date(act), act.optString("name"), i + 1, el.toInt(), pace,
-                            iv.optNum("average_heartrate") ?: 0.0, iv.optNum("max_heartrate") ?: 0.0,
+                            hr ?: 0.0, iv.optNum("max_heartrate") ?: 0.0,
                             (iv.optNum("average_watts") ?: iv.optNum("weighted_average_watts"))?.takeIf { it > 0 },
                         )
                     }
-                    SubtWorkouts.dropTestEfforts(reps)
+                    id to (if (old) reps else SubtWorkouts.dropTestEfforts(reps))
                 }
             }
-            return (keep + futures.flatMap { it.get() }).sortedWith(compareBy({ it.date }, { it.activityId }, { it.index }))
+            val got = futures.mapNotNull { it.get() }
+            val reps = (keep + got.flatMap { it.second }).sortedWith(compareBy({ it.date }, { it.activityId }, { it.index }))
+            return SubtScan(reps, (scanned intersect ids) + got.map { it.first })
         } finally {
             pool.shutdown()
         }

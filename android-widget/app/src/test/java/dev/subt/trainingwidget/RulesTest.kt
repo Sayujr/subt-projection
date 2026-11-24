@@ -122,12 +122,15 @@ class RulesTest {
             SubtMonth("2026-05", 5.20, 7, false), SubtMonth("2026-06", 5.10, 6, false),
         ), 5, "2026-06-20")
         fun rep(d: String, p: Double) = SubtRep("x$d", d, "6'x5 repeats", 1, 360, p, 158.0, 164.0, null)
-        val reps = listOf(rep("2026-05-05", 4.60), rep("2026-05-12", 4.62), rep("2026-05-19", 4.58), rep("2026-06-02", 4.55),
-            rep("2026-03-10", 9.99))  // a pre-switch rep is ignored
+        val reps = listOf(rep("2026-05-05", 4.60), rep("2026-05-12", 4.62), rep("2026-05-19", 4.58), rep("2026-06-02", 4.55))
         val m = SubtWorkouts.merge(page, reps, LocalDate.of(2026, 6, 10))!!
         assertEquals(listOf("2026-03", "2026-04", "2026-05", "2026-06"), m.months.map { it.month })
         assertEquals("old rule kept before May", 4.85, m.months[1].pace, 1e-9)
         assertEquals("reps from May", SubtWorkouts.avgPace(reps.subList(0, 3)), m.months[2].pace, 1e-9)
+        // once HR-rule laps for the early months are read, they replace the page data
+        val withOld = SubtWorkouts.merge(page, reps + rep("2026-04-08", 4.70) + rep("2026-04-15", 4.74), LocalDate.of(2026, 6, 10))!!
+        assertEquals(listOf("2026-04", "2026-05", "2026-06"), withOld.months.map { it.month })
+        assertEquals(SubtWorkouts.avgPace(listOf(rep("a", 4.70), rep("b", 4.74))), withOld.months[0].pace, 1e-9)
         assertEquals("no reps yet → page data", page, SubtWorkouts.merge(page, emptyList()))
     }
 
@@ -153,6 +156,22 @@ class RulesTest {
         val noisy = listOf(4.60, 4.50, 4.62, 4.52, 4.61, 4.53).mapIndexed { i, p -> SubtMonth("2026-0${i + 5}", p, 6, false) }
         val (sl2, se2) = SubtWorkouts.trendWithError(noisy)!!
         assertTrue("noise: error bigger than the slope", se2 > kotlin.math.abs(sl2))
+    }
+
+    @Test fun subtLapRules() {
+        // HR rule (before May): any lap, avg HR 155–172, 2–12 min, not slower than 5:45
+        assertTrue(SubtWorkouts.oldRuleLap(160.0, 300.0, 4.6))
+        assertTrue(SubtWorkouts.oldRuleLap(155.0, 120.0, 5.75))
+        assertFalse("HR too low", SubtWorkouts.oldRuleLap(150.0, 300.0, 4.6))
+        assertFalse("HR too high", SubtWorkouts.oldRuleLap(175.0, 300.0, 4.6))
+        assertFalse("too short", SubtWorkouts.oldRuleLap(160.0, 100.0, 4.6))
+        assertFalse("too long", SubtWorkouts.oldRuleLap(160.0, 800.0, 4.6))
+        assertFalse("slower than 5:45", SubtWorkouts.oldRuleLap(160.0, 300.0, 5.9))
+        assertFalse("no HR", SubtWorkouts.oldRuleLap(null, 300.0, 4.6))
+        // 3-6-10 rule (from May)
+        assertTrue(SubtWorkouts.newRuleRep(360.0, 4.5, listOf(6.0)))
+        assertFalse("slower than 5:45", SubtWorkouts.newRuleRep(360.0, 6.0, listOf(6.0)))
+        assertFalse("wrong length", SubtWorkouts.newRuleRep(600.0, 4.5, listOf(6.0)))
     }
 
     // ---- TT / race / CP test detection by name

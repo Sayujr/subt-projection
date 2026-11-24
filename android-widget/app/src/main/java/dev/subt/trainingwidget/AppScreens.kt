@@ -777,7 +777,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
 
     /** SubT split by rep length (short 3′ / medium 6′ / long 10′+) with each one's trend. */
     private fun subtKindsCard(col: LinearLayout) {
-        val reps = Prefs.subtReps(a)?.second.orEmpty()
+        // 3-6-10 reps only (from the switch month); earlier laps follow the HR rule and have no set lengths
+        val reps = Prefs.subtReps(a)?.second.orEmpty().filter { it.date.take(7) >= SubtWorkouts.SWITCH_MONTH }
         if (reps.isEmpty()) return
         val c = card(col)
         label(c, "SubT by rep length")
@@ -807,7 +808,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             "Months with fewer than 3 reps are faded. Trend = change per month over the last six months, ± its error: green or red only when the change is bigger than the error. " +
             "Your headline SubT is the last 28 days, adjusted for rep mix (each length's usual gap to your average is taken out), so doing more 3′ reps doesn't make it look faster. " +
             "Speed per heartbeat = metres per beat on the reps: it rises when you get faster at the same HR, and isn't fooled by an easy-paced hot day. Touch a chart to read a month. " +
-            "Before May 2026 the SubT chart uses the original rule: laps with average HR over 160, max HR up to 172, 1.5–15 min, monthly median.")
+            "Before May 2026 the SubT chart uses your HR rule: any lap with average HR 155–172 lasting 2–12 min (monthly average). Both rules drop anything slower than 5:45 /km.")
     }
 
     private fun monthShort(m: String) = runCatching { LocalDate.parse("$m-01").format(DateTimeFormatter.ofPattern("MMM", loc)) }.getOrDefault(m)
