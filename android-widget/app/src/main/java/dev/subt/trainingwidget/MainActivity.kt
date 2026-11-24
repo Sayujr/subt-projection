@@ -268,7 +268,10 @@ class MainActivity : Activity() {
             }
             Tab.WEEK -> {
                 controls.visibility = View.VISIBLE
+                // Back / forward first, side by side, so both are always on screen
                 chips.addView(chip("‹", false) { offset -= 1; show() })
+                chips.addView(chip("›", false) { offset += 1; show() })
+                if (offset != 0) chips.addView(chip("Now", false) { offset = 0; show() })
                 for (m in RangeMode.entries) {
                     val label = if (m == RangeMode.CUSTOM && customStart != null && mode == m) {
                         val f = DateTimeFormatter.ofPattern("d MMM", Locale.getDefault())
@@ -278,8 +281,6 @@ class MainActivity : Activity() {
                         if (m == RangeMode.CUSTOM) pickCustomRange() else { mode = m; offset = 0; show() }
                     })
                 }
-                chips.addView(chip("›", false) { offset += 1; show() })
-                if (offset != 0) chips.addView(chip("Now", false) { offset = 0; show() })
             }
             Tab.RACE -> {
                 val races = Prefs.snapshot(this)?.races.orEmpty().filter { it.date >= LocalDate.now().toString() }
