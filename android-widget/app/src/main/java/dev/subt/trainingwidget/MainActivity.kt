@@ -608,7 +608,6 @@ class MainActivity : Activity() {
         val charts = listOf<Triple<String, Int, (Zones.Total) -> Double>>(
             Triple("SubT in target", ZC_SUBT, { t: Zones.Total -> t.subtInSec }),
             Triple("Under ${Zones.EASY_HR.toInt()}", ZC_EASY, { t: Zones.Total -> t.easySec }),
-            Triple("HR 155–172", ZC_BAND, { t: Zones.Total -> t.bandSec.getOrElse(3) { 0.0 } + t.bandSec.getOrElse(4) { 0.0 } }),
             Triple("Long-run aerobic", ZC_LONG, { t: Zones.Total -> t.longSec }),
         )
         val widthPx = dp(wDp - 56).coerceAtLeast(dp(200))

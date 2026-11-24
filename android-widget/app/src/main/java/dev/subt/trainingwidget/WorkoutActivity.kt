@@ -230,8 +230,10 @@ class WorkoutActivity : Activity() {
         // Average of all work steps: the main takeaway
         det.work?.let { wk ->
             val c = card()
-            label(c, "Work steps · average of ${wk.count}", GOOD)
-            text(c, "${dur(wk.seconds)} of work" + (if (wk.distance > 0) " · ${km(wk.distance)}" else ""), 12.5f, DIM, top = 2)
+            // On an easy day every planned step counts, so don't call them "work"
+            val allSteps = det.steps.all { it.isWork }
+            label(c, (if (allSteps) "Planned steps" else "Work steps") + " · average of ${wk.count}", GOOD)
+            text(c, "${dur(wk.seconds)}" + (if (allSteps) "" else " of work") + (if (wk.distance > 0) " · ${km(wk.distance)}" else ""), 12.5f, DIM, top = 2)
             metric(c, "Power", POWER, w(wk.power.avg), "Min ${wk.power.min?.roundToInt() ?: "–"} · Max ${wk.power.max?.roundToInt() ?: "–"}")
             metric(c, if (ride) "Speed" else "Pace", PACE, spd(wk.speed.avg, ride), "Min ${spd(wk.speed.min, ride, false)} · Max ${spd(wk.speed.max, ride, false)}")
             metric(c, "Heart rate", HEART, bpm(wk.hr.avg), "Min ${wk.hr.min?.roundToInt() ?: "–"} · Max ${wk.hr.max?.roundToInt() ?: "–"}")
@@ -240,7 +242,7 @@ class WorkoutActivity : Activity() {
                 text(c, spans((if (wk.hrTarget) "Against HR target  " else "Against target  ") to DIM, "${wk.pctOfTarget?.roundToInt() ?: "–"}%" to vc, "  $vt" to vc), 15f, top = 12)
                 image(c, targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true), 30, top = 2)
                 if (!wk.hrTarget) det.ftp?.let { f -> wk.power.avg?.let { text(c, "${(it / f * 100).roundToInt()}% of CP · target ${(wk.loW / f * 100).roundToInt()}–${(wk.hiW / f * 100).roundToInt()}% of CP", 12f, FAINT, top = 4) } }
-                metric(c, if (wk.hrTarget) "Time in HR target" else "Time in power target", GOOD, pct(wk.inTarget), "work steps only")
+                metric(c, if (wk.hrTarget) "Time in HR target" else "Time in power target", GOOD, pct(wk.inTarget), if (det.steps.all { it.isWork }) null else "work steps only")
             }
             metric(c, "Time with HR ≤ 165", HEART, pct(wk.hr165), null)
             metric(c, "Time with HR ≤ 172", HEART, pct(wk.hr172), null)
