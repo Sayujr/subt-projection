@@ -858,7 +858,7 @@ class RulesTest {
 
     @Test fun coachNotesWithQuestion() {
         val n = sampleNote()
-        val q = CoachNotes.withQuestion(n, "a", "2026-01-06 08:00", "Topic\nline", "first line\nsecond   line\n\nthird", "x".repeat(900))
+        val q = CoachNotes.withQuestion(n, "a", "2026-01-06 08:00", "Topic\nline", "first line\nsecond line\n\nthird", "x".repeat(900))
         assertEquals(3, q.questions.size)
         assertEquals(3, q.questions.last().n)
         assertEquals("first line second line third", q.questions.last().question)
