@@ -55,6 +55,8 @@ object Zones {
         val easySec: Double, val easyM: Double,
         val longSec: Double, val longM: Double,
         val bandSec: List<Double> = ZEROS, val bandM: List<Double> = ZEROS,
+        /** SubT work judged under / over the planned power range. */
+        val subtUnderSec: Double = 0.0, val subtUnderM: Double = 0.0, val subtOverSec: Double = 0.0, val subtOverM: Double = 0.0,
     )
 
     data class Total(
@@ -62,6 +64,7 @@ object Zones {
         val easySec: Double, val easyM: Double, val longSec: Double, val longM: Double, val runs: Int,
         val bandSec: List<Double> = ZEROS, val bandM: List<Double> = ZEROS,
         val longBandSec: List<Double> = ZEROS, val longBandM: List<Double> = ZEROS,
+        val subtUnderSec: Double = 0.0, val subtUnderM: Double = 0.0, val subtOverSec: Double = 0.0, val subtOverM: Double = 0.0,
     )
 
     private val LONG_NAME = Regex("long|progress|steady", RegexOption.IGNORE_CASE)
@@ -108,6 +111,7 @@ object Zones {
         }
 
         var inSec = 0.0; var inM = 0.0; var workSec = 0.0
+        var underSec = 0.0; var underM = 0.0; var overSec = 0.0; var overM = 0.0
         if (subt && raw.optJSONObject("i") != null) {
             val det = WorkoutDetail.fromRaw(raw, fallbackFtp)
             for (st in det.steps) {
@@ -120,11 +124,15 @@ object Zones {
                     val w = series.getOrNull(i) ?: continue
                     val d = dt(i)
                     workSec += d
-                    if (w >= lo - 0.5 && w <= hi + 0.5) { inSec += d; inM += dist(i, d) }
+                    when {
+                        w < lo - 0.5 -> { underSec += d; underM += dist(i, d) }
+                        w > hi + 0.5 -> { overSec += d; overM += dist(i, d) }
+                        else -> { inSec += d; inM += dist(i, d) }
+                    }
                 }
             }
         }
-        return Run(id, date, name, seconds, a.numOrNull("distance") ?: 0.0, subt, long, inSec, inM, workSec, easySec, easyM, longSec, longM, bandSec.toList(), bandM.toList())
+        return Run(id, date, name, seconds, a.numOrNull("distance") ?: 0.0, subt, long, inSec, inM, workSec, easySec, easyM, longSec, longM, bandSec.toList(), bandM.toList(), underSec, underM, overSec, overM)
     }
 
     fun toJson(list: List<Run>): String {
@@ -133,7 +141,8 @@ object Zones {
             .put("distance", r.distance).put("subt", r.subt).put("long", r.long)
             .put("subtInSec", r.subtInSec).put("subtInM", r.subtInM).put("subtWorkSec", r.subtWorkSec)
             .put("easySec", r.easySec).put("easyM", r.easyM).put("longSec", r.longSec).put("longM", r.longM)
-            .put("bandSec", JSONArray(r.bandSec)).put("bandM", JSONArray(r.bandM)))
+            .put("bandSec", JSONArray(r.bandSec)).put("bandM", JSONArray(r.bandM))
+            .put("subtUnderSec", r.subtUnderSec).put("subtUnderM", r.subtUnderM).put("subtOverSec", r.subtOverSec).put("subtOverM", r.subtOverM))
         return arr.toString()
     }
 
@@ -148,7 +157,8 @@ object Zones {
                 o.optBoolean("subt"), o.optBoolean("long"),
                 o.optDouble("subtInSec", 0.0), o.optDouble("subtInM", 0.0), o.optDouble("subtWorkSec", 0.0),
                 o.optDouble("easySec", 0.0), o.optDouble("easyM", 0.0), o.optDouble("longSec", 0.0), o.optDouble("longM", 0.0),
-                arr7(o.optJSONArray("bandSec")), arr7(o.optJSONArray("bandM")))
+                arr7(o.optJSONArray("bandSec")), arr7(o.optJSONArray("bandM")),
+                o.optDouble("subtUnderSec", 0.0), o.optDouble("subtUnderM", 0.0), o.optDouble("subtOverSec", 0.0), o.optDouble("subtOverM", 0.0))
         }
     }.getOrDefault(emptyList())
 
@@ -159,7 +169,8 @@ object Zones {
         return Total(l.sumOf { it.subtInSec }, l.sumOf { it.subtInM }, l.sumOf { it.subtWorkSec },
             l.sumOf { it.easySec }, l.sumOf { it.easyM }, l.sumOf { it.longSec }, l.sumOf { it.longM }, l.size,
             sumBands(l) { it.bandSec }, sumBands(l) { it.bandM },
-            sumBands(l.filter { it.long }) { it.bandSec }, sumBands(l.filter { it.long }) { it.bandM })
+            sumBands(l.filter { it.long }) { it.bandSec }, sumBands(l.filter { it.long }) { it.bandM },
+            l.sumOf { it.subtUnderSec }, l.sumOf { it.subtUnderM }, l.sumOf { it.subtOverSec }, l.sumOf { it.subtOverM })
     }
 
     /** The last [weeks] Mon–Sun weeks, oldest first, the last one being the week of [today]. */

@@ -577,7 +577,7 @@ class MainActivity : Activity() {
         fun label(t: String, size: Float, color: Int, top: Int = 0) = TextView(this).apply {
             text = t; setTextColor(color); setTextSize(TypedValue.COMPLEX_UNIT_SP, size); setPadding(0, dp(top), 0, 0)
         }
-        card.addView(label("TIME IN TARGET", 12f, 0xFF6B7386.toInt()).apply { letterSpacing = 0.06f })
+        BandViews.heading(this, card, "TIME IN TARGET", "SubT workouts only, work steps only. Power is compared with each step's planned range.", 0xFF6B7386.toInt(), 12f)
         if (key in zonesLoading && tot.runs == 0) {
             card.addView(label("Loading…", 14f, 0xFF9AA3B2.toInt(), 6))
         } else {
@@ -589,7 +589,14 @@ class MainActivity : Activity() {
             }
             val pct = if (tot.subtWorkSec > 0) " · ${(tot.subtInSec / tot.subtWorkSec * 100).roundToInt()}% of work time" else ""
             row("SubT in power target", if (tot.subtInSec > 0) "${tm(tot.subtInSec)} · ${km(tot.subtInM)}$pct" else "–", ZC_SUBT)
-            card.addView(label("HEART RATE BANDS · ALL RUNS", 12f, 0xFF6B7386.toInt(), 16).apply { letterSpacing = 0.06f })
+            if (tot.subtWorkSec > 0) {
+                val wk = tot.subtWorkSec
+                card.addView(BandViews.stripView(this, listOf(tot.subtUnderSec, tot.subtInSec, tot.subtOverSec), listOf(0xFF6B7386.toInt(), 0xFF3DD68C.toInt(), 0xFF4EA1FF.toInt()), dp(wDp - 56)))
+                card.addView(BandViews.statRow(this, "In target", tot.subtInSec, tot.subtInSec / wk * 100, tot.subtInM))
+                card.addView(BandViews.statRow(this, "In or over target", tot.subtInSec + tot.subtOverSec, (tot.subtInSec + tot.subtOverSec) / wk * 100, tot.subtInM + tot.subtOverM, emphasised = true))
+                card.addView(BandViews.statRow(this, "Under target", tot.subtUnderSec, tot.subtUnderSec / wk * 100, tot.subtUnderM))
+            }
+            BandViews.heading(this, card, "HEART RATE BANDS · ALL RUNS", "Every run counts here, including races and tests. Rows overlap on purpose; the coloured strip shows the four parts that add up to 100%.", 0xFF6B7386.toInt(), 12f, topDp = 16)
             card.addView(BandViews.build(this, tot.bandSec, tot.bandM, dp(wDp - 56)))
             row("Long-run aerobic · HR ${Zones.EASY_HR.toInt()}–$lt1", if (tot.longSec > 0) "${tm(tot.longSec)} · ${km(tot.longM)}" else "–", ZC_LONG)
             val longBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = if (longBandsOpen) View.VISIBLE else View.GONE }

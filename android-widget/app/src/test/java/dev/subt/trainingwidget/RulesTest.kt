@@ -608,4 +608,17 @@ class RulesTest {
         val ride = buildRaw(listOf(Seg("WORK", 300, 330.0, stopAt = 100, stopLen = 20)), listOf(pw(90, 95, 300)), type = "Ride")
         assertEquals(0, WorkoutDetail.fromRaw(ride, null).stoppedSec)
     }
+
+    @Test fun zonesSubtUnderOverTotals() {
+        // 400 W is over 315–332.5 for the whole rep: everything judged is "over"
+        val raw = buildRaw(listOf(Seg("WORK", 300, 400.0)), listOf(pw(90, 95, 300)), name = "5'x1 repeats")
+        val r = Zones.compute(raw, 153.0, null)
+        assertEquals(295.0, r.subtWorkSec, 1e-9)
+        assertEquals(295.0, r.subtOverSec, 1e-9); assertEquals(0.0, r.subtInSec, 0.0); assertEquals(0.0, r.subtUnderSec, 0.0)
+        assertEquals(295.0 * 3.7, r.subtOverM, 1e-6)
+        assertEquals(r.subtWorkSec, r.subtUnderSec + r.subtInSec + r.subtOverSec, 1e-9)
+        assertEquals(listOf(r), Zones.fromJson(Zones.toJson(listOf(r))))
+        val t = Zones.total(listOf(r, r), LocalDate.parse("2026-11-16"), LocalDate.parse("2026-11-22"))
+        assertEquals(590.0, t.subtOverSec, 1e-9); assertEquals(2 * 295.0 * 3.7, t.subtOverM, 1e-6)
+    }
 }
