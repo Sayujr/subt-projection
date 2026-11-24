@@ -299,6 +299,7 @@ class WorkoutActivity : Activity() {
             val sub = if (pctT != null) "of target" + (det.ftp?.let { f -> st.power.avg?.let { " · ${(it / f * 100).roundToInt()}% CP" } } ?: "") else ""
             if (sub.isNotEmpty()) { val s0 = sb.length; sb.append("\n$sub"); sb.setSpan(RelativeSizeSpan(0.62f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(FAINT), s0, sb.length, 0) }
             text = sb; textSize = if (st.isWork) 19f else 15f
+            setPadding(0, 0, dp(if (st.isWork) 0 else 6), 0)
         }
         r.addView(right)
         if (st.isWork) r.addView(TextView(this).apply { text = if (st.index in opened) "⌃" else "›"; textSize = 18f; setTextColor(FAINT); setPadding(dp(10), 0, 0, 0) })
@@ -388,7 +389,7 @@ object WorkoutChart {
                 val dash = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0x99FFFFFF.toInt(); strokeWidth = 1f * d; style = Paint.Style.STROKE; pathEffect = DashPathEffect(floatArrayOf(3f * d, 3f * d), 0f) }
                 for (lim in listOf(165.0, 172.0)) if (lim in lo..hi) {
                     c.drawLine(r.left, y(lim), r.right, y(lim), dash)
-                    c.drawText(lim.roundToInt().toString(), r.right - label.measureText("172") - 2f * d, y(lim) - 2f * d, label)
+                    c.drawText(lim.roundToInt().toString(), r.right - label.measureText("172") - 2f * d, if (lim < 170) y(lim) + 10f * d else y(lim) - 2f * d, label)
                 }
             }
             val path = Path(); var pen = false
