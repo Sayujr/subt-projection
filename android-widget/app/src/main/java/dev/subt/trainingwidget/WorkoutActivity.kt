@@ -1,0 +1,422 @@
+package dev.subt.trainingwidget
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.DashPathEffect
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.os.Bundle
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import org.json.JSONObject
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.roundToInt
+
+/**
+ * One workout in detail: summary, the average of all work steps, power / pace / HR over time, and
+ * every step against its planned power target. Tap a work step for its own numbers.
+ */
+class WorkoutActivity : Activity() {
+    companion object {
+        const val EXTRA_ID = "activity_id"
+        const val EXTRA_NAME = "activity_name"
+        fun open(ctx: Context, id: String, name: String? = null) =
+            ctx.startActivity(Intent(ctx, WorkoutActivity::class.java).putExtra(EXTRA_ID, id).putExtra(EXTRA_NAME, name))
+
+        private const val TEXT = 0xFFF2F4F8.toInt()
+        private const val DIM = 0xFF9AA3B2.toInt()
+        private const val FAINT = 0xFF6B7386.toInt()
+        private const val GOOD = 0xFF3DD68C.toInt()
+        private const val WARN = 0xFFFFC53D.toInt()
+        private const val TILE = 0xFF222733.toInt()
+        const val POWER = 0xFFFFB02E.toInt()
+        const val PACE = 0xFF4EA1FF.toInt()
+        const val HEART = 0xFFFF7A90.toInt()
+    }
+
+    private lateinit var col: LinearLayout
+    private var id = ""
+    private val opened = mutableSetOf<Int>()
+    private var loading = false
+
+    private val d get() = resources.displayMetrics.density
+    private fun dp(v: Int) = (v * d).roundToInt()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        id = intent?.getStringExtra(EXTRA_ID).orEmpty()
+        val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false; fitsSystemWindows = true }
+        col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(24)) }
+        sv.addView(col)
+        setContentView(sv)
+        val raw = WorkoutDetail.cached(this, id)
+        if (raw != null) show(raw) else load()
+    }
+
+    private fun load() {
+        val creds = Prefs.credentials(this)
+        col.removeAllViews()
+        header(intent?.getStringExtra(EXTRA_NAME) ?: "Workout", "")
+        if (creds == null || id.isEmpty()) { text(col, "Connect intervals.icu in Settings to see workout details.", 14f, DIM); return }
+        if (loading) return
+        loading = true
+        text(col, "Loading from intervals.icu…", 14f, DIM)
+        Thread {
+            val r = runCatching { IcuApi(creds).fetchWorkoutRaw(id) }
+            runOnUiThread {
+                loading = false
+                r.onSuccess { WorkoutDetail.save(this, id, it); show(it) }
+                    .onFailure { col.removeAllViews(); header(intent?.getStringExtra(EXTRA_NAME) ?: "Workout", ""); text(col, "Couldn't load: ${it.message ?: it.javaClass.simpleName}", 14f, WARN) }
+            }
+        }.start()
+    }
+
+    // ---------------------------------------------------------------- formatting
+
+    private fun w(v: Double?) = v?.let { "${it.roundToInt()} W" } ?: "–"
+    private fun bpm(v: Double?) = v?.let { "${it.roundToInt()} bpm" } ?: "–"
+    private fun pct(v: Double?) = v?.let { "${(it * 100).roundToInt()}%" } ?: "–"
+    private fun dur(sec: Int) = SubtModel.time(sec.toDouble())
+    private fun km(m: Double) = String.format(Locale.US, "%.2f km", m / 1000)
+    /** Run: pace per km. Ride: km/h. */
+    private fun spd(v: Double?, ride: Boolean, unit: Boolean = true): String {
+        if (v == null || v <= 0) return "–"
+        return if (ride) String.format(Locale.US, "%.1f", v * 3.6) + (if (unit) " km/h" else "")
+        else Charts.paceText(1000 / v / 60) + (if (unit) " /km" else "")
+    }
+
+    // ---------------------------------------------------------------- building blocks
+
+    private fun text(parent: LinearLayout, t: CharSequence, sp: Float = 14f, color: Int = TEXT, bold: Boolean = false, top: Int = 0): TextView {
+        val tv = TextView(this).apply {
+            text = t; setTextSize(TypedValue.COMPLEX_UNIT_SP, sp); setTextColor(color)
+            if (bold) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setPadding(0, dp(top), 0, 0)
+        }
+        parent.addView(tv)
+        return tv
+    }
+
+    private fun label(parent: LinearLayout, t: String, color: Int = DIM) = text(parent, t.uppercase(Locale.getDefault()), 11f, color).apply { letterSpacing = 0.08f }
+
+    private fun card(): LinearLayout {
+        val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundResource(R.drawable.tile_bg); setPadding(dp(14), dp(12), dp(14), dp(14)) }
+        col.addView(c, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+        return c
+    }
+
+    private fun header(title: String, sub: String) {
+        val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(10)) }
+        r.addView(TextView(this).apply { text = "‹"; textSize = 28f; setTextColor(TEXT); setPadding(dp(4), 0, dp(14), 0); setOnClickListener { finish() } })
+        val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        t.addView(TextView(this).apply { text = title; textSize = 19f; setTextColor(TEXT); typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL); maxLines = 2 })
+        if (sub.isNotEmpty()) t.addView(TextView(this).apply { text = sub; textSize = 13f; setTextColor(DIM) })
+        r.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        r.addView(TextView(this).apply { text = "⟳"; textSize = 22f; setTextColor(DIM); setPadding(dp(12), 0, dp(4), 0); setOnClickListener { load() } })
+        col.addView(r)
+    }
+
+    /** Label on the left; value on the right with "Min · Max" underneath (as in the Stryd metrics list). */
+    private fun metric(parent: LinearLayout, name: String, color: Int, value: String, sub: String?) {
+        val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(9), 0, dp(3)) }
+        r.addView(TextView(this).apply { text = "●"; textSize = 10f; setTextColor(color); setPadding(0, 0, dp(10), 0) })
+        r.addView(TextView(this).apply { text = name; textSize = 15.5f; setTextColor(TEXT) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val v = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
+        v.addView(TextView(this).apply { text = value; textSize = 18f; setTextColor(TEXT); gravity = Gravity.END; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) })
+        if (sub != null) v.addView(TextView(this).apply { text = sub; textSize = 12f; setTextColor(DIM); gravity = Gravity.END })
+        r.addView(v)
+        parent.addView(r)
+    }
+
+    private fun tiles(parent: LinearLayout, items: List<Pair<String, String>>) {
+        val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4), 0, 0) }
+        for ((k, v) in items) {
+            val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            cell.addView(TextView(this).apply { text = k; textSize = 11.5f; setTextColor(DIM) })
+            cell.addView(TextView(this).apply { text = v; textSize = 17f; setTextColor(TEXT); typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) })
+            r.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        parent.addView(r)
+    }
+
+    private fun image(parent: LinearLayout, bmp: Bitmap, hDp: Int, top: Int = 6): ImageView {
+        val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.FIT_XY }
+        parent.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(hDp)).apply { topMargin = dp(top) })
+        return iv
+    }
+
+    private fun contentW() = resources.displayMetrics.widthPixels - dp(12 + 12 + 14 + 14)
+
+    /**
+     * Target bar: the middle third is the target range (ticks at its ends), the fill runs to where
+     * your average sat. Green inside the range, yellow outside.
+     */
+    private fun targetBar(wPx: Int, position: Double?, vs: Int?, lo: Double?, hi: Double?, labels: Boolean): Bitmap {
+        val h = dp(if (labels) 30 else 12)
+        val bmp = Bitmap.createBitmap(wPx.coerceAtLeast(10), h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val bh = 6f * d; val y = h - bh - 1f * d
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.color = 0xFF3A4150.toInt()
+        c.drawRoundRect(RectF(0f, y, bmp.width.toFloat(), y + bh), bh / 2, bh / 2, p)
+        val x0 = bmp.width / 3f; val x1 = bmp.width * 2 / 3f
+        if (position != null) {
+            val x = (x0 + position * (x1 - x0)).toFloat().coerceIn(bh, bmp.width.toFloat())
+            p.color = if (vs == 0) GOOD else WARN
+            c.drawRoundRect(RectF(0f, y, x, y + bh), bh / 2, bh / 2, p)
+        }
+        p.color = TEXT; p.strokeWidth = 2f * d
+        c.drawLine(x0, y - 2.5f * d, x0, y + bh + 1f * d, p)
+        c.drawLine(x1, y - 2.5f * d, x1, y + bh + 1f * d, p)
+        if (labels && lo != null && hi != null) {
+            val t = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = DIM; textSize = 11f * d }
+            val a = lo.roundToInt().toString(); val b = hi.roundToInt().toString()
+            c.drawText(a, x0 - t.measureText(a) / 2, y - 7f * d, t)
+            c.drawText(b, x1 - t.measureText(b) / 2, y - 7f * d, t)
+        }
+        return bmp
+    }
+
+    private fun vsText(avg: Double?, lo: Double?, hi: Double?): Pair<String, Int> {
+        if (avg == null || lo == null || hi == null) return "" to DIM
+        return when {
+            avg < lo - 0.5 -> "${(lo - avg).roundToInt()} W under" to WARN
+            avg > hi + 0.5 -> "${(avg - hi).roundToInt()} W over" to WARN
+            else -> "in range" to GOOD
+        }
+    }
+
+    private fun spans(vararg parts: Pair<String, Int>): CharSequence {
+        val sb = SpannableStringBuilder()
+        for ((t, c) in parts) { val s = sb.length; sb.append(t); sb.setSpan(ForegroundColorSpan(c), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+        return sb
+    }
+
+    // ---------------------------------------------------------------- screen
+
+    private fun show(raw: JSONObject) {
+        val det = try { WorkoutDetail.fromRaw(raw, Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp) } catch (e: Exception) {
+            col.removeAllViews(); header("Workout", ""); text(col, "Couldn't read this workout: ${e.message}", 14f, WARN); return
+        }
+        col.removeAllViews()
+        val ride = det.isRide
+        val dateTxt = runCatching { LocalDate.parse(det.date).format(DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())) }.getOrDefault(det.date)
+        header(det.name, "$dateTxt · ${det.type}")
+
+        // Summary
+        val s = card()
+        label(s, "Summary")
+        tiles(s, listOf("Moving time" to dur(det.seconds), "Distance" to km(det.distance), "Load" to (det.load?.toString() ?: "–"), "Elev gain" to (det.elevGain?.let { "${it.roundToInt()} m" } ?: "–")))
+        val cpTxt = det.ftp?.let { f -> det.power.avg?.let { "Average ${w(it)} · ${(it / f * 100).roundToInt()}% of CP ${f.roundToInt()} W (your CP that day)" } }
+        if (cpTxt != null) text(s, cpTxt, 12.5f, DIM, top = 8)
+
+        // Average of all work steps: the main takeaway
+        det.work?.let { wk ->
+            val c = card()
+            label(c, "Work steps · average of ${wk.count}", GOOD)
+            text(c, "${dur(wk.seconds)} of work" + (if (wk.distance > 0) " · ${km(wk.distance)}" else ""), 12.5f, DIM, top = 2)
+            metric(c, "Power", POWER, w(wk.power.avg), "Min ${wk.power.min?.roundToInt() ?: "–"} · Max ${wk.power.max?.roundToInt() ?: "–"}")
+            metric(c, if (ride) "Speed" else "Pace", PACE, spd(wk.speed.avg, ride), "Min ${spd(wk.speed.min, ride, false)} · Max ${spd(wk.speed.max, ride, false)}")
+            metric(c, "Heart rate", HEART, bpm(wk.hr.avg), "Min ${wk.hr.min?.roundToInt() ?: "–"} · Max ${wk.hr.max?.roundToInt() ?: "–"}")
+            if (wk.loW != null && wk.hiW != null) {
+                val (vt, vc) = vsText(wk.power.avg, wk.loW, wk.hiW)
+                text(c, spans("Against target  " to DIM, "${wk.pctOfTarget?.roundToInt() ?: "–"}%" to vc, "  $vt" to vc), 15f, top = 12)
+                image(c, targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true), 30, top = 2)
+                det.ftp?.let { f -> wk.power.avg?.let { text(c, "${(it / f * 100).roundToInt()}% of CP · target ${(wk.loW / f * 100).roundToInt()}–${(wk.hiW / f * 100).roundToInt()}% of CP", 12f, FAINT, top = 4) } }
+                metric(c, "Time in power target", GOOD, pct(wk.inTarget), "work steps only")
+            }
+            metric(c, "Time with HR ≤ 165", HEART, pct(wk.hr165), null)
+            metric(c, "Time with HR ≤ 172", HEART, pct(wk.hr172), null)
+        }
+
+        // Power / pace / HR over time
+        if (det.watts.any { it != null } || det.heart.any { it != null }) {
+            val c = card()
+            label(c, "Power · ${if (ride) "speed" else "pace"} · heart rate")
+            val bmp = WorkoutChart.draw(det, contentW(), dp(260), d, TILE)
+            val iv = image(c, bmp, 260)
+            ChartHits.get(bmp)?.let { Scrub.attach(iv, bmp, it) }
+            text(c, "Shaded = work steps · green band = power target · dashed = HR 165 and 172. Touch and drag to read values.", 11.5f, FAINT, top = 4)
+        }
+
+        // Steps against target
+        if (det.steps.isNotEmpty()) {
+            val c = card()
+            label(c, "Steps" + if (det.hasTargets) " · against your targets" else "")
+            if (!det.hasTargets) text(c, "No planned power targets found for this workout, so steps show what you did.", 12.5f, DIM, top = 2)
+            var workNo = 0
+            for (st in det.steps) {
+                if (st.isWork) workNo++
+                stepRow(c, det, st, workNo)
+            }
+        } else text(card(), "intervals.icu has no steps for this activity.", 13f, DIM)
+    }
+
+    private fun stepRow(parent: LinearLayout, det: WorkoutDetail.Detail, st: WorkoutDetail.Step, workNo: Int) {
+        val ride = det.isRide
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(9), 0, dp(4)) }
+        val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val blockColor = when (st.kind) {
+            WorkoutDetail.Kind.WORK -> PACE
+            WorkoutDetail.Kind.WARMUP -> GOOD
+            WorkoutDetail.Kind.COOLDOWN -> 0xFF5EC8FF.toInt()
+            else -> 0xFF4A5263.toInt()
+        }
+        r.addView(View(this).apply { setBackgroundColor(blockColor) }, LinearLayout.LayoutParams(dp(if (st.isWork) 22 else 14), dp(if (st.isWork) 22 else 14)).apply { marginEnd = dp(10) })
+        val name = st.kind.label + (if (st.isWork) " $workNo" else "")
+        val left = TextView(this).apply {
+            val sb = SpannableStringBuilder(dur(st.seconds))
+            val s0 = sb.length
+            sb.append("\n$name" + (if (st.isWork) " · ${w(st.power.avg)}" else ""))
+            sb.setSpan(RelativeSizeSpan(0.72f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(DIM), s0, sb.length, 0)
+            text = sb; textSize = if (st.isWork) 17f else 15f; setTextColor(if (st.isWork) TEXT else DIM)
+        }
+        r.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val vs = st.vsTarget
+        val pctT = st.pctOfTarget
+        val right = TextView(this).apply {
+            gravity = Gravity.END
+            val main = pctT?.let { "${it.roundToInt()}%" } ?: w(st.power.avg)
+            val sb = SpannableStringBuilder(main)
+            sb.setSpan(ForegroundColorSpan(if (pctT == null) DIM else if (vs == 0) GOOD else WARN), 0, sb.length, 0)
+            val sub = if (pctT != null) "of target" + (det.ftp?.let { f -> st.power.avg?.let { " · ${(it / f * 100).roundToInt()}% CP" } } ?: "") else ""
+            if (sub.isNotEmpty()) { val s0 = sb.length; sb.append("\n$sub"); sb.setSpan(RelativeSizeSpan(0.62f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(FAINT), s0, sb.length, 0) }
+            text = sb; textSize = if (st.isWork) 19f else 15f
+        }
+        r.addView(right)
+        if (st.isWork) r.addView(TextView(this).apply { text = if (st.index in opened) "⌃" else "›"; textSize = 18f; setTextColor(FAINT); setPadding(dp(10), 0, 0, 0) })
+        box.addView(r)
+        if (st.loW != null) {
+            val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), st.position, vs, st.loW, st.hiW, labels = false)); scaleType = ImageView.ScaleType.FIT_XY }
+            box.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)).apply { topMargin = dp(4) })
+        }
+        // Work steps open up for the full numbers; other steps only show % against target
+        if (st.isWork) {
+            val detail = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(2), 0, dp(6)); visibility = if (st.index in opened) View.VISIBLE else View.GONE }
+            if (st.loW != null && st.hiW != null) {
+                val (vt, vc) = vsText(st.power.avg, st.loW, st.hiW)
+                text(detail, spans("Target ${st.loW.roundToInt()}–${st.hiW.roundToInt()} W  " to DIM, vt to vc), 13f, top = 6)
+            }
+            tiles(detail, listOf("Time" to dur(st.seconds), "Distance" to km(st.distance), "In power target" to pct(st.inTarget)))
+            metric(detail, "Power", POWER, w(st.power.avg), "Min ${st.power.min?.roundToInt() ?: "–"} · Max ${st.power.max?.roundToInt() ?: "–"}")
+            metric(detail, if (ride) "Speed" else "Pace", PACE, spd(st.speed.avg, ride), "Min ${spd(st.speed.min, ride, false)} · Max ${spd(st.speed.max, ride, false)}")
+            metric(detail, "Heart rate", HEART, bpm(st.hr.avg), "Min ${st.hr.min?.roundToInt() ?: "–"} · Max ${st.hr.max?.roundToInt() ?: "–"}")
+            metric(detail, "Time with HR ≤ 165 / ≤ 172", HEART, "${pct(st.hr165)} / ${pct(st.hr172)}", null)
+            st.cadence?.let { metric(detail, "Cadence", 0xFFC17BFF.toInt(), "${(if (ride) it else it * 2).roundToInt()} ${if (ride) "rpm" else "spm"}", null) }
+            box.addView(detail)
+            box.setOnClickListener {
+                val o = detail.visibility != View.VISIBLE
+                detail.visibility = if (o) View.VISIBLE else View.GONE
+                if (o) opened += st.index else opened -= st.index
+            }
+        }
+        parent.addView(box)
+        parent.addView(View(this).apply { setBackgroundColor(0xFF2C3240.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
+    }
+}
+
+/** Power, pace (or speed) and heart rate over the workout, stacked, with work steps and targets marked. */
+object WorkoutChart {
+    fun draw(det: WorkoutDetail.Detail, w: Int, h: Int, d: Float, bg: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(w.coerceAtLeast(10), h.coerceAtLeast(10), Bitmap.Config.ARGB_8888)
+        val n = det.t.size
+        if (n < 2) return bmp
+        val c = Canvas(bmp)
+        val left = 34f * d; val axis = 14f * d; val gap = 8f * d
+        val ph = (h - axis - 2 * gap) / 3f
+        val panels = (0..2).map { RectF(left, it * (ph + gap), w.toFloat(), it * (ph + gap) + ph) }
+        fun x(i: Int) = left + (w - left) * i / (n - 1).toFloat()
+        val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8891A3.toInt(); textSize = 9.5f * d }
+        val grid = Paint().apply { color = 0xFF2C3240.toInt(); strokeWidth = 1f }
+
+        // Work steps shaded across all panels
+        val shade = Paint().apply { color = 0x14FFFFFF }
+        for (st in det.steps) if (st.isWork && st.start >= 0) c.drawRect(x((st.start / det.stride).coerceIn(0, n - 1)), 0f, x((st.end / det.stride).coerceIn(0, n - 1)), h - axis, shade)
+
+        val ride = det.isRide
+        // Pace is plotted as speed (faster = higher) and labelled as pace
+        val series = listOf(
+            Triple(det.watts, WorkoutActivity.POWER) { v: Double -> v.roundToInt().toString() },
+            Triple(det.vel.map { v -> v?.takeIf { it > 0.6 } }, WorkoutActivity.PACE) { v: Double -> if (ride) String.format(Locale.US, "%.0f", v * 3.6) else Charts.paceText(1000 / v / 60) },
+            Triple(det.heart, WorkoutActivity.HEART) { v: Double -> v.roundToInt().toString() },
+        )
+        val ys = ArrayList<(Double) -> Float>()
+        series.forEachIndexed { k, (vals, color, fmt) ->
+            val r = panels[k]
+            val present = vals.filterNotNull()
+            if (present.isEmpty()) { ys += { _: Double -> r.bottom }; return@forEachIndexed }
+            // robust range: ignore the top / bottom 1 % so a spike doesn't flatten the line
+            val sorted = present.sorted()
+            var lo = sorted[(sorted.size * 0.01).toInt()]; var hi = sorted[((sorted.size - 1) * 0.995).toInt()]
+            if (k == 0) det.steps.forEach { st -> st.hiW?.let { if (it > hi) hi = it }; st.loW?.let { if (st.isWork && it < lo) lo = it } }
+            if (k == 2) { if (hi < 174) hi = 174.0 }
+            if (hi - lo < 1e-6) { hi += 1; lo -= 1 }
+            val pad = (hi - lo) * 0.08; lo -= pad; hi += pad
+            val y = { v: Double -> (r.bottom - ((v - lo) / (hi - lo)).coerceIn(0.0, 1.0) * r.height()).toFloat() }
+            ys += y
+            c.drawLine(r.left, r.bottom, r.right, r.bottom, grid)
+            c.drawText(fmt(hi - pad), 0f, r.top + 9f * d, label)
+            c.drawText(fmt(lo + pad), 0f, r.bottom - 1f * d, label)
+            if (k == 0) {
+                // target band per step
+                val band = Paint().apply { this.color = 0x553DD68C }
+                for (st in det.steps) {
+                    val a = st.loW ?: continue; val b = st.hiW ?: continue
+                    if (st.start < 0) continue
+                    val top = y(b); val bot = maxOf(y(a), top + 2f * d)
+                    c.drawRect(x((st.start / det.stride).coerceIn(0, n - 1)), top, x((st.end / det.stride).coerceIn(0, n - 1)), bot, band)
+                }
+            }
+            if (k == 2) {
+                val dash = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0x99FFFFFF.toInt(); strokeWidth = 1f * d; style = Paint.Style.STROKE; pathEffect = DashPathEffect(floatArrayOf(3f * d, 3f * d), 0f) }
+                for (lim in listOf(165.0, 172.0)) if (lim in lo..hi) {
+                    c.drawLine(r.left, y(lim), r.right, y(lim), dash)
+                    c.drawText(lim.roundToInt().toString(), r.right - label.measureText("172") - 2f * d, y(lim) - 2f * d, label)
+                }
+            }
+            val path = Path(); var pen = false
+            for (i in 0 until n) {
+                val v = vals[i]
+                if (v == null) { pen = false; continue }
+                if (!pen) { path.moveTo(x(i), y(v)); pen = true } else path.lineTo(x(i), y(v))
+            }
+            c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.STROKE; strokeWidth = 1.4f * d; strokeJoin = Paint.Join.ROUND })
+        }
+        // Time axis
+        val total = det.t.last().coerceAtLeast(1)
+        val step = listOf(300, 600, 900, 1200, 1800, 3600).firstOrNull { total / it <= 6 } ?: 3600
+        var tt = step
+        while (tt < total) {
+            val i = det.t.indexOfFirst { it >= tt }.takeIf { it >= 0 } ?: break
+            val s = SubtModel.time(tt.toDouble())
+            c.drawText(s, x(i) - label.measureText(s) / 2, h - 2f * d, label)
+            c.drawLine(x(i), 0f, x(i), h - axis, grid)
+            tt += step
+        }
+        // Scrub
+        ChartHits.put(bmp, (0 until n).map { i ->
+            val p = det.watts[i]; val v = det.vel[i]; val hr = det.heart[i]
+            val parts = listOfNotNull(SubtModel.time(det.t[i].toDouble()), p?.let { "${it.roundToInt()} W" },
+                v?.takeIf { it > 0.6 }?.let { if (ride) String.format(Locale.US, "%.1f km/h", it * 3.6) else Charts.paceText(1000 / it / 60) + "/km" }, hr?.let { "${it.roundToInt()} bpm" })
+            ChartHits.Hit(x(i), p?.let { ys[0](it) } ?: hr?.let { ys[2](it) } ?: panels[0].bottom, parts.joinToString(" · "), WorkoutActivity.POWER)
+        })
+        return bmp
+    }
+}

@@ -1350,6 +1350,25 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
     }
 
     /** Quiet weekly checklist: key sessions and load against plan. */
+    /** Recently done workouts: tap one for its steps against targets. */
+    fun recentWorkoutsCard(col: LinearLayout) {
+        val s = Prefs.snapshot(a) ?: return
+        val done = s.week.filter { it.status == WorkoutStatus.DONE && it.activityId != null && !it.type.contains("Walk", true) }.sortedByDescending { it.date }.take(5)
+        if (done.isEmpty()) return
+        val c = card(col)
+        label(c, "Done this week · tap for detail")
+        for (w in done) {
+            val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(9), 0, dp(3)); gravity = Gravity.CENTER_VERTICAL }
+            r.addView(TextView(a).apply {
+                text = spans(WidgetRenderer.sportIcon(w.type) + "  " to TEXT, w.name to TEXT, "   " + (date(w.date)?.format(DateTimeFormatter.ofPattern("EEE", loc)) ?: "") to FAINT)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            r.addView(TextView(a).apply { text = WidgetRenderer.meta(w) + "  ›"; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f) })
+            r.setOnClickListener { WorkoutActivity.open(a, w.activityId!!, w.name) }
+            c.addView(r)
+        }
+    }
+
     fun weekChecklist(col: LinearLayout) {
         val s = Prefs.snapshot(a) ?: return
         val wk = s.week

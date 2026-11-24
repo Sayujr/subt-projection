@@ -40,7 +40,7 @@ object Fixture {
         return listOf(
             Workout("Easy bike", "Ride", 1200, 5, 0.0, st(d(0), false), d(0)),
             Workout("Walk", "Walk", 2340, 11, 3000.0, WorkoutStatus.DONE, d(0), plannedLoad = 0),
-            Workout("18x45/15 progressive", "Run", 3420, 66, 11800.0, WorkoutStatus.DONE, d(1), plannedLoad = 60),
+            Workout("6'x4 repeats", "Run", 3420, 66, 11800.0, WorkoutStatus.DONE, d(1), plannedLoad = 60, activityId = "i999"),
             Workout("60m Easy", "Run", 3600, 34, 10500.0, st(d(2), d(2) < t && false), d(2)),
             Workout("3x10' SubT", "Run", 4200, 65, 14000.0, if (d(3) < t) WorkoutStatus.DONE else WorkoutStatus.PLANNED, d(3), plannedLoad = 87,
                 steps = "15′ easy · 3× (10′ @ 315–325 W · 2′ rec) · 10′ easy"),
@@ -81,6 +81,50 @@ object Fixture {
             SubtMonth("%d-%02d".format(m.year, m.monthValue), 4.85 - (17 - i) * 0.018, 6 + i % 4, outlier = i == 9, hr = 160.0 - (17 - i) * 0.3)
         }
         return SubtData(System.currentTimeMillis(), months, 9, today.minusDays(3).toString())
+    }
+
+    /**
+     * A made-up 6′×4 workout as intervals.icu would return it: warm-up, 4 work reps at 90–95 % FTP
+     * with 2′ recoveries, cool-down; 1 Hz streams.
+     */
+    fun workoutRaw(id: String = "i999"): org.json.JSONObject {
+        val ftp = 350.0
+        val segs = mutableListOf<Triple<String, Int, Double>>()   // type, seconds, watts
+        segs += Triple("WARMUP", 600, 215.0)
+        repeat(4) { k -> segs += Triple("WORK", 360, 318.0 + k * 6); if (k < 3) segs += Triple("RECOVERY", 120, 170.0) }
+        segs += Triple("COOLDOWN", 480, 205.0)
+        val watts = org.json.JSONArray(); val hr = org.json.JSONArray(); val vel = org.json.JSONArray(); val time = org.json.JSONArray()
+        val ivs = org.json.JSONArray()
+        var t = 0; var h = 120.0
+        for ((type, sec, w) in segs) {
+            val start = t
+            var sumW = 0.0; var sumH = 0.0; var dist = 0.0; var maxH = 0.0
+            repeat(sec) { i ->
+                val pw = w + 9 * sin(t / 7.0) + (if (type == "WORK" && i < 12) -40 + i * 3.3 else 0.0)
+                val target = if (type == "WORK") 150 + (w - 300) * 0.9 + 14 else if (type == "RECOVERY") 140.0 else 128.0
+                h += (target - h) * 0.02
+                val v = pw / 350.0 * 3.75
+                watts.put(pw); hr.put(h); vel.put(v); time.put(t)
+                sumW += pw; sumH += h; dist += v; if (h > maxH) maxH = h
+                t++
+            }
+            ivs.put(org.json.JSONObject().put("type", if (type == "WORK") "WORK" else "RECOVERY").put("start_index", start).put("end_index", t)
+                .put("moving_time", sec).put("elapsed_time", sec).put("distance", dist).put("average_watts", sumW / sec)
+                .put("average_heartrate", sumH / sec).put("max_heartrate", maxH).put("average_speed", dist / sec).put("average_cadence", 86.0))
+        }
+        fun pstep(lo: Int, hi: Int, dur: Int) = org.json.JSONObject().put("duration", dur).put("power", org.json.JSONObject().put("start", lo).put("end", hi).put("units", "%ftp"))
+        val doc = org.json.JSONObject().put("steps", org.json.JSONArray()
+            .put(pstep(55, 68, 600).put("warmup", true))
+            .put(org.json.JSONObject().put("reps", 4).put("steps", org.json.JSONArray().put(pstep(90, 95, 360)).put(pstep(40, 55, 120))))
+            .put(pstep(55, 65, 480).put("cooldown", true)))
+        fun st(type: String, data: org.json.JSONArray) = org.json.JSONObject().put("type", type).put("data", data)
+        return org.json.JSONObject()
+            .put("a", org.json.JSONObject().put("id", id).put("name", "6'x4 repeats").put("type", "Run").put("start_date_local", today.minusDays(2).toString() + "T07:30:00")
+                .put("moving_time", t).put("distance", 9800.0).put("icu_training_load", 66).put("total_elevation_gain", 92.0).put("icu_ftp", ftp)
+                .put("icu_average_watts", 262.0).put("average_heartrate", 148.0).put("average_speed", 2.9).put("average_cadence", 84.0).put("paired_event_id", 5))
+            .put("i", org.json.JSONObject().put("icu_intervals", ivs))
+            .put("s", org.json.JSONArray().put(st("time", time)).put(st("watts", watts)).put(st("heartrate", hr)).put(st("velocity_smooth", vel)))
+            .put("e", org.json.JSONObject().put("id", 5).put("workout_doc", doc))
     }
 
     /** Seeds the app's storage with everything the screens read, and keeps it offline. */

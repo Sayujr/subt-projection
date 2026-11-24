@@ -174,6 +174,44 @@ class RulesTest {
         assertFalse("wrong length", SubtWorkouts.newRuleRep(600.0, 4.5, listOf(6.0)))
     }
 
+    // ---- Workout detail: steps against targets
+    @Test fun workoutDetailSteps() {
+        val det = WorkoutDetail.fromRaw(Fixture.workoutRaw(), null)
+        assertEquals(350.0, det.ftp!!, 1e-9)                       // CP of that day, from the activity
+        assertEquals(9, det.steps.size)
+        val kinds = det.steps.map { it.kind }
+        assertEquals(WorkoutDetail.Kind.WARMUP, kinds.first()); assertEquals(WorkoutDetail.Kind.COOLDOWN, kinds.last())
+        assertEquals(4, det.steps.count { it.isWork })
+        assertEquals(3, kinds.count { it == WorkoutDetail.Kind.RECOVERY })
+        val w1 = det.steps.first { it.isWork }
+        assertEquals(315.0, w1.loW!!, 1e-6); assertEquals(332.5, w1.hiW!!, 1e-6)   // 90–95 % of 350
+        assertEquals(0, w1.vsTarget)
+        assertTrue(w1.inTarget!! in 0.5..1.0)
+        assertTrue(w1.hr165!! >= w1.hr172!! - 1e-9 || w1.hr172 >= w1.hr165)
+        assertEquals(1, det.steps.last { it.isWork }.vsTarget)     // 336 W: over the 332.5 top
+        // Summary covers work steps only
+        val wk = det.work!!
+        assertEquals(4, wk.count); assertEquals(4 * 360, wk.seconds)
+        assertTrue("work average excludes warm-up and recoveries", wk.power.avg!! > 315)
+        assertTrue(wk.power.min!! < wk.power.avg && wk.power.max!! > wk.power.avg)
+        assertNotNull(wk.inTarget); assertNotNull(wk.hr172)
+    }
+
+    @Test fun workoutPlanAlignment() {
+        fun step(lo: Int, hi: Int, dur: Int) = org.json.JSONObject().put("duration", dur).put("power", org.json.JSONObject().put("start", lo).put("end", hi).put("units", "%ftp"))
+        // Easy day: every step is easy, so they all count as work
+        val easy = org.json.JSONObject().put("steps", org.json.JSONArray().put(step(60, 70, 1800)).put(step(62, 72, 1800)))
+        assertTrue(WorkoutDetail.flattenPlan(easy, 350.0).all { it.kind == WorkoutDetail.Kind.WORK })
+        // No FTP → no watt targets
+        assertTrue(WorkoutDetail.flattenPlan(easy, null).all { it.loW == null })
+        // An extra unplanned interval (e.g. a stop) doesn't shift the targets of later steps
+        val plan = WorkoutDetail.flattenPlan(Fixture.workoutRaw().getJSONObject("e").getJSONObject("workout_doc"), 350.0)
+        assertEquals(9, plan.size)
+        val lengths = listOf(600.0, 360.0, 30.0, 120.0, 360.0, 120.0, 360.0, 120.0, 360.0, 480.0).map { it to 0.0 }
+        val m = WorkoutDetail.align(plan, lengths)
+        assertNull(m[2]); assertEquals(WorkoutDetail.Kind.RECOVERY, m[3]!!.kind); assertEquals(WorkoutDetail.Kind.COOLDOWN, m[9]!!.kind)
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {

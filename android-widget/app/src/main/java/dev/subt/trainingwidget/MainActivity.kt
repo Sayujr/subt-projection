@@ -557,7 +557,9 @@ class MainActivity : Activity() {
         }
         row.findViewById<TextView>(R.id.row_sport).text = WidgetRenderer.sportIcon(w.type)
         name.text = w.name
-        row.findViewById<TextView>(R.id.row_meta).text = WidgetRenderer.meta(w) + if (missed) " · missed" else ""
+        row.findViewById<TextView>(R.id.row_meta).text = WidgetRenderer.meta(w) + (if (missed) " · missed" else "") + (if (w.activityId != null) "  ›" else "")
+        // Done workouts open the detail screen (steps against targets)
+        w.activityId?.let { aid -> row.setOnClickListener { WorkoutActivity.open(this, aid, w.name) } }
         return row
     }
 
@@ -659,6 +661,7 @@ class MainActivity : Activity() {
                     col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
                     screens.deviationsCard(col)
                     screens.todayPowerCard(col)
+                    screens.recentWorkoutsCard(col)
                     screens.weekChecklist(col)
                     screens.streakLine(col)
                 }, full)

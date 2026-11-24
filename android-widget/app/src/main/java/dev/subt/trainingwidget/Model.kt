@@ -32,6 +32,8 @@ data class Workout(
     val plannedLoad: Int = 0,
     /** Planned steps with power targets, e.g. "15′ easy · 3× (10′ @ 285–295 W · 2′ rec)". */
     val steps: String? = null,
+    /** intervals.icu activity id once done (opens the workout detail screen). */
+    val activityId: String? = null,
 )
 
 /** An upcoming race from the intervals.icu calendar, with projected race-day Fitness / Fatigue when known. */
@@ -145,7 +147,7 @@ data class Snapshot(
                 put(
                     JSONObject()
                         .put("n", it.name).put("t", it.type).put("s", it.seconds)
-                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date).put("pl", it.plannedLoad).putOpt("sp", it.steps)
+                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date).put("pl", it.plannedLoad).putOpt("sp", it.steps).putOpt("id", it.activityId)
                 )
             }
         }
@@ -156,6 +158,7 @@ data class Snapshot(
                 Workout(
                     x.getString("n"), x.getString("t"), x.getInt("s"), x.getInt("l"),
                     x.getDouble("m"), WorkoutStatus.valueOf(x.getString("st")), x.optString("d"), x.optInt("pl"), x.optString("sp").ifBlank { null },
+                    x.optString("id").ifBlank { null },
                 )
             }
 

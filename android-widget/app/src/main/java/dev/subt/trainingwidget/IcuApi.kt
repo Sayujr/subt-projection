@@ -176,6 +176,18 @@ class IcuApi(private val creds: Credentials) {
      * SubT reps from runs in the last [daysBack] days, using the same lap filter as the projection
      * page (refresh_data.py): avg HR > 160, max HR ≤ 172, 1.5–15 min, pace 3:30–9:00 /km.
      */
+    /** Everything the workout detail screen needs for one activity: summary, steps, streams, planned workout. */
+    fun fetchWorkoutRaw(activityId: String): JSONObject {
+        val id = URLEncoder.encode(activityId, "UTF-8")
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val a = getObject("/activity/$id")
+        val out = JSONObject().put("a", a)
+        runCatching { getObject("/activity/$id/intervals") }.onSuccess { out.put("i", it) }
+        runCatching { getArray("/activity/$id/streams", mapOf("types" to "time,watts,heartrate,velocity_smooth,cadence,altitude")) }.onSuccess { out.put("s", it) }
+        a.optNum("paired_event_id")?.toLong()?.let { ev -> runCatching { getObject("/athlete/$ath/events/$ev") }.onSuccess { out.put("e", it) } }
+        return out
+    }
+
     data class SubtScan(val reps: List<SubtRep>, val scanned: Set<String>)
 
     /**
@@ -586,6 +598,7 @@ class IcuApi(private val creds: Credentials) {
                 date = date(e),
                 plannedLoad = (e.optNum("icu_training_load") ?: 0.0).toInt(),
                 steps = e.optJSONObject("workout_doc")?.let { stepsText(it) }?.takeIf { it.isNotBlank() },
+                activityId = done?.optString("id")?.takeIf { it.isNotBlank() },
             )
         }
         for (a in activities) {
@@ -598,6 +611,7 @@ class IcuApi(private val creds: Credentials) {
                 distanceM = a.optNum("distance") ?: 0.0,
                 status = WorkoutStatus.DONE,
                 date = date(a),
+                activityId = a.optString("id").takeIf { it.isNotBlank() },
             )
         }
         return out.sortedBy { it.date }

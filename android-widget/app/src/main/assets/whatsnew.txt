@@ -1,7 +1,5 @@
-- App updates live in Settings → App updates: check for updates, see what's new, download and install
-- Today chart: gold dot on the period's peak Fitness with its date on the axis, plus average Fitness and Form with a trend arrow
-- This week / 2 weeks charts show every day's date
-- Notifications: each type has its own switch and time (today's workout 04:00, recovery check 09:00, alerts not before 09:00); recovery ones pause from 2 days before a race
-- Race screen: tap A / B / C race to change a race's priority in intervals.icu (asks first)
-- "Why this call?" load now shows each of the last 3 days by name, straight from intervals.icu
-- Fixed: scrubbing the chart could crash the app
+- Workout detail: tap a done workout (Week list, or "Done this week" on Today) for its steps against your power targets
+- Work-steps average: power, pace and HR (avg, min, max) across all work steps, where you sat in the target range, time in target, and time with HR ≤ 165 / ≤ 172
+- SubT: HR rule (155–172 bpm, 2–12 min) before May, 3-6-10 reps after; anything slower than 5:45 /km is dropped
+- SubT headline is the last 28 days, adjusted for rep mix; trends show ± error; speed-per-heartbeat chart
+- Charts on SubT, Recovery and Power can be scrubbed

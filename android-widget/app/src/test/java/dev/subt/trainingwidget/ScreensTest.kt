@@ -143,6 +143,14 @@ class ScreensTest {
             ev(android.view.MotionEvent.ACTION_UP, iv.width * 0.6f)
             ctl.pause().stop().destroy()
         }
+        // Workout detail from a made-up 6'x4 workout, with the first work step opened
+        safely("workout") {
+            WorkoutDetail.save(ctx, "i999", Fixture.workoutRaw())
+            val ctl = Robolectric.buildActivity(WorkoutActivity::class.java, Intent(ctx, WorkoutActivity::class.java).putExtra(WorkoutActivity.EXTRA_ID, "i999")).setup()
+            settle()
+            capture("workout", ctl.get().window.decorView)
+            ctl.pause().stop().destroy()
+        }
         safely("settings") {
             val ctl = Robolectric.buildActivity(SetupActivity::class.java).setup()
             settle()
