@@ -45,6 +45,7 @@ class WorkoutActivity : Activity() {
         private const val FAINT = 0xFF6B7386.toInt()
         private const val GOOD = 0xFF3DD68C.toInt()
         private const val WARN = 0xFFFFC53D.toInt()
+        private const val BAD = 0xFFFF7A7A.toInt()
         private const val TILE = 0xFF222733.toInt()
         private const val TEST_C = 0xFFC17BFF.toInt()
         private const val UNDER_C = 0xFF6B7386.toInt()
@@ -183,7 +184,11 @@ class WorkoutActivity : Activity() {
         val x0 = bmp.width / 3f; val x1 = bmp.width * 2 / 3f
         if (position != null) {
             val x = (x0 + position * (x1 - x0)).toFloat().coerceIn(bh, bmp.width.toFloat())
-            p.color = if (vs == 0) GOOD else WARN
+            // Colour by the average against the actual range: green inside, yellow just outside (within 3 %), red further out
+            val mid = if (lo != null && hi != null) (lo + hi) / 2 else null
+            val avg = if (lo != null && hi != null) lo + position * (hi - lo) else null
+            val far = mid != null && avg != null && lo != null && hi != null && (avg < lo - 0.03 * mid || avg > hi + 0.03 * mid)
+            p.color = if (vs == 0) GOOD else if (far) BAD else WARN
             c.drawRoundRect(RectF(0f, y, x, y + bh), bh / 2, bh / 2, p)
         }
         p.color = TEXT; p.strokeWidth = 2f * d
@@ -205,6 +210,16 @@ class WorkoutActivity : Activity() {
             avg > hi + 0.5 -> "${(avg - hi).roundToInt()} $unit over" to WARN
             else -> "in range" to GOOD
         }
+    }
+
+    /** Headline colour for "on or over target": green 85 %+, yellow 70–85 %, red below. */
+    private fun onColor(share: Double) = if (share >= 0.85) GOOD else if (share >= 0.70) WARN else BAD
+    /** HR colour: red when over 172 for more than 20 % of the step, green when 70 %+ sat in 155–172, else yellow. */
+    private fun hrColor(inBand: Double?, over: Double?) = when {
+        inBand == null -> DIM
+        (over ?: 0.0) > 0.20 -> BAD
+        inBand >= 0.70 -> GOOD
+        else -> WARN
     }
 
     private fun spans(vararg parts: Pair<String, Int>): CharSequence {
@@ -249,9 +264,20 @@ class WorkoutActivity : Activity() {
             if (wk.loW != null && wk.hiW != null) {
                 val (vt, vc) = vsText(wk.targetAvg, wk.loW, wk.hiW, if (wk.hrTarget) "bpm" else "W")
                 BandViews.heading(this, c, if (wk.hrTarget) "Against HR target" else "Against target",
-                    "Your average power for the work steps against the planned range. Green = the average is inside the range. '% of target midpoint' compares it with the middle of the range.", topDp = 14)
+                    "The big % is how much of the work was at or above the bottom of the planned range (green 85%+, yellow 70–85%, red below). The bar shows where your average sat in the range: green inside, yellow just outside, red more than 3% outside. The HR figure is green when 70%+ of the work was at 155–172, red when more than 20% was over 172.", topDp = 14)
                 val avgTxt = if (wk.hrTarget) bpm(wk.targetAvg) else w(wk.targetAvg)
-                text(c, spans(avgTxt to vc, (if (vt.isEmpty()) "" else " · $vt") to vc), 18f, bold = true, top = 4)
+                val ooAll = wk.inOrOver
+                if (ooAll != null) {
+                    // Session headline: share of the work on or over target; then small print coloured by each part's own rule
+                    text(c, spans("${(ooAll * 100).roundToInt()}%" to onColor(ooAll), "  of work on or over target" to DIM), 22f, bold = true, top = 4)
+                    val bandAll = wk.hrB
+                    text(c, spans(
+                        "on target ${SubtModel.time(wk.inSec)} (${((wk.inT ?: 0.0) * 100).roundToInt()}%)" to DIM, "  ·  " to FAINT,
+                        avgTxt + (if (vt.isEmpty()) "" else " $vt") to vc,
+                        (if (bandAll != null && !wk.hrTarget) "  ·  " else "") to FAINT,
+                        (if (bandAll != null && !wk.hrTarget) "HR ${(bandAll.frac * 100).roundToInt()}% in 155–172" else "") to hrColor(bandAll?.frac, wk.hrOver?.frac),
+                    ), 13f, top = 2)
+                } else text(c, spans(avgTxt to vc, (if (vt.isEmpty()) "" else " · $vt") to vc), 18f, bold = true, top = 4)
                 image(c, targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true), 30, top = 2)
                 val cp = if (!wk.hrTarget && ftpD != null) wk.power.avg?.let { " · ${(it / ftpD * 100).roundToInt()}% of CP" } ?: "" else ""
                 text(c, "${wk.pctOfTarget?.roundToInt() ?: "–"}% of target midpoint$cp", 12f, FAINT, top = 2)
@@ -344,10 +370,19 @@ class WorkoutActivity : Activity() {
             val sb = SpannableStringBuilder(dur(st.seconds))
             val s0 = sb.length
             sb.append("\n$name")
-            // Without opening the step: how much of it was at or above the bottom of the range
-            val oo = st.inOrOver
-            if (judged && oo != null) sb.append("\nin or over ${(oo * 100).roundToInt()}% · ${SubtModel.time(st.inSec + st.overSec)} · ${km(st.inM + st.overM)}")
             sb.setSpan(RelativeSizeSpan(0.72f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(DIM), s0, sb.length, 0)
+            // Small print, each part coloured by its own rule: time in the power range, average vs range, HR in band
+            fun part(t: String, color: Int) { val a = sb.length; sb.append(t); sb.setSpan(RelativeSizeSpan(0.72f), a, sb.length, 0); sb.setSpan(ForegroundColorSpan(color), a, sb.length, 0) }
+            val inShare = st.inT
+            if (judged && inShare != null) {
+                part("\non target ${SubtModel.time(st.inSec)} (${(inShare * 100).roundToInt()}%)", DIM)
+                part("  ·  ", FAINT)
+                part(if (st.hrTarget) bpm(st.hr.avg) else w(st.power.avg), if (st.vsTarget == 0) GOOD else WARN)
+            }
+            val band = st.hrB
+            if (judged && band != null && !st.hrTarget) {
+                part("\n${bpm(st.hr.avg)}  ·  ${(band.frac * 100).roundToInt()}% in 155–172", hrColor(band.frac, st.hrOver?.frac))
+            }
             text = sb; textSize = if (judged) 17f else 15f; setTextColor(if (judged) TEXT else DIM)
         }
         r.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -355,14 +390,15 @@ class WorkoutActivity : Activity() {
         val pctT = st.pctOfTarget
         val right = TextView(this).apply {
             gravity = Gravity.END
-            val main = if (judged && st.hrTarget) bpm(st.hr.avg) else w(st.power.avg)
+            // Headline for a judged step: how much of it was on or over target
+            val oo = if (judged) st.inOrOver else null
+            val main = if (oo != null) "${(oo * 100).roundToInt()}%" else if (judged && st.hrTarget) bpm(st.hr.avg) else w(st.power.avg)
             val sb = SpannableStringBuilder(main)
-            sb.setSpan(ForegroundColorSpan(if (!judged || vs == null) DIM else if (vs == 0) GOOD else WARN), 0, sb.length, 0)
-            val cp = if (st.hrTarget) "" else det.ftp?.let { f -> st.power.avg?.let { " · ${(it / f * 100).roundToInt()}% CP" } } ?: ""
-            val sub = if (judged) {
-                val verdict = vsText(st.targetAvg, st.loW, st.hiW, if (st.hrTarget) "bpm" else "W").first
-                (verdict + cp).removePrefix(" · ")
-            } else if (pctT != null) "of target ${pctT.roundToInt()}%" else ""
+            sb.setSpan(ForegroundColorSpan(if (oo != null) onColor(oo) else if (!judged || vs == null) DIM else if (vs == 0) GOOD else WARN), 0, sb.length, 0)
+            val cp = if (st.hrTarget) "" else det.ftp?.let { f -> st.power.avg?.let { "${(it / f * 100).roundToInt()}% CP" } } ?: ""
+            val sub = if (oo != null) "on or over target" + (if (cp.isNotEmpty()) "\n$cp" else "")
+                else if (judged) vsText(st.targetAvg, st.loW, st.hiW, if (st.hrTarget) "bpm" else "W").first
+                else if (pctT != null) "of target ${pctT.roundToInt()}%" else ""
             if (sub.isNotEmpty()) { val s0 = sb.length; sb.append("\n$sub"); sb.setSpan(RelativeSizeSpan(0.62f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(FAINT), s0, sb.length, 0) }
             text = sb; textSize = if (judged) 19f else 15f
             setPadding(0, 0, dp(if (judged) 0 else 6), 0)
