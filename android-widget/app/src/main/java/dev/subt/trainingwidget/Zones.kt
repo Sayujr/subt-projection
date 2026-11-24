@@ -108,13 +108,14 @@ object Zones {
         }
 
         var inSec = 0.0; var inM = 0.0; var workSec = 0.0
+        val wattsS = WorkoutDetail.smooth(watts)
         if (subt && raw.optJSONObject("i") != null) {
             val det = WorkoutDetail.fromRaw(raw, fallbackFtp)
             for (st in det.steps) {
                 val lo = st.loW; val hi = st.hiW
                 if (!(st.isWork && !st.hrTarget && lo != null && hi != null && st.start >= 0)) continue
-                for (i in st.start..minOf(st.end, n - 1)) {
-                    val w = watts.getOrNull(i) ?: continue
+                for (i in WorkoutDetail.afterRamp(st.start, st.end)..minOf(st.end, n - 1)) {
+                    val w = wattsS.getOrNull(i) ?: continue
                     val d = dt(i)
                     workSec += d
                     if (w >= lo - 0.5 && w <= hi + 0.5) { inSec += d; inM += dist(i, d) }

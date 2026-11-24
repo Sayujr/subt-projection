@@ -244,6 +244,7 @@ class WorkoutActivity : Activity() {
                 if (!wk.hrTarget) det.ftp?.let { f -> wk.power.avg?.let { text(c, "${(it / f * 100).roundToInt()}% of CP · target ${(wk.loW / f * 100).roundToInt()}–${(wk.hiW / f * 100).roundToInt()}% of CP", 12f, FAINT, top = 4) } }
                 metric(c, if (wk.hrTarget) "Time in HR target" else "Time in power target", GOOD, pct(wk.inTarget), if (det.steps.all { it.isWork }) null else "work steps only")
             }
+            text(c, "Min / max and time in target leave out the first 15 s of each rep (getting up to power) and judge power on a 10 s average. HR minimum is read after the first minute.", 11.5f, FAINT, top = 6)
             metric(c, "Time with HR ≤ 165", HEART, pct(wk.hr165), null)
             metric(c, "Time with HR ≤ 172", HEART, pct(wk.hr172), null)
         }
@@ -317,8 +318,9 @@ class WorkoutActivity : Activity() {
         if (st.isWork) r.addView(TextView(this).apply { text = if (st.index in opened) "⌃" else "›"; textSize = 18f; setTextColor(FAINT); setPadding(dp(10), 0, 0, 0) })
         box.addView(r)
         if (st.loW != null) {
-            val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), st.position, vs, st.loW, st.hiW, labels = false)); scaleType = ImageView.ScaleType.FIT_XY }
-            box.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)).apply { topMargin = dp(4) })
+            // Target range (watts or bpm) written above the ticks, visible without opening the step
+            val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), st.position, vs, st.loW, st.hiW, labels = true)); scaleType = ImageView.ScaleType.FIT_XY }
+            box.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(30)).apply { topMargin = dp(2) })
         }
         // Work steps open up for the full numbers; other steps only show % against target
         if (st.isWork) {

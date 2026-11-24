@@ -192,6 +192,24 @@ object WorkoutDetail {
         return if (hi < lo) null else lo to hi
     }
 
+    /** Seconds at the start of a work step left out of min / max and time in target (getting up to power). */
+    const val RAMP = 15
+    /** HR lags power: its minimum is read after this many seconds into a work step. */
+    const val HR_LAG = 60
+    /** Rolling average over the last [window] samples (how targets are judged: 1-second power is too jumpy). */
+    fun smooth(v: List<Double?>, window: Int = 10): List<Double?> {
+        val out = ArrayList<Double?>(v.size)
+        var sum = 0.0; var cnt = 0
+        for (i in v.indices) {
+            v[i]?.let { sum += it; cnt++ }
+            if (i >= window) v[i - window]?.let { sum -= it; cnt-- }
+            out += if (v[i] == null || cnt == 0) null else sum / cnt
+        }
+        return out
+    }
+    /** First sample of a work step that counts, after the ramp (at most a quarter of the step). */
+    fun afterRamp(from: Int, to: Int, skip: Int = RAMP): Int = from + minOf(skip, (to - from + 1) / 4)
+
     fun build(
         activity: JSONObject, intervals: JSONObject?, streams: JSONArray?, event: JSONObject?, fallbackFtp: Double?,
         fallbackMaxHr: Double? = 194.0, fallbackLthr: Double? = 172.0,
@@ -199,6 +217,7 @@ object WorkoutDetail {
         val ftp = activity.num("icu_ftp")?.takeIf { it > 0 } ?: fallbackFtp
         val watts = stream(streams, "watts"); val heart = stream(streams, "heartrate"); val vel = stream(streams, "velocity_smooth")
         val time = stream(streams, "time")
+        val wattsS = smooth(watts)
         val maxHr = activity.num("athlete_max_hr")?.takeIf { it > 100 } ?: fallbackMaxHr
         val lthr = activity.num("lthr")?.takeIf { it > 100 } ?: fallbackLthr
         val plan = flattenPlan(event?.optJSONObject("workout_doc"), ftp, maxHr, lthr)
@@ -216,9 +235,14 @@ object WorkoutDetail {
                 type.equals("RECOVERY", true) -> Kind.RECOVERY
                 else -> Kind.OTHER
             }
-            val wr = if (has) range(watts, from, to, smooth = 3) else null
-            val hrr = if (has) range(heart, from, to) else null
-            val vr = if (has) range(vel, from, to, floor = 0.6, smooth = 5) else null
+            // Work steps: ignore the first seconds (getting up to power; HR catching up) so min / max
+            // and time in target describe the rep itself. Power is judged on a 10 s rolling average.
+            val isWorkStep = kind == Kind.WORK
+            val f2 = if (isWorkStep && has) afterRamp(from, to) else from
+            val fHr = if (isWorkStep && has) afterRamp(from, to, HR_LAG) else from
+            val wr = if (has) range(wattsS, f2, to) else null
+            val hrr = if (has) range(heart, fHr, to) else null
+            val vr = if (has) range(vel, f2, to, floor = 0.6, smooth = 5) else null
             val sec = secs(iv); val dist = iv.num("distance") ?: 0.0
             Step(
                 index = i + 1, kind = kind, seconds = sec.toInt(), distance = dist,
@@ -227,7 +251,7 @@ object WorkoutDetail {
                 hr = Stat(iv.num("average_heartrate")?.takeIf { it > 0 }, hrr?.first ?: iv.num("min_heartrate"), hrr?.second ?: iv.num("max_heartrate")),
                 cadence = iv.num("average_cadence")?.takeIf { it > 0 }, elevGain = iv.num("total_elevation_gain"),
                 loW = p?.loW, hiW = p?.hiW,
-                inTarget = if (has && p?.loW != null && p.hiW != null) share(if (p.hrTarget) heart else watts, from, to) { it >= p.loW - 0.5 && it <= p.hiW + 0.5 } else null,
+                inTarget = if (has && p?.loW != null && p.hiW != null) share(if (p.hrTarget) heart else wattsS, if (p.hrTarget) fHr else f2, to) { it >= p.loW - 0.5 && it <= p.hiW + 0.5 } else null,
                 hr165 = if (has) share(heart, from, to) { it <= 165.0 } else null,
                 hr172 = if (has) share(heart, from, to) { it <= 172.0 } else null,
                 start = from, end = to, group = p?.group ?: 0, reps = p?.reps ?: 1,

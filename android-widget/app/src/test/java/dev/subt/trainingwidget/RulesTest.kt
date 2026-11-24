@@ -247,6 +247,16 @@ class RulesTest {
         assertNull("2 reps isn't enough for a point", s[SubtWorkouts.Kind.MEDIUM])
     }
 
+    @Test fun workStepIgnoresRamp() {
+        // Fixture reps start ~40 W low for 12 s: the step minimum must not show that ramp
+        val det = WorkoutDetail.fromRaw(Fixture.workoutRaw(), null)
+        val w1 = det.steps.first { it.isWork }
+        assertTrue("min ${w1.power.min} reflects the rep, not the ramp", w1.power.min!! > 300)
+        assertEquals(15, WorkoutDetail.afterRamp(0, 359)); assertEquals(5, WorkoutDetail.afterRamp(0, 19))
+        val sm = WorkoutDetail.smooth(listOf(0.0, 10.0, 20.0, null, 40.0), 2)
+        assertEquals(15.0, sm[2]!!, 1e-9); assertNull(sm[3])
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {
@@ -449,7 +459,7 @@ class RulesTest {
     @Test fun zonesSubtFixture() {
         val r = Zones.compute(Fixture.workoutRaw(), 153.0, null)
         assertTrue(r.subt)
-        assertEquals(1440.0, r.subtWorkSec, 4.0)
+        assertEquals(1440.0 - 4 * 15, r.subtWorkSec, 6.0)   // 4 reps, first 15 s of each left out
         assertTrue(r.subtInSec > 0 && r.subtInSec <= r.subtWorkSec)
         assertTrue(r.subtInM > 0)
     }
