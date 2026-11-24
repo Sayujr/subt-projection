@@ -121,7 +121,7 @@ object WorkoutDetail {
     /** Pairs each interval with its planned step: one-to-one when the counts match, else in order by length. */
     fun align(plan: List<Plan>, lengths: List<Pair<Double, Double>>): List<Plan?> {
         if (plan.isEmpty()) return lengths.map { null }
-        if (plan.size == lengths.size) return plan
+        if (plan.size == lengths.size && plan.indices.all { fits(plan[it], lengths[it].first, lengths[it].second) }) return plan
         var p = 0
         return lengths.map { (sec, dist) ->
             val k = (p until minOf(p + 3, plan.size)).firstOrNull { fits(plan[it], sec, dist) }

@@ -206,7 +206,7 @@ class RulesTest {
         assertTrue(WorkoutDetail.flattenPlan(easy, null).all { it.loW == null })
         // An extra unplanned interval (e.g. a stop) doesn't shift the targets of later steps
         val plan = WorkoutDetail.flattenPlan(Fixture.workoutRaw().getJSONObject("e").getJSONObject("workout_doc"), 350.0)
-        assertEquals(9, plan.size)
+        assertEquals(10, plan.size)   // warm-up, 4 × (work + recovery), cool-down
         val lengths = listOf(600.0, 360.0, 30.0, 120.0, 360.0, 120.0, 360.0, 120.0, 360.0, 480.0).map { it to 0.0 }
         val m = WorkoutDetail.align(plan, lengths)
         assertNull(m[2]); assertEquals(WorkoutDetail.Kind.RECOVERY, m[3]!!.kind); assertEquals(WorkoutDetail.Kind.COOLDOWN, m[9]!!.kind)
