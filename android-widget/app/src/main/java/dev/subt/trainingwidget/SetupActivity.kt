@@ -385,7 +385,14 @@ class SetupActivity : Activity() {
             row.addView(tv, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = (8 * d).toInt() })
         }
         paint()
+        val sync = android.widget.CheckBox(this).apply {
+            text = "Keep coach notes in intervals.icu"; setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f
+            isChecked = Prefs.coachSync(this@SetupActivity)
+            setOnCheckedChangeListener { _, on -> Prefs.setCoachSync(this@SetupActivity, on) }
+        }
         return listOf(
+            sync,
+            note("Adds one 'Coach notes' note per training day to your intervals.icu calendar, for runs with targets and for questions you send. Nothing else in intervals.icu is changed."),
             TextView(this).apply { text = "Tone"; setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f; setPadding(0, (10 * d).toInt(), 0, 0) },
             row,
             note("Long-press a card or tap Coach › for a read-out. 'Talk it through' shares the numbers on that card with the Claude app; nothing is sent until you tap it."),

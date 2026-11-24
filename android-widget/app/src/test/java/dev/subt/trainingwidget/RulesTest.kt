@@ -806,4 +806,96 @@ class RulesTest {
             assertTrue(r.data.isNotBlank())
         }
     }
+
+    // ---- coach notes
+    private fun sampleNote() = CoachNotes.Note(
+        "- Goal: sub-3\n- Weight: 80 kg",
+        listOf(
+            CoachNotes.WorkoutNote("i1", "6'x4 repeats", "Rep 1: 320 W\nRep 2: 322 W", listOf("Reps on target", "HR settled"),
+                "Good work.\n\n- keep targets\n- add 5 W later\n\nSee you Thursday."),
+            CoachNotes.WorkoutNote("i2", "3x10' SubT", "Rep 1: 300 W", listOf("Slightly low"), null),
+        ),
+        listOf(
+            CoachNotes.Qa(1, "2026-01-05 19:40", "6'x4 repeats", "Raise targets?", "Reps on target; HR settled", "Not yet.\nHold one more week."),
+            CoachNotes.Qa(2, "2026-01-05 19:42", "3x10' SubT", "Too slow?", "Slightly low", null),
+        ),
+    )
+
+    @Test fun coachNotesRoundTrip() {
+        val n = sampleNote()
+        assertEquals(n, CoachNotes.parse(CoachNotes.render(n)))
+        assertEquals(CoachNotes.render(n), CoachNotes.render(CoachNotes.parse(CoachNotes.render(n))!!))
+    }
+
+    @Test fun coachNotesExactFormat() {
+        val n = CoachNotes.Note("- Goal: sub-3", listOf(CoachNotes.WorkoutNote("i9", "Easy 8", "Avg 200 W", listOf("On target", "HR fine"), null)),
+            listOf(CoachNotes.Qa(1, "2026-01-05 19:40", "Easy 8", "Push more?", "On target; HR fine", null)))
+        val expected = "TRAINING TODAY COACH NOTES v1\n" +
+            "(Written by the Training Today app. A coach fills in the lines marked (pending). Keep the === lines unchanged.)\n\n" +
+            "ABOUT ME\n- Goal: sub-3\n\n" +
+            "=== WORKOUT i9 | Easy 8 ===\nDATA\nAvg 200 W\nDRAFT\n- On target\n- HR fine\nRECAP\n(pending)\n\n" +
+            "=== QUESTIONS ===\nQ1 | 2026-01-05 19:40 | Easy 8\nPush more?\nCONTEXT: On target; HR fine\nA1\n(pending)"
+        assertEquals(expected, CoachNotes.render(n))
+        assertEquals(n, CoachNotes.parse(expected))
+    }
+
+    @Test fun coachNotesWithWorkout() {
+        val n = sampleNote()
+        val again = CoachNotes.withWorkout(n, "new about", CoachNotes.WorkoutNote("i1", "6'x4 repeats", "other", listOf("x"), null))
+        assertEquals(2, again.workouts.size)
+        assertEquals(n.workouts[0], again.workouts[0])
+        assertEquals("new about", again.about)
+        val added = CoachNotes.withWorkout(n, "a", CoachNotes.WorkoutNote("i3", "Run", "d", listOf("l"), null))
+        assertEquals(3, added.workouts.size)
+        assertEquals(n.workouts[0].recap, added.workouts[0].recap)
+        val fresh = CoachNotes.withWorkout(null, "me", CoachNotes.WorkoutNote("i3", "Run", "d", listOf("l"), null))
+        val txt = CoachNotes.render(fresh)
+        assertTrue(txt.startsWith("TRAINING TODAY COACH NOTES v1\n"))
+        assertTrue(txt.contains("ABOUT ME\nme\n"))
+        assertTrue(txt.endsWith("RECAP\n(pending)"))
+        assertTrue(fresh.questions.isEmpty())
+    }
+
+    @Test fun coachNotesWithQuestion() {
+        val n = sampleNote()
+        val q = CoachNotes.withQuestion(n, "a", "2026-01-06 08:00", "Topic\nline", "first line\nsecond   line\n\nthird", "x".repeat(900))
+        assertEquals(3, q.questions.size)
+        assertEquals(3, q.questions.last().n)
+        assertEquals("first line second line third", q.questions.last().question)
+        assertEquals("Topic line", q.questions.last().topic)
+        assertEquals(400, q.questions.last().context.length)
+        assertEquals(n.questions, q.questions.take(2))
+        val first = CoachNotes.withQuestion(null, "a", "t", "tp", "q", "c")
+        assertEquals(1, first.questions.single().n)
+        assertEquals(q, CoachNotes.parse(CoachNotes.render(q)))
+    }
+
+    @Test fun coachNotesParseRobustness() {
+        assertNull(CoachNotes.parse("Remember to stretch"))
+        assertNull(CoachNotes.parse(""))
+        val back = CoachNotes.parse(CoachNotes.render(sampleNote()))!!
+        assertEquals("Good work.\n\n- keep targets\n- add 5 W later\n\nSee you Thursday.", back.workouts[0].recap)
+        assertEquals("Not yet.\nHold one more week.", back.questions[0].answer)
+        assertNull(back.workouts[1].recap)
+        assertNull(back.questions[1].answer)
+        assertEquals(sampleNote(), CoachNotes.parse(CoachNotes.render(sampleNote()).replace("\n", "\r\n")))
+    }
+
+    @Test fun coachNotesOnlyRunsWithTargets() {
+        assertTrue(CoachNotes.eligible("Run", true))
+        assertTrue(CoachNotes.eligible("VirtualRun", true))
+        assertFalse(CoachNotes.eligible("Run", false))
+        assertFalse(CoachNotes.eligible("Ride", true))
+        assertFalse(CoachNotes.eligible("VirtualRide", true))
+        assertFalse(CoachNotes.eligible("Walk", true))
+    }
+
+    @Test fun coachNotesFixtureSeeded() {
+        Fixture.seed(ctx)
+        val note = CoachNotes.parse(Prefs.coachNotes(ctx).values.single())!!
+        assertEquals("i999", note.workouts.single().activityId)
+        assertNotNull(note.workouts.single().recap)
+        assertEquals(listOf(true, false), note.questions.map { it.answer != null })
+        assertTrue(Prefs.coachSync(ctx))
+    }
 }

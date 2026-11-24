@@ -163,6 +163,7 @@ class ScreensTest {
             val ctl = Robolectric.buildActivity(WorkoutActivity::class.java, Intent(ctx, WorkoutActivity::class.java).putExtra(WorkoutActivity.EXTRA_ID, "i999")).setup()
             settle()
             capture("workout", ctl.get().window.decorView)
+            File(outDir, "example_note.txt").writeText(Prefs.coachNotes(ctx).values.first())
             ctl.pause().stop().destroy()
         }
         // The Coach sheet for the made-up workout, built as a plain view (no dialog) so it can be captured

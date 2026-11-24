@@ -216,6 +216,22 @@ object Prefs {
     fun coachTone(ctx: Context): Int = sp(ctx).getInt("coach_tone", 0).coerceIn(0, 2)
     fun setCoachTone(ctx: Context, v: Int) = sp(ctx).edit().putInt("coach_tone", v.coerceIn(0, 2)).apply()
 
+    // ---- coach notes (one "Coach notes" note per day in intervals.icu)
+    /** Cached note descriptions by date (yyyy-MM-dd), so screens render offline. */
+    fun coachNotes(ctx: Context): Map<String, String> = sp(ctx).getString("coach_notes", null)?.let {
+        runCatching { val o = org.json.JSONObject(it); o.keys().asSequence().associateWith { k -> o.getString(k) } }.getOrNull()
+    }.orEmpty()
+    fun saveCoachNotes(ctx: Context, m: Map<String, String>) =
+        sp(ctx).edit().putString("coach_notes", org.json.JSONObject(m as Map<*, *>).toString()).apply()
+    fun coachSync(ctx: Context): Boolean = sp(ctx).getBoolean("coach_sync", true)
+    fun setCoachSync(ctx: Context, on: Boolean) = sp(ctx).edit().putBoolean("coach_sync", on).apply()
+    /** Activity ids already handled (a section written, or skipped as not eligible). */
+    fun coachNoted(ctx: Context): Set<String> = sp(ctx).getStringSet("coach_noted", emptySet()) ?: emptySet()
+    fun saveCoachNoted(ctx: Context, ids: Set<String>) = sp(ctx).edit().putStringSet("coach_noted", HashSet(ids)).apply()
+    /** Replies the "Coach replied" card has already shown: "<date>|W|<activityId>" / "<date>|Q|<n>". */
+    fun coachSeen(ctx: Context): Set<String> = sp(ctx).getStringSet("coach_seen", emptySet()) ?: emptySet()
+    fun saveCoachSeen(ctx: Context, keys: Set<String>) = sp(ctx).edit().putStringSet("coach_seen", HashSet(keys)).apply()
+
     // ---- per-widget settings
 
     fun style(ctx: Context, id: Int): GraphStyle =

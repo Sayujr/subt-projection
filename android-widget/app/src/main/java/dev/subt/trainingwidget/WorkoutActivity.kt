@@ -294,6 +294,80 @@ class WorkoutActivity : Activity() {
         return sb
     }
 
+
+    // ---------------------------------------------------------------- coach's recap
+
+    private fun coachLevelColor(l: Coach.Level) = when (l) { Coach.Level.GOOD -> GOOD; Coach.Level.WATCH -> WARN; Coach.Level.ACT -> BAD; Coach.Level.INFO -> DIM }
+
+    /** Runs with targets only: the coach's recap from the day's note, or the app's draft until it arrives; plus questions. */
+    private fun coachCard(det: WorkoutDetail.Detail, z: Zones.Run?, raw: JSONObject) {
+        if (!CoachNotes.eligible(det.type, det.hasTargets)) return
+        val note = Prefs.coachNotes(this)[det.date]?.let { CoachNotes.parse(it) }
+        val section = note?.workouts?.firstOrNull { it.activityId == det.id }
+        val c = card()
+        label(c, "Coach's recap", GOOD)
+        val recap = section?.recap
+        if (recap != null) {
+            val lines = recap.split("\n")
+            val tv = text(c, lines.take(4).joinToString("\n"), 14f, TEXT, top = 4)
+            if (lines.size > 4) {
+                var open = false
+                val more = text(c, "More", 13f, OVER_C, top = 4)
+                more.setOnClickListener {
+                    open = !open
+                    tv.text = if (open) recap else lines.take(4).joinToString("\n")
+                    more.text = if (open) "Less" else "More"
+                }
+            }
+            text(c, "From your coach notes in intervals.icu", 11.5f, FAINT, top = 6)
+        } else {
+            text(c, "Draft · full recap arrives after the evening coach run", 12f, DIM, top = 2)
+            for (l in Coach.workout(det, z).lines) {
+                val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(7), 0, 0) }
+                r.addView(TextView(this).apply { text = "●"; setTextColor(coachLevelColor(l.level)); setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f); setPadding(0, dp(3), dp(8), 0) })
+                r.addView(TextView(this).apply { text = l.text; setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                c.addView(r)
+            }
+        }
+        for (q in note?.questions.orEmpty().filter { it.topic == det.name }) {
+            text(c, "You: ${q.question}", 13.5f, DIM, top = 10)
+            if (q.answer != null) text(c, "Coach: ${q.answer}", 14f, TEXT, top = 3) else text(c, "Coach: (waiting for the evening run)", 13f, FAINT, top = 3)
+        }
+        val ask = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, 0) }
+        val input = android.widget.EditText(this).apply {
+            hint = if (Prefs.credentials(this@WorkoutActivity) == null) "Connect intervals.icu to ask" else "Ask about this workout"
+            setHintTextColor(FAINT); setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setSingleLine(true); inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            isEnabled = Prefs.credentials(this@WorkoutActivity) != null
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF262C3A.toInt()); cornerRadius = dp(10).toFloat() }
+            setPadding(dp(12), dp(9), dp(12), dp(9))
+        }
+        val send = TextView(this).apply {
+            text = "➤"; setTextColor(OVER_C); setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f); gravity = Gravity.CENTER
+            setPadding(dp(14), dp(4), dp(6), dp(4))
+            setOnClickListener {
+                val blocked = CoachSync.blocker(this@WorkoutActivity)
+                val q = input.text.toString().trim()
+                val creds = Prefs.credentials(this@WorkoutActivity)
+                if (blocked != null || creds == null) { android.widget.Toast.makeText(this@WorkoutActivity, blocked, android.widget.Toast.LENGTH_LONG).show(); return@setOnClickListener }
+                if (q.isEmpty()) return@setOnClickListener
+                val ctxLines = Coach.workout(det, z).lines.joinToString("; ") { it.text }
+                isEnabled = false
+                Thread {
+                    val r = runCatching { CoachSync.sendQuestion(this@WorkoutActivity, creds, det.date, det.name, q, ctxLines) }
+                    runOnUiThread {
+                        isEnabled = true
+                        r.onSuccess { android.widget.Toast.makeText(this@WorkoutActivity, "Sent to your coach notes", android.widget.Toast.LENGTH_SHORT).show(); show(raw) }
+                            .onFailure { android.widget.Toast.makeText(this@WorkoutActivity, "Couldn't send: ${it.message ?: it.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show() }
+                    }
+                }.start()
+            }
+        }
+        ask.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        ask.addView(send)
+        c.addView(ask)
+    }
+
     // ---------------------------------------------------------------- screen
 
     private fun show(raw: JSONObject) {
@@ -305,6 +379,9 @@ class WorkoutActivity : Activity() {
         val dateTxt = runCatching { LocalDate.parse(det.date).format(DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())) }.getOrDefault(det.date)
         header(det.name, "$dateTxt · ${det.type}")
 
+        val z = if (det.heart.any { it != null }) runCatching { Zones.compute(raw, Prefs.lt1(this).toDouble(), Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp) }.getOrNull() else null
+        coachCard(det, z, raw)
+
         // Summary
         val s = card()
         label(s, "Summary")
@@ -312,7 +389,6 @@ class WorkoutActivity : Activity() {
         val cpTxt = det.ftp?.let { f -> det.power.avg?.let { "Average ${w(it)} · ${(it / f * 100).roundToInt()}% of CP ${f.roundToInt()} W (your CP that day)" } }
         if (cpTxt != null) text(s, cpTxt, 12.5f, DIM, top = 8)
         if (det.stoppedSec >= 10) text(s, "Min values leave out ${dur(det.stoppedSec)} of walking or stops (slower than 10:00 /km).", 12f, FAINT, top = 4)
-        val z = if (det.heart.any { it != null }) runCatching { Zones.compute(raw, Prefs.lt1(this).toDouble(), Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp) }.getOrNull() else null
 
         // Average of all work steps: the main takeaway
         det.work?.let { wk ->

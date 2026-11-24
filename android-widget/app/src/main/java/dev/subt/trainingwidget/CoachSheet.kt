@@ -97,9 +97,11 @@ object CoachSheet {
         }
         val buttons = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(14), 0, 0) }
         buttons.addView(button("Talk it through", true) { talk(a, Coach.prompt(a, r, question(content))); onSent(true) },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.6f).apply { rightMargin = dp(10) })
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.5f).apply { rightMargin = dp(8) })
         buttons.addView(button("Copy", false) { copy(a, Coach.prompt(a, r, question(content))); onSent(false) },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.9f).apply { rightMargin = dp(8) })
+        buttons.addView(button("Add to coach notes ➤", false) { addToNotes(a, r, question(content)) { onSent(false) } },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.5f))
         col.addView(buttons)
         col.addView(TextView(a).apply {
             text = "Nothing is sent until you tap Talk it through."; setTextColor(FAINT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f); setPadding(0, dp(8), 0, 0)
@@ -114,6 +116,22 @@ object CoachSheet {
         val ok = installed && runCatching { a.startActivity(Intent(send).setPackage(CLAUDE_PACKAGE)) }.isSuccess
         if (!ok) runCatching { a.startActivity(Intent.createChooser(send, "Talk it through with…")) }
             .onFailure { Toast.makeText(a, "No app to share with.", Toast.LENGTH_SHORT).show() }
+    }
+
+    /** Appends [question] to today's coach note (topic = the read-out's title, context = its lines) in the background. */
+    fun addToNotes(a: Activity, r: Coach.Readout, question: String, done: () -> Unit = {}) {
+        val blocked = CoachSync.blocker(a)
+        val creds = Prefs.credentials(a)
+        if (blocked != null || creds == null) { Toast.makeText(a, blocked ?: "Connect intervals.icu in Settings first.", Toast.LENGTH_LONG).show(); return }
+        if (question.isBlank()) { Toast.makeText(a, "Type a question first.", Toast.LENGTH_SHORT).show(); return }
+        val ctxLine = r.lines.joinToString("; ") { it.text }
+        Thread {
+            val res = runCatching { CoachSync.sendQuestion(a, creds, java.time.LocalDate.now().toString(), r.title, question, ctxLine) }
+            a.runOnUiThread {
+                res.onSuccess { Toast.makeText(a, "Sent to your coach notes", Toast.LENGTH_SHORT).show(); done() }
+                    .onFailure { Toast.makeText(a, "Couldn't send: ${it.message ?: it.javaClass.simpleName}", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     fun copy(a: Activity, text: String) {

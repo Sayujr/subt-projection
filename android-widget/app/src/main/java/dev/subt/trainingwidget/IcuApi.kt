@@ -467,6 +467,51 @@ class IcuApi(private val creds: Credentials) {
         } finally { conn.disconnect() }
     }
 
+    /** The "Coach notes" NOTE events in [start]..[end]: date → (event id, description). Read-only. */
+    fun fetchCoachNotes(start: LocalDate, end: LocalDate): Map<String, Pair<Long, String>> {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val out = linkedMapOf<String, Pair<Long, String>>()
+        for (o in getArray("/athlete/$ath/events", mapOf("oldest" to start.toString(), "newest" to end.toString())).objects()) {
+            if (o.optString("category") != "NOTE" || o.optString("name") != CoachNotes.NAME) continue
+            val day = date(o)
+            if (day.isEmpty() || day in out || !o.has("id") || o.isNull("id")) continue
+            out[day] = o.getLong("id") to (if (o.isNull("description")) "" else o.optString("description"))
+        }
+        return out
+    }
+
+    /**
+     * Writes the day's "Coach notes" note: creates it (POST) when [eventId] is null, else replaces its
+     * description (PUT). The only event this app ever creates or edits besides a race's priority. Returns the event id.
+     */
+    fun saveCoachNote(date: String, eventId: Long?, description: String): Long {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        if (eventId == null) {
+            val body = JSONObject().put("category", "NOTE").put("start_date_local", "${date}T00:00:00")
+                .put("name", CoachNotes.NAME).put("description", description)
+            return JSONObject(sendJson("POST", "/athlete/$ath/events", body)).getLong("id")
+        }
+        sendJson("PUT", "/athlete/$ath/events/$eventId", JSONObject().put("description", description))
+        return eventId
+    }
+
+    private fun sendJson(method: String, path: String, body: JSONObject): String {
+        val conn = Net.open(URL("$BASE$path"))
+        try {
+            conn.requestMethod = method; conn.doOutput = true
+            conn.connectTimeout = 15_000; conn.readTimeout = 25_000
+            val token = Base64.encodeToString("API_KEY:${creds.apiKey}".toByteArray(), Base64.NO_WRAP)
+            conn.setRequestProperty("Authorization", "Basic $token")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Accept", "application/json")
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            if (code == 401 || code == 403) throw AuthException()
+            if (code !in 200..299) throw IOException("intervals.icu returned HTTP $code")
+            return conn.inputStream.bufferedReader().use { it.readText() }
+        } finally { conn.disconnect() }
+    }
+
     fun updateWellness(date: String, fields: JSONObject) {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
         val conn = Net.open(URL("$BASE/athlete/$ath/wellness/${URLEncoder.encode(date, "UTF-8")}"))

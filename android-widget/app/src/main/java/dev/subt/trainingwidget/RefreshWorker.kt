@@ -34,6 +34,7 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                 Prefs.setError(ctx, "offline")
             }
         }
+        if (creds != null && Prefs.coachSync(ctx)) runCatching { CoachSync.run(ctx, creds) }
         // PBs change rarely: refresh daily (or on a manual refresh)
         if (creds != null) {
             val pb = Prefs.pbs(ctx)

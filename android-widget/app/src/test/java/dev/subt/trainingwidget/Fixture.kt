@@ -182,5 +182,18 @@ object Fixture {
             100.0, 360.0, 80.0, 304.0,
             listOf(600.0, 800.0, 1440.0, 580.0), listOf(1600.0, 2100.0, 4400.0, 1700.0))
         Prefs.saveZones(ctx, zr)
+        // A coach note for the fixture workout's day: recap filled in, one question answered and one waiting
+        val det = WorkoutDetail.fromRaw(workoutRaw(), null)
+        val r = Coach.workout(det, null)
+        val date = today.minusDays(2).toString()
+        var note = CoachNotes.withWorkout(null, Coach.background(ctx),
+            CoachNotes.WorkoutNote("i999", det.name, r.data, r.lines.map { it.text }, null))
+        note = note.copy(workouts = note.workouts.map { it.copy(recap = "Solid session. The four 6-minute reps landed on target power with heart rate settling in the SubT band.\n" +
+            "- Rep 1 started a touch low: ease into the first minute and you will hold the rest.\n" +
+            "- Recoveries were calm, so the 2 minutes are doing their job.\n\nNext time: keep the same targets and let the last rep decide whether to nudge them up.") })
+        note = CoachNotes.withQuestion(note, note.about, "$date 19:40", det.name, "Should I raise the targets next time?", r.lines.joinToString("; ") { it.text })
+        note = CoachNotes.withQuestion(note, note.about, "$date 19:42", det.name, "Was the first rep too slow?", r.lines.joinToString("; ") { it.text })
+        note = note.copy(questions = note.questions.map { if (it.n == 1) it.copy(answer = "Not yet. Hold these targets for one more week, then add about 5 W.") else it })
+        Prefs.saveCoachNotes(ctx, mapOf(date to CoachNotes.render(note)))
     }
 }

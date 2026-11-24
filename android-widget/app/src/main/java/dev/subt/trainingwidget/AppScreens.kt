@@ -1324,6 +1324,35 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         CoachSheet.attach(a, c) { Coach.today(a) }
     }
 
+    /** "Coach replied": answers and recaps from today's and yesterday's coach notes that haven't been shown yet. */
+    fun coachRepliedCard(col: LinearLayout) {
+        val notes = Prefs.coachNotes(a)
+        if (notes.isEmpty()) return
+        val seen = Prefs.coachSeen(a)
+        class Item(val key: String, val title: String, val line: String, val activityId: String?, val name: String?)
+        val items = mutableListOf<Item>()
+        val today = java.time.LocalDate.now()
+        for (date in listOf(today.minusDays(1).toString(), today.toString())) {
+            val n = notes[date]?.let { CoachNotes.parse(it) } ?: continue
+            for (w in n.workouts) { val r = w.recap ?: continue; val k = "$date|W|${w.activityId}"
+                if (k !in seen) items += Item(k, w.name, r.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim(), w.activityId, w.name) }
+            for (q in n.questions) { val ans = q.answer ?: continue; val k = "$date|Q|${q.n}"
+                if (k !in seen) items += Item(k, q.topic, ans.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim(), n.workouts.firstOrNull { it.name == q.topic }?.activityId, q.topic) }
+        }
+        if (items.isEmpty()) return
+        val shown = items.take(3)
+        val c = card(col)
+        label(c, "Coach replied", GOOD)
+        for (item in shown) {
+            val row = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(8), 0, 0) }
+            row.addView(TextView(a).apply { text = item.title; setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f); typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) })
+            row.addView(TextView(a).apply { text = item.line; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+            item.activityId?.let { id -> row.setOnClickListener { WorkoutActivity.open(a, id, item.name) } }
+            c.addView(row)
+        }
+        Prefs.saveCoachSeen(a, seen + shown.map { it.key })
+    }
+
     /** Differences between your entered numbers and intervals.icu (the app uses yours). */
     fun deviationsCard(col: LinearLayout) {
         val dev = Deviations.compute(a)
