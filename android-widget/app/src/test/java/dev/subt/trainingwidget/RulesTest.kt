@@ -683,4 +683,127 @@ class RulesTest {
         assertTrue("top ${p.first()} vs ${q.first()}", kotlin.math.abs(p.first() - q.first()) <= 2)
         assertTrue("bottom ${p.last()} vs ${q.last()}", kotlin.math.abs(p.last() - q.last()) <= 2)
     }
+
+    // ---- Coach: rule-based read-outs and the hand-off prompt
+    private fun coachLine(r: Coach.Readout, needle: String) = r.lines.firstOrNull { it.text.contains(needle, ignoreCase = true) }
+    private fun ctlDays(n: Int = 43, f: (Int) -> Double) =
+        (0 until n).map { i -> Day(LocalDate.now().minusDays((n - 1 - i).toLong()).toString(), f(i), f(i) - 5.0) }
+
+    @Test fun coachWorkoutReadout() {
+        val det = WorkoutDetail.fromRaw(Fixture.workoutRaw(), null)
+        val r = Coach.workout(det, null)
+        assertTrue(r.lines.isNotEmpty() && r.lines.size <= 5)
+        val share = det.work!!.inOrOver!!
+        val line = coachLine(r, "on or over target")!!
+        val expected = if (share >= 0.85) Coach.Level.GOOD else if (share >= 0.70) Coach.Level.WATCH else Coach.Level.ACT
+        assertEquals(expected, line.level)
+        assertTrue(line.text, line.text.contains("${Math.round(share * 100)}%"))
+        for (n in 1..4) assertTrue("data lists rep $n", r.data.contains("Work rep $n"))
+        assertEquals(3, r.questions.size)
+    }
+
+    @Test fun coachWorkoutFade() {
+        val raw = Fixture.workoutRaw()
+        val ivs = raw.getJSONObject("i").getJSONArray("icu_intervals")
+        val work = (0 until ivs.length()).map { ivs.getJSONObject(it) }.filter { it.getString("type") == "WORK" }
+        val firstAvg = work.first().getDouble("average_watts")
+        val last = work.last()
+        val factor = firstAvg * 0.95 / last.getDouble("average_watts")
+        last.put("average_watts", firstAvg * 0.95)
+        val streams = raw.getJSONArray("s")
+        for (i in 0 until streams.length()) {
+            val st = streams.getJSONObject(i)
+            if (st.getString("type") != "watts") continue
+            val data = st.getJSONArray("data")
+            for (k in last.getInt("start_index") until last.getInt("end_index")) data.put(k, data.getDouble(k) * factor)
+        }
+        val r = Coach.workout(WorkoutDetail.fromRaw(raw, null), null)
+        val faded = coachLine(r, "faded")
+        assertNotNull(r.lines.toString(), faded)
+        assertEquals(Coach.Level.WATCH, faded!!.level)
+        // the unmodified fixture's last rep is higher than its first: no fade
+        assertNull(coachLine(Coach.workout(WorkoutDetail.fromRaw(Fixture.workoutRaw(), null), null), "faded"))
+    }
+
+    @Test fun coachLoadLines() {
+        val rising = Coach.loadReadout(ctlDays { 40.0 + it * 10.0 / 42 })!!
+        val up = coachLine(rising, "rising")!!
+        assertEquals(Coach.Level.GOOD, up.level)
+        assertTrue("slow rise is not a fast ramp", rising.lines.none { it.level == Coach.Level.ACT })
+        val spike = Coach.loadReadout(ctlDays { if (it <= 36) 50.0 else 50.0 + (it - 36) })!!   // +6 in the last 7 days
+        val ramp = coachLine(spike, "ramping fast")!!
+        assertEquals(Coach.Level.ACT, ramp.level)
+        val flat = Coach.loadReadout(ctlDays { 50.0 })!!
+        assertEquals(Coach.Level.INFO, coachLine(flat, "holding")!!.level)
+        val deep = Coach.loadReadout((0 until 43).map { Day(LocalDate.now().minusDays((42 - it).toLong()).toString(), 50.0, 50.0 + (if (it >= 36) 25.0 else 0.0)) })!!
+        assertEquals(Coach.Level.WATCH, coachLine(deep, "below −20")!!.level)   // 7 of the last 14 days
+        assertNull(Coach.loadReadout(ctlDays(10) { 50.0 }))
+    }
+
+    private fun totalWithEasyShare(share: Double): Zones.Total {
+        val bands = listOf(share * 4000, share * 6000, 0.0, (1 - share) * 10000, 0.0, 0.0, 0.0)
+        return Zones.Total(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3, bandSec = bands, bandM = List(7) { 0.0 })
+    }
+
+    @Test fun coachWeekLines() {
+        assertEquals(Coach.Level.WATCH, coachLine(Coach.weekReadout(totalWithEasyShare(0.30), "w")!!, "under 135")!!.level)
+        assertEquals(Coach.Level.INFO, coachLine(Coach.weekReadout(totalWithEasyShare(0.50), "w")!!, "under 135")!!.level)
+        assertEquals(Coach.Level.GOOD, coachLine(Coach.weekReadout(totalWithEasyShare(0.70), "w")!!, "under 135")!!.level)
+        // lines with no data are left out
+        val r = Coach.weekReadout(totalWithEasyShare(0.70), "w")!!
+        assertNull(coachLine(r, "SubT:")); assertNull(coachLine(r, "Long-run aerobic")); assertNull(coachLine(r, "over 172"))
+        // SubT share of work time on or over target: 600 in + 300 over of 1000
+        val subt = Zones.Total(600.0, 0.0, 1000.0, 0.0, 0.0, 0.0, 0.0, 1, bandSec = List(7) { 100.0 }, bandM = List(7) { 0.0 }, subtOverSec = 300.0, subtUnderSec = 100.0)
+        assertEquals(Coach.Level.GOOD, coachLine(Coach.weekReadout(subt, "w")!!, "SubT:")!!.level)
+        val mid = Zones.Total(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1, bandSec = listOf(0.0, 100.0, 500.0, 0.0, 0.0, 0.0, 0.0), bandM = List(7) { 0.0 })
+        assertEquals(Coach.Level.WATCH, coachLine(Coach.weekReadout(mid, "w")!!, "in-between")!!.level)
+        assertNull(Coach.weekReadout(Zones.Total(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0), "w"))
+    }
+
+    @Test fun coachSubtTrendWording() {
+        val real = Coach.trendLine(-2.0 / 60 to 0.5 / 60)!!
+        assertTrue(real.text, real.text.contains("real improvement")); assertEquals(Coach.Level.GOOD, real.level)
+        val noise = Coach.trendLine(-1.0 / 60 to 2.0 / 60)!!
+        assertTrue(noise.text, noise.text.contains("within noise")); assertFalse(noise.text.contains("real improvement"))
+        assertFalse("a real slowing is not an improvement", Coach.trendLine(2.0 / 60 to 0.5 / 60)!!.text.contains("real improvement"))
+        assertNull(Coach.trendLine(null))
+    }
+
+    @Test fun coachTodayRestingHr() {
+        Prefs.saveSnapshot(ctx, snapWith(51.0, -2.0), 60)
+        assertEquals(Coach.Level.GOOD, coachLine(Coach.today(ctx)!!, "Resting HR")!!.level)
+        Prefs.saveSnapshot(ctx, snapWith(54.0, -2.0), 60)       // about 3.5 above normal
+        assertEquals(Coach.Level.WATCH, coachLine(Coach.today(ctx)!!, "Resting HR")!!.level)
+        Prefs.saveSnapshot(ctx, snapWith(57.0, -2.0), 60)       // about 6.5 above
+        assertEquals(Coach.Level.ACT, coachLine(Coach.today(ctx)!!, "Resting HR")!!.level)
+        ctx.getSharedPreferences("training_widget", Context.MODE_PRIVATE).edit().clear().commit()
+        assertNull(Coach.today(ctx))
+    }
+
+    @Test fun coachPrompt() {
+        Fixture.seed(ctx)
+        val det = WorkoutDetail.fromRaw(Fixture.workoutRaw(), null)
+        val r = Coach.workout(det, null)
+        val p = Coach.prompt(ctx, r, "What should I change next time?")
+        val bg = Coach.background(ctx)
+        assertTrue(p.startsWith("You are my running coach. Be direct and concise."))
+        assertTrue(p.contains("ABOUT ME\n$bg"))
+        assertTrue(p.contains("WHAT I'M LOOKING AT (${r.title})\n${r.data}"))
+        for (l in r.lines) assertTrue(l.text, p.contains(l.text))
+        assertTrue(p.endsWith("MY QUESTION\nWhat should I change next time?"))
+        for (k in listOf("sub-3", "Stryd", "172", "135", "SubT", "intervals.icu", "CP / FTP", "351", "Current SubT pace")) assertTrue("background has $k", bg.contains(k))
+        Prefs.setCoachTone(ctx, 1); assertTrue(Coach.prompt(ctx, r, "q").contains("Be encouraging but honest."))
+        Prefs.setCoachTone(ctx, 2); assertTrue(Coach.prompt(ctx, r, "q").contains("Be analytical, show your reasoning."))
+    }
+
+    @Test fun coachReadoutsFromSeededData() {
+        Fixture.seed(ctx)
+        for ((name, r) in listOf("today" to Coach.today(ctx), "load" to Coach.load(ctx), "subt" to Coach.subt(ctx), "race" to Coach.race(ctx),
+            "week" to Coach.week(ctx, LocalDate.now().minusDays(6), LocalDate.now()))) {
+            assertNotNull("$name read-out", r)
+            assertTrue("$name has 3-5 lines: ${r!!.lines}", r.lines.size in 3..5)
+            assertEquals(3, r.questions.size)
+            assertTrue(r.data.isNotBlank())
+        }
+    }
 }

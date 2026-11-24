@@ -241,6 +241,7 @@ class SetupActivity : Activity() {
         section("send", "Send to intervals.icu", "Optional, asks before each change", false, groups["send"]!!)
         section("rules", "Rules", "Plan tolerance, streak bands, marathon power", false, rulesViews())
         section("wid", "Widgets", if (widgetMode) "This widget's graphs and period" else "Long-press a widget to change it", widgetMode, groups["wid"]!!)
+        section("coach", "Coach", "Tone of the read-out you take to the Claude app", false, coachViews())
         section("backup", "Backup", "Save or restore your settings and numbers", false, backupViews())
         val crashes = CrashLog.count(this)
         section("crash", "Crash reports", if (crashes == 0) "No crashes recorded" else "⚠ $crashes recorded, last ${CrashLog.lastTime(this)}", false, crashViews())
@@ -360,6 +361,35 @@ class SetupActivity : Activity() {
         }
         return listOf(info, notes, btn, viaBrowser,
             note("Android asks you to confirm the install. Your widgets and settings stay. If the \"Install unknown apps\" switch is greyed out, Samsung Auto Blocker is on: turn it off for the install, or use the browser button."))
+    }
+
+    /** Tone for the prompt "Talk it through" prepares. */
+    private fun coachViews(): List<View> {
+        val d = resources.displayMetrics.density
+        val names = listOf("Direct", "Encouraging", "Analytical")
+        val row = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; setPadding(0, (10 * d).toInt(), 0, 0) }
+        val chips = names.map { TextView(this) }
+        fun paint() {
+            val sel = Prefs.coachTone(this)
+            chips.forEachIndexed { i, tv ->
+                tv.setBackgroundResource(if (i == sel) R.drawable.chip_on else R.drawable.chip_off)
+                tv.setTextColor(if (i == sel) 0xFFF2F4F8.toInt() else 0xFF9AA3B2.toInt())
+            }
+        }
+        chips.forEachIndexed { i, tv ->
+            tv.apply {
+                text = names[i]; textSize = 14f; gravity = android.view.Gravity.CENTER
+                setPadding((8 * d).toInt(), (9 * d).toInt(), (8 * d).toInt(), (9 * d).toInt())
+                setOnClickListener { Prefs.setCoachTone(this@SetupActivity, i); paint() }
+            }
+            row.addView(tv, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = (8 * d).toInt() })
+        }
+        paint()
+        return listOf(
+            TextView(this).apply { text = "Tone"; setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f; setPadding(0, (10 * d).toInt(), 0, 0) },
+            row,
+            note("Long-press a card or tap Coach › for a read-out. 'Talk it through' shares the numbers on that card with the Claude app; nothing is sent until you tap it."),
+        )
     }
 
     private fun backupViews(): List<View> = listOf(

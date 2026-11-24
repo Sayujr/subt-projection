@@ -701,6 +701,7 @@ class MainActivity : Activity() {
                 setImageBitmap(bmp); scaleType = android.widget.ImageView.ScaleType.FIT_XY
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)))
         }
+        CoachSheet.attach(this, card) { Coach.week(this, start, end) }
         return card
     }
 
@@ -887,6 +888,8 @@ class MainActivity : Activity() {
                             val w = todays[i]
                             w.activityId?.let { aid -> rows.getChildAt(i).setOnClickListener { WorkoutActivity.open(this, aid, w.name) } }
                         }
+                        // Long-press the chart card, or tap Coach › under it
+                        CoachSheet.attachBelow(this, col, card) { Coach.load(this) }
                     }
                     col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
                     screens.deviationsCard(col)
@@ -924,6 +927,7 @@ class MainActivity : Activity() {
                         val hits = ChartHits.named("subt")
                         if (bmp != null && hits != null) Scrub.attach(iv, bmp, hits)
                     }
+                    col.getChildAt(col.childCount - 1)?.let { card -> CoachSheet.attachBelow(this, col, card) { Coach.subt(this) } }
                     col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
                     AppScreens(this, wDp).subtExtras(col)
                     content.addView(sv, full)

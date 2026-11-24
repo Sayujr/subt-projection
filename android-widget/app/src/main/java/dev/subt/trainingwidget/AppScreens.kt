@@ -257,6 +257,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 Triple("Form", signed(eveTop.form.roundToInt()) to z.color, z.label),
             ))
         }
+        CoachSheet.attach(a, h) { Coach.race(a, raceIndex) }
         val peakIdx = window.indices.maxBy { window[it].ctl }
         val peak = window[peakIdx]
         val floor = tt?.floor ?: peak.ctl * 0.9
@@ -1305,7 +1306,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         for ((color, t) in v.reasons) bullet(c, color, t)
         // "Why this call?": the numbers behind it, folded away until tapped
         val facts = Verdict.explain(Prefs.snapshot(a), Prefs.rhrOverride(a), Prefs.hrvOverride(a), Prefs.loadIndex(a)?.first)
-        if (facts.isEmpty()) return
+        if (facts.isEmpty()) { CoachSheet.attach(a, c) { Coach.today(a) }; return }
         val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; visibility = if ("why" in openInfo) View.VISIBLE else View.GONE }
         for ((k, v2) in facts) row(body, listOf(k to DIM, v2 to TEXT), weights = listOf(1f, 2.1f))
         text(body, "Push = recovered and balanced. Hold = one warning sign. Back off = several, or one strong one. Taper overrides near a race.", 12f, FAINT, top = 6)
@@ -1320,6 +1321,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             }
         }
         c.addView(head); c.addView(body)
+        CoachSheet.attach(a, c) { Coach.today(a) }
     }
 
     /** Differences between your entered numbers and intervals.icu (the app uses yours). */

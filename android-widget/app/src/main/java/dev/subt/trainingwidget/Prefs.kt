@@ -212,6 +212,10 @@ object Prefs {
     fun lt1(ctx: Context): Int = sp(ctx).getInt("lt1_hr", 153)
     fun setLt1(ctx: Context, v: Int) = sp(ctx).edit().putInt("lt1_hr", v).apply()
 
+    // ---- coach: tone of the hand-off prompt (0 direct, 1 encouraging, 2 analytical)
+    fun coachTone(ctx: Context): Int = sp(ctx).getInt("coach_tone", 0).coerceIn(0, 2)
+    fun setCoachTone(ctx: Context, v: Int) = sp(ctx).edit().putInt("coach_tone", v.coerceIn(0, 2)).apply()
+
     // ---- per-widget settings
 
     fun style(ctx: Context, id: Int): GraphStyle =

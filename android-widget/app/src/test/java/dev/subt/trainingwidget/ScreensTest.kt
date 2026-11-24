@@ -165,6 +165,16 @@ class ScreensTest {
             capture("workout", ctl.get().window.decorView)
             ctl.pause().stop().destroy()
         }
+        // The Coach sheet for the made-up workout, built as a plain view (no dialog) so it can be captured
+        safely("coach_sheet") {
+            val act = Robolectric.buildActivity(WorkoutActivity::class.java, Intent(ctx, WorkoutActivity::class.java).putExtra(WorkoutActivity.EXTRA_ID, "i999")).setup().get()
+            val r = Coach.workout(WorkoutDetail.fromRaw(Fixture.workoutRaw(), null), null)
+            val sheet = CoachSheet.content(act, r)
+            val w = (390 * ctx.resources.displayMetrics.density).toInt()
+            sheet.view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val h = sheet.view.measuredHeight.coerceIn(1, 4000)
+            save("coach_sheet", draw(sheet.view, w, h))
+        }
         safely("settings") {
             val ctl = Robolectric.buildActivity(SetupActivity::class.java).setup()
             settle()

@@ -385,6 +385,7 @@ class WorkoutActivity : Activity() {
                 c.addView(BandViews.statRow(this, "155–172", wk.hrB.sec, wk.hrB.frac * 100, wk.hrB.m, emphasised = true, decimals = 2))
                 c.addView(BandViews.statRow(this, "Over 172", wk.hrOver.sec, wk.hrOver.frac * 100, wk.hrOver.m, decimals = 2))
             }
+            CoachSheet.attach(this, c) { Coach.workout(det, z) }
         }
 
         // Test efforts (long hard steps at or above CP) are kept out of the work numbers
@@ -433,6 +434,7 @@ class WorkoutActivity : Activity() {
                 val no = when { st.isWork -> ++workNo; st.isTest -> ++testNo; else -> 0 }
                 stepRow(c, det, st, no)
             }
+            if (det.work == null) CoachSheet.attach(this, c) { Coach.workout(det, z) }
         } else text(card(), "intervals.icu has no steps for this activity.", 13f, DIM)
     }
 
