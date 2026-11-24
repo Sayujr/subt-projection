@@ -174,6 +174,7 @@ class ScreensTest {
             sheet.view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
             val h = sheet.view.measuredHeight.coerceIn(1, 4000)
             save("coach_sheet", draw(sheet.view, w, h))
+            File(outDir, "coach_prompt.txt").writeText(Coach.prompt(ctx, r, CoachSheet.question(sheet)))
         }
         safely("settings") {
             val ctl = Robolectric.buildActivity(SetupActivity::class.java).setup()
