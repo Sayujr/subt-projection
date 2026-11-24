@@ -1,3 +1,4 @@
+- Heart-rate bands on every run and on the Week screen: time, % and km under 125, under 135, 135–155, 155–165, 165–172, 155–172, 165–175 and over 172
 - Week screen: time in target (SubT in power target, easy HR under 130, long-run aerobic) with time, km and a 12-week trend
 - Workout detail: tap a done workout (Week list, or "Done this week" on Today) for its steps against your power targets
 - Work-steps average: power, pace and HR (avg, min, max) across all work steps, where you sat in the target range, time in target, and time with HR ≤ 165 / ≤ 172

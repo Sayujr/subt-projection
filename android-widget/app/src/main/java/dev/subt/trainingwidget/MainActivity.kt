@@ -54,9 +54,11 @@ class MainActivity : Activity() {
     private var layoutRetries = 0
     /** When each background load last failed: no automatic retry for 5 minutes (stops offline retry loops). */
     private val failedAt = mutableMapOf<String, Long>()
-    private val ZC_SUBT = 0xFFFF9F5A.toInt()
+    private val ZC_SUBT = 0xFFFFC53D.toInt()
     private val ZC_EASY = 0xFF3DD68C.toInt()
     private val ZC_LONG = 0xFF4EA1FF.toInt()
+    private val ZC_BAND = 0xFFFF9F5A.toInt()
+    private var longBandsOpen = false
     private lateinit var content: FrameLayout
     private lateinit var controls: HorizontalScrollView
     private lateinit var chips: LinearLayout
@@ -587,14 +589,26 @@ class MainActivity : Activity() {
             }
             val pct = if (tot.subtWorkSec > 0) " · ${(tot.subtInSec / tot.subtWorkSec * 100).roundToInt()}% of work time" else ""
             row("SubT in power target", if (tot.subtInSec > 0) "${tm(tot.subtInSec)} · ${km(tot.subtInM)}$pct" else "–", ZC_SUBT)
-            row("Easy · HR under ${Zones.EASY_HR.toInt()}", if (tot.easySec > 0) "${tm(tot.easySec)} · ${km(tot.easyM)}" else "–", ZC_EASY)
+            card.addView(label("HEART RATE BANDS · ALL RUNS", 12f, 0xFF6B7386.toInt(), 16).apply { letterSpacing = 0.06f })
+            card.addView(BandViews.build(this, tot.bandSec, tot.bandM, dp(wDp - 56)))
             row("Long-run aerobic · HR ${Zones.EASY_HR.toInt()}–$lt1", if (tot.longSec > 0) "${tm(tot.longSec)} · ${km(tot.longM)}" else "–", ZC_LONG)
+            val longBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = if (longBandsOpen) View.VISIBLE else View.GONE }
+            longBox.addView(BandViews.build(this, tot.longBandSec, tot.longBandM, dp(wDp - 56)))
+            val toggle = label(if (longBandsOpen) "Long runs only: heart rate bands ▴" else "Long runs only: heart rate bands ▾", 13f, 0xFF4EA1FF.toInt(), 8)
+            toggle.setOnClickListener {
+                longBandsOpen = !longBandsOpen
+                longBox.visibility = if (longBandsOpen) View.VISIBLE else View.GONE
+                toggle.text = if (longBandsOpen) "Long runs only: heart rate bands ▴" else "Long runs only: heart rate bands ▾"
+            }
+            card.addView(toggle)
+            card.addView(longBox)
         }
         card.addView(label("LAST 12 WEEKS", 12f, 0xFF6B7386.toInt(), 14).apply { letterSpacing = 0.06f })
         val weeks = Zones.weekly(all, 12, LocalDate.now())
         val charts = listOf<Triple<String, Int, (Zones.Total) -> Double>>(
             Triple("SubT in target", ZC_SUBT, { t: Zones.Total -> t.subtInSec }),
-            Triple("Easy · HR under ${Zones.EASY_HR.toInt()}", ZC_EASY, { t: Zones.Total -> t.easySec }),
+            Triple("Under ${Zones.EASY_HR.toInt()}", ZC_EASY, { t: Zones.Total -> t.easySec }),
+            Triple("HR 155–172", ZC_BAND, { t: Zones.Total -> t.bandSec.getOrElse(3) { 0.0 } + t.bandSec.getOrElse(4) { 0.0 } }),
             Triple("Long-run aerobic", ZC_LONG, { t: Zones.Total -> t.longSec }),
         )
         val widthPx = dp(wDp - 56).coerceAtLeast(dp(200))
@@ -679,6 +693,8 @@ class MainActivity : Activity() {
             zr == null -> ""
             zr.subt && zr.subtWorkSec > 0 -> " · ${(zr.subtInSec / 60).roundToInt()}′ in target"
             zr.long && zr.longSec > 0 -> " · ${(zr.longSec / 60).roundToInt()}′ aerobic"
+            !zr.subt && !zr.long && zr.bandSec.getOrElse(0) { 0.0 } + zr.bandSec.getOrElse(1) { 0.0 } > 0 ->
+                " · ${((zr.bandSec[0] + zr.bandSec[1]) / 60).roundToInt()}′ under 135"
             else -> ""
         }
         row.findViewById<TextView>(R.id.row_meta).text = WidgetRenderer.meta(w) + inTarget + (if (missed) " · missed" else "") + (if (w.activityId != null) "  ›" else "")

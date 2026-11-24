@@ -246,6 +246,16 @@ class WorkoutActivity : Activity() {
             metric(c, "Time with HR ≤ 172", HEART, pct(wk.hr172), null)
         }
 
+        // Heart-rate bands for this run (every run with an HR stream)
+        if (det.heart.any { it != null }) {
+            val z = runCatching { Zones.compute(raw, Prefs.lt1(this).toDouble(), Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp) }.getOrNull()
+            if (z != null && z.bandSec.sum() > 0) {
+                val c = card()
+                label(c, "Heart rate bands")
+                c.addView(BandViews.build(this, z.bandSec, z.bandM, contentW()))
+            }
+        }
+
         // Power / pace / HR over time
         if (det.watts.any { it != null } || det.heart.any { it != null }) {
             val c = card()

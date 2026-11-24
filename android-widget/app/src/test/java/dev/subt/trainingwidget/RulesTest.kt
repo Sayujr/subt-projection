@@ -398,6 +398,54 @@ class RulesTest {
         assertEquals(9.0 + 5.0 + 9.0 + 1.0, g.easySec, 1e-9)
     }
 
+    private fun bandRaw(name: String, counts: List<Int>): org.json.JSONObject {
+        val reps = listOf(120.0, 130.0, 145.0, 160.0, 168.0, 173.0, 180.0)
+        val hr = counts.indices.flatMap { i -> List(counts[i]) { reps[i] } }
+        return rawOf(name, hr.indices.toList(), hr, List(hr.size) { 3.0 })
+    }
+
+    @Test fun bandBuckets() {
+        assertEquals(listOf(0, 1, 1, 2, 3, 4, 5, 6),
+            listOf(124.9, 125.0, 134.9, 135.0, 155.0, 165.0, 172.0, 175.0).map { Zones.bucket(it) })
+    }
+
+    @Test fun bandRowsFromCompute() {
+        val counts = listOf(10, 20, 30, 40, 50, 60, 70)
+        val r = Zones.compute(bandRaw("Easy", counts), 153.0, null)
+        assertEquals(counts.map { it.toDouble() }, r.bandSec)
+        assertEquals(counts.map { it * 3.0 }, r.bandM)
+        val rows = Zones.bandRows(r.bandSec, r.bandM).associateBy { it.label }
+        val exp = mapOf("Under 125" to 10, "Under 135" to 30, "135–155" to 30, "155–165" to 40, "165–172" to 50,
+            "155–172" to 90, "165–175" to 110, "Over 172" to 130)
+        assertEquals(8, rows.size)
+        for ((l, n) in exp) {
+            assertEquals(l, n.toDouble(), rows[l]!!.sec, 1e-9)
+            assertEquals(l, n * 3.0, rows[l]!!.m, 1e-9)
+            assertEquals(l, n / 280.0 * 100, rows[l]!!.pct, 1e-9)
+        }
+        assertTrue(rows["155–172"]!!.emphasised)
+        assertEquals(100.0, rows["Under 135"]!!.pct + rows["135–155"]!!.pct + rows["155–172"]!!.pct + rows["Over 172"]!!.pct, 1.0)
+        assertTrue(Zones.bandRows(List(7) { 0.0 }, List(7) { 0.0 }).all { it.pct == 0.0 })
+    }
+
+    @Test fun bandsCountForRaces() {
+        val r = Zones.compute(bandRaw("Half marathon race", listOf(0, 0, 0, 0, 100, 0, 0)), 153.0, null)
+        assertEquals(100.0, r.bandSec[4], 1e-9)
+    }
+
+    @Test fun bandsLongOnlyAndJson() {
+        val z = List(7) { 1.0 }
+        val a = Zones.Run("a", "2026-11-23", "Easy", 3000, 9000.0, false, false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, z, z)
+        val b = Zones.Run("b", "2026-11-24", "2h steady", 7200, 20000.0, false, true, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, List(7) { 2.0 }, List(7) { 5.0 })
+        val t = Zones.total(listOf(a, b), LocalDate.parse("2026-11-23"), LocalDate.parse("2026-11-29"))
+        assertEquals(List(7) { 3.0 }, t.bandSec); assertEquals(List(7) { 6.0 }, t.bandM)
+        assertEquals(List(7) { 2.0 }, t.longBandSec); assertEquals(List(7) { 5.0 }, t.longBandM)
+        assertEquals(listOf(a, b), Zones.fromJson(Zones.toJson(listOf(a, b))))
+        val old = """[{"id":"o","date":"2026-11-23","name":"Easy","seconds":10,"distance":1.0,"easySec":5.0}]"""
+        val o = Zones.fromJson(old).single()
+        assertEquals(List(7) { 0.0 }, o.bandSec); assertEquals(List(7) { 0.0 }, o.bandM)
+    }
+
     @Test fun zonesSubtFixture() {
         val r = Zones.compute(Fixture.workoutRaw(), 153.0, null)
         assertTrue(r.subt)
