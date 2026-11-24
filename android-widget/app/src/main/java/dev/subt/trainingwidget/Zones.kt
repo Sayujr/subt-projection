@@ -108,14 +108,16 @@ object Zones {
         }
 
         var inSec = 0.0; var inM = 0.0; var workSec = 0.0
-        val wattsS = WorkoutDetail.smooth(watts)
         if (subt && raw.optJSONObject("i") != null) {
             val det = WorkoutDetail.fromRaw(raw, fallbackFtp)
             for (st in det.steps) {
                 val lo = st.loW; val hi = st.hiW
                 if (!(st.isWork && !st.hrTarget && lo != null && hi != null && st.start >= 0)) continue
-                for (i in WorkoutDetail.afterRamp(st.start, st.end)..minOf(st.end, n - 1)) {
-                    val w = wattsS.getOrNull(i) ?: continue
+                // same rule as the workout screen: reps under 90 s are judged raw, longer ones on a 10 s average after the ramp
+                val first = WorkoutDetail.rampStart(st.start, st.end)
+                val series = if (WorkoutDetail.isShort(st.start, st.end)) watts else WorkoutDetail.stepSmooth(watts, first, st.end)
+                for (i in first..minOf(st.end, n - 1)) {
+                    val w = series.getOrNull(i) ?: continue
                     val d = dt(i)
                     workSec += d
                     if (w >= lo - 0.5 && w <= hi + 0.5) { inSec += d; inM += dist(i, d) }

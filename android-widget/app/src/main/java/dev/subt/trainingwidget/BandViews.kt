@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -26,6 +27,12 @@ object BandViews {
     private const val FAINT = 0xFF6B7386.toInt()
 
     fun bar(ctx: Context, sec: List<Double>, widthPx: Int): Bitmap {
+        fun s(i: Int) = sec.getOrElse(i) { 0.0 }
+        return strip(ctx, listOf(s(0) + s(1), s(2), s(3) + s(4), s(5) + s(6)), listOf(GREEN, GREY, ORANGE, RED), widthPx)
+    }
+
+    /** A rounded bar split into parts (any weights) with the given colours. */
+    fun strip(ctx: Context, parts: List<Double>, cols: List<Int>, widthPx: Int): Bitmap {
         val d = ctx.resources.displayMetrics.density
         val h = (10 * d).roundToInt()
         val w = widthPx.coerceAtLeast(40)
@@ -35,9 +42,6 @@ object BandViews {
         val r = h / 2f
         p.color = 0xFF3A4150.toInt()
         c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), r, r, p)
-        fun s(i: Int) = sec.getOrElse(i) { 0.0 }
-        val parts = listOf(s(0) + s(1), s(2), s(3) + s(4), s(5) + s(6))
-        val cols = listOf(GREEN, GREY, ORANGE, RED)
         val sum = parts.sum()
         if (sum > 0) {
             c.save()
@@ -53,6 +57,45 @@ object BandViews {
             c.restore()
         }
         return bmp
+    }
+
+    fun stripView(ctx: Context, parts: List<Double>, cols: List<Int>, widthPx: Int): ImageView {
+        val iv = ImageView(ctx).apply { setImageBitmap(strip(ctx, parts, cols, widthPx)); scaleType = ImageView.ScaleType.FIT_XY }
+        val d = ctx.resources.displayMetrics.density
+        iv.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (10 * d).roundToInt()).apply { topMargin = (8 * d).roundToInt() }
+        return iv
+    }
+
+    /** One table row: label, time, share (0–100, null = hidden), distance (null = hidden). */
+    fun statRow(ctx: Context, label: String, sec: Double, pct: Double?, m: Double?, emphasised: Boolean = false, decimals: Int = 1): LinearLayout {
+        val d = ctx.resources.displayMetrics.density
+        val line = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, (3 * d).roundToInt(), 0, (3 * d).roundToInt()) }
+        val c = if (emphasised) TEXT else 0xFFD3D8E2.toInt()
+        val sp = if (emphasised) 15f else 14f
+        line.addView(cell(ctx, label, sp, c, 0, emphasised, Gravity.START))
+        line.addView(cell(ctx, if (sec > 0) SubtModel.time(sec) else "–", sp, c, 66, emphasised, Gravity.END))
+        if (pct != null) line.addView(cell(ctx, if (sec > 0) "${pct.roundToInt()}%" else "–", sp, c, 48, emphasised, Gravity.END))
+        if (m != null) line.addView(cell(ctx, if (m > 0) String.format(Locale.US, "%.${decimals}f km", m / 1000) else "–", sp, c, 66, emphasised, Gravity.END))
+        return line
+    }
+
+    /** Small heading with a tappable "ⓘ" that shows or hides a short note underneath. */
+    fun heading(ctx: Context, parent: LinearLayout, title: String, note: String?, color: Int = DIM, size: Float = 11f, topDp: Int = 0) {
+        val d = ctx.resources.displayMetrics.density
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, (topDp * d).roundToInt(), 0, 0) }
+        row.addView(TextView(ctx).apply { text = title; setTextSize(TypedValue.COMPLEX_UNIT_SP, size); setTextColor(color); letterSpacing = 0.08f })
+        parent.addView(row)
+        if (note == null) return
+        val tv = TextView(ctx).apply {
+            text = note; setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f); setTextColor(DIM); setPadding(0, (4 * d).roundToInt(), 0, (2 * d).roundToInt())
+            visibility = View.GONE
+        }
+        row.addView(TextView(ctx).apply {
+            text = "ⓘ"; setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f); setTextColor(FAINT); setPadding((10 * d).roundToInt(), (2 * d).roundToInt(), (10 * d).roundToInt(), (2 * d).roundToInt())
+            contentDescription = "Explain $title"
+            setOnClickListener { tv.visibility = if (tv.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
+        })
+        parent.addView(tv)
     }
 
     private fun cell(ctx: Context, t: String, sp: Float, color: Int, widthDp: Int, bold: Boolean, gravity: Int): TextView =
@@ -91,10 +134,6 @@ object BandViews {
             line.addView(cell(ctx, if (r.m > 0) String.format(Locale.US, "%.1f km", r.m / 1000) else "–", sp, c, 66, r.emphasised, Gravity.END))
             box.addView(line)
         }
-        box.addView(TextView(ctx).apply {
-            text = "Rows overlap on purpose (e.g. 155–172 includes 155–165). Under 135 + 135–155 + 155–172 + Over 172 = 100%."
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f); setTextColor(FAINT); setPadding(0, dp(8), 0, 0)
-        })
         return box
     }
 }

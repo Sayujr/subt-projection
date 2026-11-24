@@ -100,7 +100,7 @@ object Fixture {
             val start = t
             var sumW = 0.0; var sumH = 0.0; var dist = 0.0; var maxH = 0.0
             repeat(sec) { i ->
-                val pw = w + 9 * sin(t / 7.0) + (if (type == "WORK" && i < 12) -40 + i * 3.3 else 0.0)
+                val pw = w + 9 * sin(t / 7.0) + (if (type == "WORK" && i < 5) -40 + i * 8.0 else 0.0)
                 val target = if (type == "WORK") 150 + (w - 300) * 0.9 + 14 else if (type == "RECOVERY") 140.0 else 128.0
                 h += (target - h) * 0.02
                 val v = pw / 350.0 * 3.75

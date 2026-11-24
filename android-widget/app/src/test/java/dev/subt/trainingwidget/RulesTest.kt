@@ -227,6 +227,8 @@ class RulesTest {
         assertEquals(3, tens.size); assertTrue("10' reps are work", tens.all { it.kind == WorkoutDetail.Kind.WORK })
         assertTrue("strides aren't work", plan.filter { it.seconds in 1..39 }.none { it.kind == WorkoutDetail.Kind.WORK })
         assertEquals(WorkoutDetail.Kind.RECOVERY, plan.first { it.seconds == 300 }.kind)
+        // The 3' at 112–120 % is a test effort and doesn't set the bar for the work rule
+        assertEquals(WorkoutDetail.Kind.TEST, plan.first { it.seconds == 180 }.kind)
         // Bike session with HR-only targets (75–85 % of max HR 194 = 145.5–164.9 bpm)
         fun hr(lo: Int, hi: Int, dur: Int) = org.json.JSONObject().put("duration", dur).put("hr", org.json.JSONObject().put("start", lo).put("end", hi).put("units", "%hr"))
         val bike = org.json.JSONObject().put("steps", org.json.JSONArray().put(hr(50, 65, 600).put("warmup", true)).put(grp(5, hr(75, 85, 360), hr(50, 60, 60))).put(hr(50, 65, 600).put("cooldown", true)))
@@ -252,7 +254,8 @@ class RulesTest {
         val det = WorkoutDetail.fromRaw(Fixture.workoutRaw(), null)
         val w1 = det.steps.first { it.isWork }
         assertTrue("min ${w1.power.min} reflects the rep, not the ramp", w1.power.min!! > 300)
-        assertEquals(15, WorkoutDetail.afterRamp(0, 359)); assertEquals(5, WorkoutDetail.afterRamp(0, 19))
+        assertEquals(5, WorkoutDetail.RAMP)
+        assertEquals(5, WorkoutDetail.afterRamp(0, 359)); assertEquals(5, WorkoutDetail.afterRamp(0, 19)); assertEquals(3, WorkoutDetail.afterRamp(0, 11))
         val sm = WorkoutDetail.smooth(listOf(0.0, 10.0, 20.0, null, 40.0), 2)
         assertEquals(15.0, sm[2]!!, 1e-9); assertNull(sm[3])
     }
@@ -459,7 +462,7 @@ class RulesTest {
     @Test fun zonesSubtFixture() {
         val r = Zones.compute(Fixture.workoutRaw(), 153.0, null)
         assertTrue(r.subt)
-        assertEquals(1440.0 - 4 * 15, r.subtWorkSec, 6.0)   // 4 reps, first 15 s of each left out
+        assertEquals(1440.0 - 4 * 5, r.subtWorkSec, 6.0)   // 4 reps, first 5 s of each left out
         assertTrue(r.subtInSec > 0 && r.subtInSec <= r.subtWorkSec)
         assertTrue(r.subtInM > 0)
     }
@@ -486,5 +489,123 @@ class RulesTest {
         ctx.getSharedPreferences("training_widget", Context.MODE_PRIVATE).edit()
             .putString("rhr_override_date", LocalDate.now().minusDays(1).toString()).commit()
         assertNull("yesterday's entry doesn't carry over", Prefs.rhrOverride(ctx))
+    }
+
+    // ---- Under / in / over, 45/15 reps, test efforts, stops
+
+    private class Seg(val type: String, val sec: Int, val w: Double, val v: Double = 3.7, val hr: Double = 150.0, val lead: Int = 0, val stopAt: Int = -1, val stopLen: Int = 0)
+
+    private fun pw(lo: Int, hi: Int, dur: Int) = org.json.JSONObject().put("duration", dur).put("power", org.json.JSONObject().put("start", lo).put("end", hi).put("units", "%ftp"))
+    private fun grp(n: Int, vararg st: org.json.JSONObject) = org.json.JSONObject().put("reps", n).put("steps", org.json.JSONArray().apply { st.forEach { put(it) } })
+
+    private fun buildRaw(segs: List<Seg>, steps: List<org.json.JSONObject>, name: String = "x", type: String = "Run"): org.json.JSONObject {
+        val watts = org.json.JSONArray(); val hr = org.json.JSONArray(); val vel = org.json.JSONArray(); val time = org.json.JSONArray()
+        val ivs = org.json.JSONArray()
+        var t = 0
+        for (g in segs) {
+            val start = t; var sum = 0.0; var dist = 0.0
+            repeat(g.sec) { i ->
+                val stop = g.stopAt >= 0 && i >= g.stopAt && i < g.stopAt + g.stopLen
+                val w = if (stop) 0.0 else if (i < g.lead) 200.0 else g.w
+                val v = if (stop) 0.0 else g.v
+                watts.put(w); hr.put(g.hr); vel.put(v); time.put(t); sum += w; dist += v; t++
+            }
+            ivs.put(org.json.JSONObject().put("type", if (g.type == "WORK") "WORK" else "RECOVERY").put("start_index", start).put("end_index", t)
+                .put("moving_time", g.sec).put("elapsed_time", g.sec).put("distance", dist).put("average_watts", sum / g.sec)
+                .put("average_heartrate", g.hr).put("average_speed", dist / g.sec))
+        }
+        fun st(ty: String, d: org.json.JSONArray) = org.json.JSONObject().put("type", ty).put("data", d)
+        return org.json.JSONObject()
+            .put("a", org.json.JSONObject().put("id", "t1").put("name", name).put("type", type).put("start_date_local", "2026-11-20T07:00:00")
+                .put("moving_time", t).put("distance", 10000.0).put("icu_ftp", 350.0))
+            .put("i", org.json.JSONObject().put("icu_intervals", ivs))
+            .put("s", org.json.JSONArray().put(st("time", time)).put(st("watts", watts)).put(st("heartrate", hr)).put(st("velocity_smooth", vel)))
+            .put("e", org.json.JSONObject().put("id", 1).put("workout_doc", org.json.JSONObject().put("steps", org.json.JSONArray().apply { steps.forEach { put(it) } })))
+    }
+
+    @Test fun underInOverAddUp() {
+        val det = WorkoutDetail.fromRaw(Fixture.workoutRaw(), null)
+        for (st in det.steps.filter { it.isWork }) {
+            assertEquals(1.0, st.under!! + st.inT!! + st.over!!, 1e-9)
+            assertEquals((st.seconds - WorkoutDetail.RAMP).toDouble(), st.underSec + st.inSec + st.overSec, 1e-9)
+            assertEquals(st.inT!!, st.inTarget!!, 0.0)
+            assertEquals(st.inT!! + st.over!!, st.inOrOver!!, 1e-9)
+            assertTrue(st.underM >= 0 && st.inM > 0)
+        }
+        val wk = det.work!!
+        assertEquals(1.0, wk.under!! + wk.inT!! + wk.over!!, 1e-9)
+        assertEquals(det.steps.filter { it.isWork }.sumOf { it.inSec }, wk.inSec, 1e-9)
+        assertEquals(wk.underSec + wk.inSec + wk.overSec, 4.0 * (360 - 5), 1e-9)
+        // heart rate on the work: bands cover the work-step samples, with no ramp skipped
+        val hn = det.steps.filter { it.isWork }.sumOf { it.hrN }
+        assertEquals(4.0 * 360, hn, 1e-9)
+        assertTrue(wk.hrA!!.sec <= wk.hrB!!.sec + 1e-9)
+        assertEquals(wk.hrB!!.sec / hn, wk.hrB!!.frac, 1e-9)
+    }
+
+    @Test fun constantPowerAboveRangeIsOver() {
+        // 90–95 % of 350 = 315–332.5; 400 W is over for the whole rep
+        val raw = buildRaw(listOf(Seg("WORK", 300, 400.0)), listOf(pw(90, 95, 300)))
+        val st = WorkoutDetail.fromRaw(raw, null).steps.single()
+        assertTrue(st.isWork)
+        assertEquals(1.0, st.over!!, 1e-9); assertEquals(0.0, st.inT!!, 1e-9); assertEquals(0.0, st.under!!, 1e-9)
+        assertEquals(295.0 * 3.7, st.overM, 1e-6)
+    }
+
+    @Test fun shortRepsJudgedRaw() {
+        val doc = listOf(pw(55, 68, 600).put("warmup", true), grp(18, pw(105, 110, 45), pw(40, 55, 15)))
+        val plan = WorkoutDetail.flattenPlan(org.json.JSONObject().put("steps", org.json.JSONArray().apply { doc.forEach { put(it) } }), 350.0)
+        assertEquals(18, plan.count { it.kind == WorkoutDetail.Kind.WORK })
+        assertTrue("45 s reps are work, not tests", plan.none { it.kind == WorkoutDetail.Kind.TEST })
+        // 3 s at 200 W, then 375 W (105–110 % = 367.5–385): raw judging counts those 3 s as under, nothing is skipped
+        val segs = mutableListOf(Seg("REC", 600, 200.0))
+        repeat(18) { segs += Seg("WORK", 45, 375.0, lead = 3); segs += Seg("REC", 15, 160.0) }
+        val det = WorkoutDetail.fromRaw(buildRaw(segs, doc, name = "18 x 45/15 repeats"), null)
+        val reps = det.steps.filter { it.isWork }
+        assertEquals(18, reps.size)
+        for (r in reps) {
+            assertEquals(3.0, r.underSec, 1e-9); assertEquals(42.0, r.inSec, 1e-9); assertEquals(0.0, r.overSec, 1e-9)
+            assertEquals(200.0, r.power.min!!, 1e-9)      // raw: no smoothing, no ramp skip
+        }
+        assertEquals(18 * 45.0, det.work!!.underSec + det.work!!.inSec + det.work!!.overSec, 1e-9)
+        // and Zones judges them the same way
+        val z = Zones.compute(buildRaw(segs, doc, name = "6'x18 repeats SubT"), 153.0, null)
+        assertEquals(18 * 45.0, z.subtWorkSec, 1e-9)
+        assertEquals(18 * 42.0, z.subtInSec, 1e-9)
+    }
+
+    @Test fun testEffortsAreSeparate() {
+        val doc = org.json.JSONObject().put("steps", org.json.JSONArray()
+            .put(pw(55, 70, 900).put("warmup", true))
+            .put(pw(112, 120, 180)).put(pw(44, 70, 300))
+            .put(grp(3, pw(88, 91, 600), pw(40, 60, 120)))
+            .put(pw(55, 70, 900).put("cooldown", true)))
+        val plan = WorkoutDetail.flattenPlan(doc, 350.0)
+        assertEquals(WorkoutDetail.Kind.TEST, plan.first { it.seconds == 180 }.kind)
+        assertEquals(3, plan.count { it.seconds == 600 && it.kind == WorkoutDetail.Kind.WORK })
+        // the same session with only the test and the reps built end to end: the test isn't in the work summary
+        val segs = listOf(Seg("REC", 900, 200.0), Seg("WORK", 180, 400.0), Seg("REC", 300, 200.0)) +
+            (0 until 3).flatMap { listOf(Seg("WORK", 600, 312.0), Seg("REC", 120, 170.0)) } + Seg("REC", 900, 200.0)
+        val det = WorkoutDetail.fromRaw(buildRaw(segs, listOf(pw(55, 70, 900).put("warmup", true), pw(112, 120, 180), pw(44, 70, 300),
+            grp(3, pw(88, 91, 600), pw(40, 60, 120)), pw(55, 70, 900).put("cooldown", true))), null)
+        assertEquals(1, det.tests.size)
+        assertEquals(3, det.work!!.count)
+        assertEquals(1800, det.work!!.seconds)
+        assertTrue(det.work!!.power.avg!! < 320)
+    }
+
+    @Test fun minValuesIgnoreStops() {
+        // 300 s rep at 330 W with a 20 s stop (speed 0, watts 0) in the middle
+        val raw = buildRaw(listOf(Seg("WORK", 300, 330.0, stopAt = 100, stopLen = 20)), listOf(pw(90, 95, 300)))
+        val det = WorkoutDetail.fromRaw(raw, null)
+        val st = det.steps.single()
+        assertEquals(330.0, st.power.min!!, 1e-6)                    // the stop doesn't set the minimum
+        assertEquals(330.0 * 280 / 300, st.power.avg!!, 1e-6)        // but the average still includes it
+        assertEquals(3.7, st.speed.min!!, 1e-6)
+        assertEquals(20, det.stoppedSec)
+        assertEquals(330.0, det.power.min!!, 1e-6)
+        // rides keep their stops
+        val ride = buildRaw(listOf(Seg("WORK", 300, 330.0, stopAt = 100, stopLen = 20)), listOf(pw(90, 95, 300)), type = "Ride")
+        assertEquals(0, WorkoutDetail.fromRaw(ride, null).stoppedSec)
     }
 }

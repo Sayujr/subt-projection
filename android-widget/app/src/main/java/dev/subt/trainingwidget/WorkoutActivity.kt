@@ -46,6 +46,10 @@ class WorkoutActivity : Activity() {
         private const val GOOD = 0xFF3DD68C.toInt()
         private const val WARN = 0xFFFFC53D.toInt()
         private const val TILE = 0xFF222733.toInt()
+        private const val TEST_C = 0xFFC17BFF.toInt()
+        private const val UNDER_C = 0xFF6B7386.toInt()
+        private const val IN_C = 0xFF3DD68C.toInt()
+        private const val OVER_C = 0xFF4EA1FF.toInt()
         const val POWER = 0xFFFFB02E.toInt()
         const val PACE = 0xFF4EA1FF.toInt()
         const val HEART = 0xFFFF7A90.toInt()
@@ -226,6 +230,8 @@ class WorkoutActivity : Activity() {
         tiles(s, listOf("Moving time" to dur(det.seconds), "Distance" to km(det.distance), "Load" to (det.load?.toString() ?: "–"), "Elev gain" to (det.elevGain?.let { "${it.roundToInt()} m" } ?: "–")))
         val cpTxt = det.ftp?.let { f -> det.power.avg?.let { "Average ${w(it)} · ${(it / f * 100).roundToInt()}% of CP ${f.roundToInt()} W (your CP that day)" } }
         if (cpTxt != null) text(s, cpTxt, 12.5f, DIM, top = 8)
+        if (det.stoppedSec >= 10) text(s, "Min values leave out ${dur(det.stoppedSec)} of walking or stops (slower than 10:00 /km).", 12f, FAINT, top = 4)
+        val z = if (det.heart.any { it != null }) runCatching { Zones.compute(raw, Prefs.lt1(this).toDouble(), Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp) }.getOrNull() else null
 
         // Average of all work steps: the main takeaway
         det.work?.let { wk ->
@@ -237,21 +243,59 @@ class WorkoutActivity : Activity() {
             metric(c, "Power", POWER, w(wk.power.avg), "Min ${wk.power.min?.roundToInt() ?: "–"} · Max ${wk.power.max?.roundToInt() ?: "–"}")
             metric(c, if (ride) "Speed" else "Pace", PACE, spd(wk.speed.avg, ride), "Min ${spd(wk.speed.min, ride, false)} · Max ${spd(wk.speed.max, ride, false)}")
             metric(c, "Heart rate", HEART, bpm(wk.hr.avg), "Min ${wk.hr.min?.roundToInt() ?: "–"} · Max ${wk.hr.max?.roundToInt() ?: "–"}")
+            // An easy run: every planned step, no warm-up or recoveries, and targets well under threshold (or HR targets)
+            val ftpD = det.ftp
+            val easyRun = allSteps && (wk.hrTarget || (ftpD != null && wk.loW != null && wk.hiW != null && (wk.loW + wk.hiW) / 2 < 0.8 * ftpD))
             if (wk.loW != null && wk.hiW != null) {
                 val (vt, vc) = vsText(wk.targetAvg, wk.loW, wk.hiW, if (wk.hrTarget) "bpm" else "W")
-                text(c, spans((if (wk.hrTarget) "Against HR target  " else "Against target  ") to DIM, "${wk.pctOfTarget?.roundToInt() ?: "–"}%" to vc, "  $vt" to vc), 15f, top = 12)
+                BandViews.heading(this, c, if (wk.hrTarget) "Against HR target" else "Against target",
+                    "Your average power for the work steps against the planned range. Green = the average is inside the range. '% of target midpoint' compares it with the middle of the range.", topDp = 14)
+                val avgTxt = if (wk.hrTarget) bpm(wk.targetAvg) else w(wk.targetAvg)
+                text(c, spans(avgTxt to vc, (if (vt.isEmpty()) "" else " · $vt") to vc), 18f, bold = true, top = 4)
                 image(c, targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true), 30, top = 2)
-                if (!wk.hrTarget) det.ftp?.let { f -> wk.power.avg?.let { text(c, "${(it / f * 100).roundToInt()}% of CP · target ${(wk.loW / f * 100).roundToInt()}–${(wk.hiW / f * 100).roundToInt()}% of CP", 12f, FAINT, top = 4) } }
-                metric(c, if (wk.hrTarget) "Time in HR target" else "Time in power target", GOOD, pct(wk.inTarget), if (det.steps.all { it.isWork }) null else "work steps only")
+                val cp = if (!wk.hrTarget && ftpD != null) wk.power.avg?.let { " · ${(it / ftpD * 100).roundToInt()}% of CP" } ?: "" else ""
+                text(c, "${wk.pctOfTarget?.roundToInt() ?: "–"}% of target midpoint$cp", 12f, FAINT, top = 2)
             }
-            text(c, "Min / max and time in target leave out the first 15 s of each rep (getting up to power) and judge power on a 10 s average. HR minimum is read after the first minute.", 11.5f, FAINT, top = 6)
-            metric(c, "Time with HR ≤ 165", HEART, pct(wk.hr165), null)
-            metric(c, "Time with HR ≤ 172", HEART, pct(wk.hr172), null)
+            if (wk.inT != null && wk.over != null && wk.under != null) {
+                BandViews.heading(this, c, "TIME ON TARGET",
+                    "How long your power was under, inside or over the planned range. Running power wobbles, so with a narrow range you can average in range yet spend many seconds just outside it. 'In or over' is the share of the rep done at or above target. Reps of 90 s or more are judged on a 10 s average and skip the first 5 s; shorter reps (e.g. 45/15) are judged second by second.",
+                    topDp = 14)
+                c.addView(BandViews.stripView(this, listOf(wk.underSec, wk.inSec, wk.overSec), listOf(UNDER_C, IN_C, OVER_C), contentW()))
+                c.addView(BandViews.statRow(this, "In target", wk.inSec, wk.inT * 100, wk.inM, decimals = 2))
+                c.addView(BandViews.statRow(this, "In or over target", wk.inSec + wk.overSec, (wk.inT + wk.over) * 100, wk.inM + wk.overM, emphasised = true, decimals = 2))
+                c.addView(BandViews.statRow(this, "Under target", wk.underSec, wk.under * 100, wk.underM, decimals = 2))
+            }
+            if (easyRun) {
+                if (z != null && z.bandSec.sum() > 0) {
+                    val tot = z.bandSec.sum()
+                    fun sec(vararg i: Int) = i.sumOf { z.bandSec[it] }
+                    fun mm(vararg i: Int) = i.sumOf { z.bandM[it] }
+                    BandViews.heading(this, c, "EASY CHECK", null, topDp = 14)
+                    c.addView(BandViews.statRow(this, "Under 125", sec(0), sec(0) / tot * 100, mm(0), decimals = 2))
+                    c.addView(BandViews.statRow(this, "Under 135", sec(0, 1), sec(0, 1) / tot * 100, mm(0, 1), emphasised = true, decimals = 2))
+                    c.addView(BandViews.statRow(this, "Over 135", sec(2, 3, 4, 5, 6), sec(2, 3, 4, 5, 6) / tot * 100, mm(2, 3, 4, 5, 6), decimals = 2))
+                }
+            } else if (wk.hrA != null && wk.hrB != null && wk.hrOver != null) {
+                BandViews.heading(this, c, "HEART RATE ON THE WORK", "Heart rate during work steps only. 155–172 is your SubT band; over 172 means the rep went too hard.", topDp = 14)
+                c.addView(BandViews.statRow(this, "155–165", wk.hrA.sec, wk.hrA.frac * 100, wk.hrA.m, decimals = 2))
+                c.addView(BandViews.statRow(this, "155–172", wk.hrB.sec, wk.hrB.frac * 100, wk.hrB.m, emphasised = true, decimals = 2))
+                c.addView(BandViews.statRow(this, "Over 172", wk.hrOver.sec, wk.hrOver.frac * 100, wk.hrOver.m, decimals = 2))
+            }
+        }
+
+        // Test efforts (long hard steps at or above CP) are kept out of the work numbers
+        if (det.tests.isNotEmpty()) {
+            val c = card()
+            label(c, "Test efforts")
+            det.tests.forEachIndexed { k, st ->
+                text(c, "Test ${k + 1} · ${dur(st.seconds)} · ${w(st.power.avg)}", 15f, bold = true, top = 8)
+                val cpT = det.ftp?.let { f -> st.power.avg?.let { "${(it / f * 100).roundToInt()}% of CP" } }
+                text(c, listOfNotNull(cpT, "${spd(st.speed.avg, ride)}", "HR avg ${st.hr.avg?.roundToInt() ?: "–"} · max ${st.hr.max?.roundToInt() ?: "–"} bpm").joinToString(" · "), 12.5f, DIM, top = 1)
+            }
         }
 
         // Heart-rate bands for this run (every run with an HR stream)
         if (det.heart.any { it != null }) {
-            val z = runCatching { Zones.compute(raw, Prefs.lt1(this).toDouble(), Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp) }.getOrNull()
             if (z != null && z.bandSec.sum() > 0) {
                 val c = card()
                 label(c, "Heart rate bands")
@@ -274,67 +318,82 @@ class WorkoutActivity : Activity() {
             val c = card()
             label(c, "Steps" + if (det.hasTargets) " · against your targets" else "")
             if (!det.hasTargets) text(c, "No planned power targets found for this workout, so steps show what you did.", 12.5f, DIM, top = 2)
-            var workNo = 0
+            var workNo = 0; var testNo = 0
             for (st in det.steps) {
-                if (st.isWork) workNo++
-                stepRow(c, det, st, workNo)
+                val no = when { st.isWork -> ++workNo; st.isTest -> ++testNo; else -> 0 }
+                stepRow(c, det, st, no)
             }
         } else text(card(), "intervals.icu has no steps for this activity.", 13f, DIM)
     }
 
-    private fun stepRow(parent: LinearLayout, det: WorkoutDetail.Detail, st: WorkoutDetail.Step, workNo: Int) {
+    private fun stepRow(parent: LinearLayout, det: WorkoutDetail.Detail, st: WorkoutDetail.Step, no: Int) {
         val ride = det.isRide
+        val judged = st.isWork || st.isTest
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(9), 0, dp(4)) }
         val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val blockColor = when (st.kind) {
             WorkoutDetail.Kind.WORK -> PACE
+            WorkoutDetail.Kind.TEST -> TEST_C
             WorkoutDetail.Kind.WARMUP -> GOOD
             WorkoutDetail.Kind.COOLDOWN -> 0xFF5EC8FF.toInt()
             else -> 0xFF4A5263.toInt()
         }
-        r.addView(View(this).apply { setBackgroundColor(blockColor) }, LinearLayout.LayoutParams(dp(if (st.isWork) 22 else 14), dp(if (st.isWork) 22 else 14)).apply { marginEnd = dp(10) })
-        val name = st.kind.label + (if (st.isWork) " $workNo" else "")
+        r.addView(View(this).apply { setBackgroundColor(blockColor) }, LinearLayout.LayoutParams(dp(if (judged) 22 else 14), dp(if (judged) 22 else 14)).apply { marginEnd = dp(10) })
+        val name = st.kind.label + (if (judged) " $no" else "")
         val left = TextView(this).apply {
             val sb = SpannableStringBuilder(dur(st.seconds))
             val s0 = sb.length
-            sb.append("\n$name" + (if (st.isWork) " · ${w(st.power.avg)}" else ""))
+            sb.append("\n$name")
+            // Without opening the step: how much of it was at or above the bottom of the range
+            val oo = st.inOrOver
+            if (judged && oo != null) sb.append("\nin or over ${(oo * 100).roundToInt()}% · ${SubtModel.time(st.inSec + st.overSec)} · ${km(st.inM + st.overM)}")
             sb.setSpan(RelativeSizeSpan(0.72f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(DIM), s0, sb.length, 0)
-            text = sb; textSize = if (st.isWork) 17f else 15f; setTextColor(if (st.isWork) TEXT else DIM)
+            text = sb; textSize = if (judged) 17f else 15f; setTextColor(if (judged) TEXT else DIM)
         }
         r.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val vs = st.vsTarget
         val pctT = st.pctOfTarget
         val right = TextView(this).apply {
             gravity = Gravity.END
-            val main = pctT?.let { "${it.roundToInt()}%" } ?: w(st.power.avg)
+            val main = if (judged && st.hrTarget) bpm(st.hr.avg) else w(st.power.avg)
             val sb = SpannableStringBuilder(main)
-            sb.setSpan(ForegroundColorSpan(if (pctT == null) DIM else if (vs == 0) GOOD else WARN), 0, sb.length, 0)
-            val sub = if (pctT != null) (if (st.hrTarget) "of HR target" else "of target") + (det.ftp?.let { f -> st.power.avg?.let { " · ${(it / f * 100).roundToInt()}% CP" } } ?: "") else ""
+            sb.setSpan(ForegroundColorSpan(if (!judged || vs == null) DIM else if (vs == 0) GOOD else WARN), 0, sb.length, 0)
+            val cp = if (st.hrTarget) "" else det.ftp?.let { f -> st.power.avg?.let { " · ${(it / f * 100).roundToInt()}% CP" } } ?: ""
+            val sub = if (judged) {
+                val verdict = vsText(st.targetAvg, st.loW, st.hiW, if (st.hrTarget) "bpm" else "W").first
+                (verdict + cp).removePrefix(" · ")
+            } else if (pctT != null) "of target ${pctT.roundToInt()}%" else ""
             if (sub.isNotEmpty()) { val s0 = sb.length; sb.append("\n$sub"); sb.setSpan(RelativeSizeSpan(0.62f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(FAINT), s0, sb.length, 0) }
-            text = sb; textSize = if (st.isWork) 19f else 15f
-            setPadding(0, 0, dp(if (st.isWork) 0 else 6), 0)
+            text = sb; textSize = if (judged) 19f else 15f
+            setPadding(0, 0, dp(if (judged) 0 else 6), 0)
         }
         r.addView(right)
-        if (st.isWork) r.addView(TextView(this).apply { text = if (st.index in opened) "⌃" else "›"; textSize = 18f; setTextColor(FAINT); setPadding(dp(10), 0, 0, 0) })
+        if (judged) r.addView(TextView(this).apply { text = if (st.index in opened) "⌃" else "›"; textSize = 18f; setTextColor(FAINT); setPadding(dp(10), 0, 0, 0) })
         box.addView(r)
         if (st.loW != null) {
             // Target range (watts or bpm) written above the ticks, visible without opening the step
             val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), st.position, vs, st.loW, st.hiW, labels = true)); scaleType = ImageView.ScaleType.FIT_XY }
             box.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(30)).apply { topMargin = dp(2) })
         }
-        // Work steps open up for the full numbers; other steps only show % against target
-        if (st.isWork) {
+        // Work and test steps open up for the full numbers; other steps only show % against target
+        if (judged) {
             val detail = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(2), 0, dp(6)); visibility = if (st.index in opened) View.VISIBLE else View.GONE }
             if (st.loW != null && st.hiW != null) {
                 val u = if (st.hrTarget) "bpm" else "W"
                 val (vt, vc) = vsText(st.targetAvg, st.loW, st.hiW, u)
                 text(detail, spans("Target ${st.loW.roundToInt()}–${st.hiW.roundToInt()} $u  " to DIM, vt to vc), 13f, top = 6)
             }
-            tiles(detail, listOf("Time" to dur(st.seconds), "Distance" to km(st.distance), (if (st.hrTarget) "In HR target" else "In power target") to pct(st.inTarget)))
+            tiles(detail, listOf("Time" to dur(st.seconds), "Distance" to km(st.distance)))
+            if (st.inT != null) {
+                detail.addView(BandViews.statRow(this, "Under target", st.underSec, (st.under ?: 0.0) * 100, st.underM, decimals = 2))
+                detail.addView(BandViews.statRow(this, "In target", st.inSec, st.inT * 100, st.inM, decimals = 2))
+                detail.addView(BandViews.statRow(this, "Over target", st.overSec, (st.over ?: 0.0) * 100, st.overM, decimals = 2))
+            }
             metric(detail, "Power", POWER, w(st.power.avg), "Min ${st.power.min?.roundToInt() ?: "–"} · Max ${st.power.max?.roundToInt() ?: "–"}")
             metric(detail, if (ride) "Speed" else "Pace", PACE, spd(st.speed.avg, ride), "Min ${spd(st.speed.min, ride, false)} · Max ${spd(st.speed.max, ride, false)}")
             metric(detail, "Heart rate", HEART, bpm(st.hr.avg), "Min ${st.hr.min?.roundToInt() ?: "–"} · Max ${st.hr.max?.roundToInt() ?: "–"}")
-            metric(detail, "Time with HR ≤ 165 / ≤ 172", HEART, "${pct(st.hr165)} / ${pct(st.hr172)}", null)
+            st.hrA?.let { detail.addView(BandViews.statRow(this, "HR 155–165", it.sec, it.frac * 100, null)) }
+            st.hrB?.let { detail.addView(BandViews.statRow(this, "HR 155–172", it.sec, it.frac * 100, null)) }
             st.cadence?.let { metric(detail, "Cadence", 0xFFC17BFF.toInt(), "${(if (ride) it else it * 2).roundToInt()} ${if (ride) "rpm" else "spm"}", null) }
             box.addView(detail)
             box.setOnClickListener {

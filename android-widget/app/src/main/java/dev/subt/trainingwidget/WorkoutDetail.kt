@@ -17,9 +17,11 @@ import kotlin.math.abs
  * Steps with a heart-rate target instead of power (e.g. bike sessions) are judged against that HR range.
  */
 object WorkoutDetail {
-    enum class Kind(val label: String) { WARMUP("Warm-up"), WORK("Work"), RECOVERY("Recovery"), COOLDOWN("Cool-down"), OTHER("Step") }
+    enum class Kind(val label: String) { WARMUP("Warm-up"), WORK("Work"), TEST("Test"), RECOVERY("Recovery"), COOLDOWN("Cool-down"), OTHER("Step") }
 
     data class Stat(val avg: Double?, val min: Double?, val max: Double?)
+    /** Seconds and metres in a heart-rate band, and its share (0–1) of the step's heart-rate samples. */
+    data class Cut(val sec: Double, val m: Double, val frac: Double)
     /** [loW]/[hiW] hold the target range: watts, or bpm when [hrTarget]. */
     data class Plan(val kind: Kind, val seconds: Int, val distance: Double, val loW: Double?, val hiW: Double?, val group: Int, val reps: Int, val hrTarget: Boolean = false)
 
@@ -27,15 +29,23 @@ object WorkoutDetail {
         val index: Int, val kind: Kind, val seconds: Int, val distance: Double,
         val power: Stat, val speed: Stat, val hr: Stat, val cadence: Double?, val elevGain: Double?,
         val loW: Double?, val hiW: Double?,
-        /** Share of the step (0–1) with power inside the target range. */
-        val inTarget: Double?,
+        /** Shares (0–1, sum to 1) of judged samples under / inside / over the target range, with seconds and metres. */
+        val under: Double?, val inT: Double?, val over: Double?,
+        val underSec: Double, val inSec: Double, val overSec: Double,
+        val underM: Double, val inM: Double, val overM: Double,
         /** Share of the step (0–1) with HR at or under 165 / 172. */
         val hr165: Double?, val hr172: Double?,
+        /** HR 155–165, 155–172 and over 172 across all samples of the step; [hrN] = samples with HR. */
+        val hrA: Cut?, val hrB: Cut?, val hrOver: Cut?, val hrN: Double,
         val start: Int, val end: Int, val group: Int, val reps: Int,
         /** The target range is heart rate (bpm), not power. */
         val hrTarget: Boolean = false,
     ) {
         val isWork get() = kind == Kind.WORK
+        val isTest get() = kind == Kind.TEST
+        /** Share of the step judged at or above the bottom of the range. */
+        val inOrOver: Double? get() = if (inT != null && over != null) inT + over else null
+        val inTarget: Double? get() = inT
         /** The average the target applies to: HR for HR targets, else power. */
         val targetAvg: Double? get() = if (hrTarget) hr.avg else power.avg
         val mid: Double? get() = if (loW != null && hiW != null) (loW + hiW) / 2 else null
@@ -52,9 +62,15 @@ object WorkoutDetail {
         val count: Int, val seconds: Int, val distance: Double,
         val power: Stat, val speed: Stat, val hr: Stat,
         val pctOfTarget: Double?, val position: Double?, val loW: Double?, val hiW: Double?,
-        val inTarget: Double?, val hr165: Double?, val hr172: Double?,
+        val under: Double?, val inT: Double?, val over: Double?,
+        val underSec: Double, val inSec: Double, val overSec: Double,
+        val underM: Double, val inM: Double, val overM: Double,
+        val hr165: Double?, val hr172: Double?,
+        val hrA: Cut?, val hrB: Cut?, val hrOver: Cut?,
         val hrTarget: Boolean = false,
     ) {
+        val inTarget: Double? get() = inT
+        val inOrOver: Double? get() = if (inT != null && over != null) inT + over else null
         val targetAvg: Double? get() = if (hrTarget) hr.avg else power.avg
     }
 
@@ -63,12 +79,15 @@ object WorkoutDetail {
         val seconds: Int, val distance: Double, val load: Int?, val elevGain: Double?, val ftp: Double?,
         val power: Stat, val speed: Stat, val hr: Stat, val cadence: Double?,
         val steps: List<Step>, val work: Summary?, val hasTargets: Boolean,
+        /** Samples (s) where speed was under 10:00 /km or power under 40 % of FTP: left out of min values (runs only). */
+        val stoppedSec: Int = 0,
         /** Down-sampled streams for the chart (same length): seconds, watts, HR, speed m/s. */
         val t: List<Int>, val watts: List<Double?>, val heart: List<Double?>, val vel: List<Double?>,
         /** Stream index → chart index factor. */
         val stride: Int,
     ) {
         val isRide get() = type.contains("Ride", ignoreCase = true)
+        val tests get() = steps.filter { it.isTest }
     }
 
     // ---------------------------------------------------------------- plan
@@ -127,11 +146,16 @@ object WorkoutDetail {
         walk(doc.optJSONArray("steps"), 0, 1)
         // Hardest step of 2 min+ (or 400 m+) sets the bar, so 20–30 s strides don't; fall back to any step
         val main = out.filter { !it.warm && !it.cool && it.lo != null }
-        val hardest = (main.filter { it.seconds >= 120 || it.distance >= 400 }.ifEmpty { main }).maxOfOrNull { (it.lo!! + it.hi!!) / 2 }
+        // A test effort: a long (1 min / 400 m) power step at 105 % of FTP or more. It doesn't set the bar for work steps.
+        fun isTest(r: Raw) = !r.warm && !r.cool && !r.hr && r.lo != null && ftp != null && ftp > 0 &&
+            (r.lo + r.hi!!) / 2 >= ftp * 1.05 && (r.seconds >= 60 || r.distance >= 400)
+        val basis = main.filter { !isTest(it) }.ifEmpty { main }
+        val hardest = (basis.filter { it.seconds >= 120 || it.distance >= 400 }.ifEmpty { basis }).maxOfOrNull { (it.lo!! + it.hi!!) / 2 }
         return out.map { r ->
             val kind = when {
                 r.warm -> Kind.WARMUP
                 r.cool -> Kind.COOLDOWN
+                isTest(r) -> Kind.TEST
                 r.lo == null || hardest == null -> Kind.OTHER
                 r.seconds in 1..39 && r.distance <= 0 -> if ((r.lo!! + r.hi!!) / 2 >= hardest!! * 0.75) Kind.OTHER else Kind.RECOVERY
                 (r.lo!! + r.hi!!) / 2 >= hardest!! * 0.75 -> Kind.WORK
@@ -177,23 +201,59 @@ object WorkoutDetail {
         return if (n == 0) null else hit.toDouble() / n
     }
 
-    private fun range(vals: List<Double?>, from: Int, to: Int, floor: Double = Double.NEGATIVE_INFINITY, smooth: Int = 1): Pair<Double, Double>? {
+    /**
+     * Min and max of [vals] over from..to (lo/hi null when nothing counts). A short rolling average of [smooth]
+     * samples keeps one noisy sample from setting either. With [stop], windows touching a stopped sample
+     * don't count towards the min.
+     */
+    private fun range(vals: List<Double?>, from: Int, to: Int, floor: Double = Double.NEGATIVE_INFINITY, smooth: Int = 1, stop: BooleanArray? = null): Pair<Double?, Double?>? {
         var lo = Double.MAX_VALUE; var hi = -Double.MAX_VALUE
         val a = from.coerceAtLeast(0); val b = to.coerceAtMost(vals.lastIndex)
         for (i in a..b) {
-            // short rolling average so one noisy sample doesn't set the min / max
-            var sum = 0.0; var n = 0
-            for (j in maxOf(a, i - smooth + 1)..i) { val v = vals[j] ?: continue; sum += v; n++ }
+            var sum = 0.0; var n = 0; var clean = true
+            for (j in maxOf(a, i - smooth + 1)..i) {
+                if (stop != null && stop.getOrElse(j) { false }) clean = false
+                val v = vals[j] ?: continue; sum += v; n++
+            }
             if (n == 0) continue
             val v = sum / n
             if (v < floor) continue
-            if (v < lo) lo = v; if (v > hi) hi = v
+            if (clean && v < lo) lo = v
+            if (v > hi) hi = v
         }
-        return if (hi < lo) null else lo to hi
+        return if (hi == -Double.MAX_VALUE) null else (if (lo == Double.MAX_VALUE) null else lo) to hi
+    }
+
+    private class Tally { var u = 0; var i = 0; var o = 0; var um = 0.0; var im = 0.0; var om = 0.0 }
+
+    /** Counts samples under / inside / over [lo]..[hi] (±0.5); metres are speed × 1 s, no speed = 0. */
+    private fun tally(vals: List<Double?>, vel: List<Double?>, from: Int, to: Int, lo: Double, hi: Double): Tally? {
+        val t = Tally(); var n = 0
+        for (k in from.coerceAtLeast(0)..to.coerceAtMost(vals.lastIndex)) {
+            val v = vals[k] ?: continue
+            val m = vel.getOrNull(k) ?: 0.0
+            n++
+            when {
+                v < lo - 0.5 -> { t.u++; t.um += m }
+                v > hi + 0.5 -> { t.o++; t.om += m }
+                else -> { t.i++; t.im += m }
+            }
+        }
+        return if (n == 0) null else t
+    }
+
+    /** Samples of [from]..[to] with HR in [lo, hi) (hi null = no upper limit), as seconds and metres. */
+    private fun cut(heart: List<Double?>, vel: List<Double?>, from: Int, to: Int, lo: Double, hi: Double?): Pair<Double, Double> {
+        var s = 0.0; var m = 0.0
+        for (k in from.coerceAtLeast(0)..to.coerceAtMost(heart.lastIndex)) {
+            val h = heart[k] ?: continue
+            if (h >= lo && (hi == null || h < hi)) { s += 1.0; m += vel.getOrNull(k) ?: 0.0 }
+        }
+        return s to m
     }
 
     /** Seconds at the start of a work step left out of min / max and time in target (getting up to power). */
-    const val RAMP = 15
+    const val RAMP = 5
     /** HR lags power: its minimum is read after this many seconds into a work step. */
     const val HR_LAG = 60
     /** Rolling average over the last [window] samples (how targets are judged: 1-second power is too jumpy). */
@@ -207,8 +267,23 @@ object WorkoutDetail {
         }
         return out
     }
+    /** [smooth] over from..to only (windows never reach back into the previous step); null outside. Same size as [v]. */
+    fun stepSmooth(v: List<Double?>, from: Int, to: Int, window: Int = 10): List<Double?> {
+        val a = from.coerceAtLeast(0); val b = (to + 1).coerceAtMost(v.size)
+        if (a >= b) return emptyList()
+        return List<Double?>(a) { null } + smooth(v.subList(a, b), window)
+    }
     /** First sample of a work step that counts, after the ramp (at most a quarter of the step). */
     fun afterRamp(from: Int, to: Int, skip: Int = RAMP): Int = from + minOf(skip, (to - from + 1) / 4)
+    /** Steps shorter than this (e.g. 45 s reps) are judged second by second: no ramp skip, no smoothing, no HR lag skip. */
+    const val SHORT_STEP = 90
+    fun isShort(from: Int, to: Int): Boolean = to - from + 1 < SHORT_STEP
+    /** First sample that counts for a work step: the start for short steps, else after the ramp. */
+    fun rampStart(from: Int, to: Int): Int = if (isShort(from, to)) from else afterRamp(from, to)
+    /** Speed under 10:00 /km, or power under 40 % of FTP: a stop or walking, left out of min values. */
+    const val STOP_SPEED = 1.667
+    fun isStopped(speed: Double?, watts: Double?, ftp: Double?): Boolean =
+        (speed != null && speed < STOP_SPEED) || (ftp != null && watts != null && watts < 0.4 * ftp)
 
     fun build(
         activity: JSONObject, intervals: JSONObject?, streams: JSONArray?, event: JSONObject?, fallbackFtp: Double?,
@@ -220,6 +295,9 @@ object WorkoutDetail {
         val wattsS = smooth(watts)
         val maxHr = activity.num("athlete_max_hr")?.takeIf { it > 100 } ?: fallbackMaxHr
         val lthr = activity.num("lthr")?.takeIf { it > 100 } ?: fallbackLthr
+        val isRun = activity.optString("type").contains("Run", ignoreCase = true)
+        val nAll = maxOf(watts.size, vel.size)
+        val stop: BooleanArray? = if (isRun) BooleanArray(nAll) { isStopped(vel.getOrNull(it), watts.getOrNull(it), ftp) } else null
         val plan = flattenPlan(event?.optJSONObject("workout_doc"), ftp, maxHr, lthr)
         val ivs = intervals?.optJSONArray("icu_intervals")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
         fun secs(iv: JSONObject) = iv.num("moving_time") ?: iv.num("elapsed_time") ?: 0.0
@@ -237,23 +315,38 @@ object WorkoutDetail {
             }
             // Work steps: ignore the first seconds (getting up to power; HR catching up) so min / max
             // and time in target describe the rep itself. Power is judged on a 10 s rolling average.
-            val isWorkStep = kind == Kind.WORK
-            val f2 = if (isWorkStep && has) afterRamp(from, to) else from
-            val fHr = if (isWorkStep && has) afterRamp(from, to, HR_LAG) else from
-            val wr = if (has) range(wattsS, f2, to) else null
-            val hrr = if (has) range(heart, fHr, to) else null
-            val vr = if (has) range(vel, f2, to, floor = 0.6, smooth = 5) else null
+            // Steps under 90 s (45/15 reps…) are judged raw: no ramp skip, no smoothing.
+            val isWorkStep = kind == Kind.WORK || kind == Kind.TEST
+            val short = isWorkStep && has && isShort(from, to)
+            val f2 = if (isWorkStep && has) rampStart(from, to) else from
+            val fHr = if (isWorkStep && has) (if (short) from else afterRamp(from, to, HR_LAG)) else from
+            val pSeries = if (short) watts else if (isWorkStep && has) stepSmooth(watts, f2, to) else wattsS
+            val wr = if (has) range(pSeries, f2, to, stop = stop) else null
+            val hrr = if (has) range(heart, fHr, to, stop = stop) else null
+            val vr = if (has) range(vel, f2, to, floor = 0.6, smooth = 5, stop = stop) else null
+            val tl = if (has && p?.loW != null && p.hiW != null) tally(if (p.hrTarget) heart else pSeries, vel, if (p.hrTarget) fHr else f2, to, p.loW, p.hiW) else null
+            val jn = tl?.let { (it.u + it.i + it.o).toDouble() }
+            fun frac(c: Int?) = if (tl == null || jn == null) null else c!! / jn
+            val hn = if (has) (from.coerceAtLeast(0)..to.coerceAtMost(heart.lastIndex)).count { heart[it] != null }.toDouble() else 0.0
+            fun hcut(lo: Double, hi: Double?): Cut? {
+                if (!has || hn <= 0) return null
+                val (cs, cm) = cut(heart, vel, from, to, lo, hi)
+                return Cut(cs, cm, cs / hn)
+            }
             val sec = secs(iv); val dist = iv.num("distance") ?: 0.0
             Step(
                 index = i + 1, kind = kind, seconds = sec.toInt(), distance = dist,
-                power = Stat((iv.num("average_watts") ?: iv.num("weighted_average_watts"))?.takeIf { it > 0 }, wr?.first ?: iv.num("min_watts"), wr?.second ?: iv.num("max_watts")),
-                speed = Stat(iv.num("average_speed")?.takeIf { it > 0 } ?: if (sec > 0 && dist > 0) dist / sec else null, vr?.first ?: iv.num("min_speed"), vr?.second ?: iv.num("max_speed")),
-                hr = Stat(iv.num("average_heartrate")?.takeIf { it > 0 }, hrr?.first ?: iv.num("min_heartrate"), hrr?.second ?: iv.num("max_heartrate")),
+                power = Stat((iv.num("average_watts") ?: iv.num("weighted_average_watts"))?.takeIf { it > 0 }, wr?.first ?: iv.num("min_watts").takeIf { stop == null || !has }, wr?.second ?: iv.num("max_watts")),
+                speed = Stat(iv.num("average_speed")?.takeIf { it > 0 } ?: if (sec > 0 && dist > 0) dist / sec else null, vr?.first ?: iv.num("min_speed").takeIf { stop == null || !has }, vr?.second ?: iv.num("max_speed")),
+                hr = Stat(iv.num("average_heartrate")?.takeIf { it > 0 }, hrr?.first ?: iv.num("min_heartrate").takeIf { stop == null || !has }, hrr?.second ?: iv.num("max_heartrate")),
                 cadence = iv.num("average_cadence")?.takeIf { it > 0 }, elevGain = iv.num("total_elevation_gain"),
                 loW = p?.loW, hiW = p?.hiW,
-                inTarget = if (has && p?.loW != null && p.hiW != null) share(if (p.hrTarget) heart else wattsS, if (p.hrTarget) fHr else f2, to) { it >= p.loW - 0.5 && it <= p.hiW + 0.5 } else null,
+                under = frac(tl?.u), inT = frac(tl?.i), over = frac(tl?.o),
+                underSec = tl?.u?.toDouble() ?: 0.0, inSec = tl?.i?.toDouble() ?: 0.0, overSec = tl?.o?.toDouble() ?: 0.0,
+                underM = tl?.um ?: 0.0, inM = tl?.im ?: 0.0, overM = tl?.om ?: 0.0,
                 hr165 = if (has) share(heart, from, to) { it <= 165.0 } else null,
                 hr172 = if (has) share(heart, from, to) { it <= 172.0 } else null,
+                hrA = hcut(155.0, 165.0), hrB = hcut(155.0, 172.0), hrOver = hcut(172.0, null), hrN = hn,
                 start = from, end = to, group = p?.group ?: 0, reps = p?.reps ?: 1,
                 hrTarget = p?.hrTarget == true && p.loW != null,
             )
@@ -266,6 +359,16 @@ object WorkoutDetail {
                 return if (l.isEmpty()) null else l.sumOf { f(it)!! * it.seconds } / l.sumOf { it.seconds.toDouble() }.coerceAtLeast(1.0)
             }
             val dist = work.sumOf { it.distance }
+            val jw = work.filter { it.inT != null }
+            val uS = jw.sumOf { it.underSec }; val iS = jw.sumOf { it.inSec }; val oS = jw.sumOf { it.overSec }
+            val uM = jw.sumOf { it.underM }; val iM = jw.sumOf { it.inM }; val oM = jw.sumOf { it.overM }
+            val jt = uS + iS + oS
+            val hnAll = work.sumOf { it.hrN }
+            fun hsum(f: (Step) -> Cut?): Cut? {
+                if (hnAll <= 0) return null
+                val s = work.sumOf { f(it)?.sec ?: 0.0 }
+                return Cut(s, work.sumOf { f(it)?.m ?: 0.0 }, s / hnAll)
+            }
             Summary(
                 count = work.size, seconds = t.toInt(), distance = dist,
                 power = Stat(wavg { it.power.avg }, work.mapNotNull { it.power.min }.minOrNull(), work.mapNotNull { it.power.max }.maxOrNull()),
@@ -273,7 +376,10 @@ object WorkoutDetail {
                 hr = Stat(wavg { it.hr.avg }, work.mapNotNull { it.hr.min }.minOrNull(), work.mapNotNull { it.hr.max }.maxOrNull()),
                 pctOfTarget = wavg { it.pctOfTarget }, position = wavg { it.position },
                 loW = wavg { it.loW }, hiW = wavg { it.hiW },
-                inTarget = wavg { it.inTarget }, hr165 = wavg { it.hr165 }, hr172 = wavg { it.hr172 },
+                under = if (jt > 0) uS / jt else null, inT = if (jt > 0) iS / jt else null, over = if (jt > 0) oS / jt else null,
+                underSec = uS, inSec = iS, overSec = oS, underM = uM, inM = iM, overM = oM,
+                hr165 = wavg { it.hr165 }, hr172 = wavg { it.hr172 },
+                hrA = hsum { it.hrA }, hrB = hsum { it.hrB }, hrOver = hsum { it.hrOver },
                 hrTarget = work.all { it.hrTarget },
             )
         }
@@ -285,9 +391,9 @@ object WorkoutDetail {
             for (j in i until minOf(i + stride, v.size)) { val x = v[j] ?: continue; s += x; c++ }
             if (c == 0) null else s / c
         }
-        val wAll = if (watts.isNotEmpty()) range(watts, 0, watts.lastIndex, smooth = 3) else null
-        val hAll = if (heart.isNotEmpty()) range(heart, 0, heart.lastIndex) else null
-        val vAll = if (vel.isNotEmpty()) range(vel, 0, vel.lastIndex, floor = 0.6, smooth = 5) else null
+        val wAll = if (watts.isNotEmpty()) range(watts, 0, watts.lastIndex, smooth = 3, stop = stop) else null
+        val hAll = if (heart.isNotEmpty()) range(heart, 0, heart.lastIndex, stop = stop) else null
+        val vAll = if (vel.isNotEmpty()) range(vel, 0, vel.lastIndex, floor = 0.6, smooth = 5, stop = stop) else null
         val sec = (activity.num("moving_time") ?: 0.0); val dist = activity.num("distance") ?: 0.0
         return Detail(
             id = activity.optString("id"), name = activity.optString("name").ifBlank { activity.optString("type", "Workout") },
@@ -297,7 +403,7 @@ object WorkoutDetail {
             speed = Stat(activity.num("average_speed")?.takeIf { it > 0 } ?: if (sec > 0 && dist > 0) dist / sec else null, vAll?.first, vAll?.second),
             hr = Stat(activity.num("average_heartrate")?.takeIf { it > 0 }, hAll?.first, hAll?.second ?: activity.num("max_heartrate")),
             cadence = activity.num("average_cadence")?.takeIf { it > 0 },
-            steps = steps, work = summary, hasTargets = steps.any { it.loW != null },
+            steps = steps, work = summary, hasTargets = steps.any { it.loW != null }, stoppedSec = stop?.count { it } ?: 0,
             t = (0 until n step stride).map { i -> time.getOrNull(i)?.toInt() ?: i }, watts = down(watts), heart = down(heart), vel = down(vel), stride = stride,
         )
     }
