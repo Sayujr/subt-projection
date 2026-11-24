@@ -179,30 +179,30 @@ class WorkoutActivity : Activity() {
         val c = Canvas(bmp)
         val bh = 6f * d; val y = h - bh - 5f * d
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        p.color = 0xFF3A4150.toInt()
-        c.drawRoundRect(RectF(0f, y, bmp.width.toFloat(), y + bh), bh / 2, bh / 2, p)
         val x0 = bmp.width / 3f; val x1 = bmp.width * 2 / 3f
-        // The target range itself, as a lighter band between the ticks
-        p.color = 0xFF56607A.toInt()
+        // The whole line takes the verdict colour (green = average inside the range, yellow just outside,
+        // red more than 3 % outside); it is not a progress fill.
+        val mid = if (lo != null && hi != null) (lo + hi) / 2 else null
+        val avg = if (lo != null && hi != null && position != null) lo + position * (hi - lo) else null
+        val far = mid != null && avg != null && lo != null && hi != null && (avg < lo - 0.03 * mid || avg > hi + 0.03 * mid)
+        val lineC = if (position == null) 0xFF3A4150.toInt() else if (vs == 0) GOOD else if (far) BAD else WARN
+        p.color = (lineC and 0x00FFFFFF) or 0x66000000
+        c.drawRoundRect(RectF(0f, y, bmp.width.toFloat(), y + bh), bh / 2, bh / 2, p)
+        // Target range between the ticks, in the full colour
+        p.color = lineC
         c.drawRect(x0, y, x1, y + bh, p)
+        // Target ticks (thin) and the actual average (a taller, thicker line)
+        p.color = 0xFFB8C0CE.toInt(); p.strokeWidth = 1.5f * d
+        c.drawLine(x0, y - 3f * d, x0, y + bh + 2f * d, p)
+        c.drawLine(x1, y - 3f * d, x1, y + bh + 2f * d, p)
         if (position != null) {
-            val x = (x0 + position * (x1 - x0)).toFloat().coerceIn(bh, bmp.width.toFloat())
-            // Colour by the average against the actual range: green inside, yellow just outside (within 3 %), red further out
-            val mid = if (lo != null && hi != null) (lo + hi) / 2 else null
-            val avg = if (lo != null && hi != null) lo + position * (hi - lo) else null
-            val far = mid != null && avg != null && lo != null && hi != null && (avg < lo - 0.03 * mid || avg > hi + 0.03 * mid)
-            p.color = if (vs == 0) GOOD else if (far) BAD else WARN
-            c.drawRoundRect(RectF(0f, y, x, y + bh), bh / 2, bh / 2, p)
-            // Marker where the average sat
-            val mx = x.coerceIn(5f * d, bmp.width - 5f * d)
-            val dotC = p.color
-            p.color = 0xFF161A22.toInt(); c.drawCircle(mx, y + bh / 2, 6.5f * d, p)
-            p.color = dotC; c.drawCircle(mx, y + bh / 2, 5f * d, p)
-            p.color = TEXT; c.drawCircle(mx, y + bh / 2, 1.8f * d, p)
+            val mx = (x0 + position * (x1 - x0)).toFloat().coerceIn(3f * d, bmp.width - 3f * d)
+            p.color = 0xFF161A22.toInt(); p.strokeWidth = 6f * d
+            c.drawLine(mx, y - 5f * d, mx, y + bh + 4f * d, p)
+            p.color = TEXT; p.strokeWidth = 3f * d; p.strokeCap = Paint.Cap.ROUND
+            c.drawLine(mx, y - 5f * d, mx, y + bh + 4f * d, p)
+            p.strokeCap = Paint.Cap.BUTT
         }
-        p.color = TEXT; p.strokeWidth = 2f * d
-        c.drawLine(x0, y - 2.5f * d, x0, y + bh + 1f * d, p)
-        c.drawLine(x1, y - 2.5f * d, x1, y + bh + 1f * d, p)
         if (labels && lo != null && hi != null) {
             val t = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = DIM; textSize = 11f * d }
             val a = lo.roundToInt().toString(); val b = hi.roundToInt().toString()
@@ -330,7 +330,7 @@ class WorkoutActivity : Activity() {
             if (wk.loW != null && wk.hiW != null) {
                 val (vt, vc) = vsText(wk.targetAvg, wk.loW, wk.hiW, if (wk.hrTarget) "bpm" else "W")
                 BandViews.heading(this, c, if (wk.hrTarget) "Against HR target" else "Against target",
-                    "The big % is how much of the work was at or above the bottom of the planned range (for an HR target, which is a ceiling: at or under the top). Green 85%+, yellow 70–85%, red below. On the bar, the lighter band between the ticks is your target range and the dot is your average: green inside the range, yellow just outside, red more than 3% outside. The HR figure is green when 70%+ of the work was at 155–172, red when more than 20% was over 172.", topDp = 14)
+                    "The big % is how much of the work was at or above the bottom of the planned range (for an HR target, which is a ceiling: at or under the top). Green 85%+, yellow 70–85%, red below. On the bar, the thin ticks mark your target range and the thick white line is your average. The bar's colour is the verdict: green when the average is inside the range, yellow just outside, red more than 3% outside. The HR figure is green when 70%+ of the work was at 155–172, red when more than 20% was over 172.", topDp = 14)
                 val avgTxt = if (wk.hrTarget) bpm(wk.targetAvg) else w(wk.targetAvg)
                 // An HR target on an easy run is a ceiling: what counts is staying in or under it
                 val ceiling = wk.hrTarget
