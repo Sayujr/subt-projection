@@ -206,15 +206,14 @@ object WorkoutDetail {
      * samples keeps one noisy sample from setting either. With [stop], windows touching a stopped sample
      * don't count towards the min.
      */
-    private fun range(vals: List<Double?>, from: Int, to: Int, floor: Double = Double.NEGATIVE_INFINITY, smooth: Int = 1, stop: BooleanArray? = null): Pair<Double?, Double?>? {
+    private fun range(vals: List<Double?>, from: Int, to: Int, floor: Double = Double.NEGATIVE_INFINITY, smooth: Int = 1, stop: BooleanArray? = null, stopWin: Int = smooth): Pair<Double?, Double?>? {
         var lo = Double.MAX_VALUE; var hi = -Double.MAX_VALUE
         val a = from.coerceAtLeast(0); val b = to.coerceAtMost(vals.lastIndex)
         for (i in a..b) {
-            var sum = 0.0; var n = 0; var clean = true
-            for (j in maxOf(a, i - smooth + 1)..i) {
-                if (stop != null && stop.getOrElse(j) { false }) clean = false
-                val v = vals[j] ?: continue; sum += v; n++
-            }
+            var sum = 0.0; var n = 0
+            for (j in maxOf(a, i - smooth + 1)..i) { val v = vals[j] ?: continue; sum += v; n++ }
+            // [stopWin]: how many samples back the value in [vals] already averages (a series smoothed beforehand)
+            val clean = stop == null || (maxOf(0, i - maxOf(smooth, stopWin) + 1)..i).none { stop.getOrElse(it) { false } }
             if (n == 0) continue
             val v = sum / n
             if (v < floor) continue
@@ -321,7 +320,7 @@ object WorkoutDetail {
             val f2 = if (isWorkStep && has) rampStart(from, to) else from
             val fHr = if (isWorkStep && has) (if (short) from else afterRamp(from, to, HR_LAG)) else from
             val pSeries = if (short) watts else if (isWorkStep && has) stepSmooth(watts, f2, to) else wattsS
-            val wr = if (has) range(pSeries, f2, to, stop = stop) else null
+            val wr = if (has) range(pSeries, f2, to, stop = stop, stopWin = if (short) 1 else 10) else null
             val hrr = if (has) range(heart, fHr, to, stop = stop) else null
             val vr = if (has) range(vel, f2, to, floor = 0.6, smooth = 5, stop = stop) else null
             val tl = if (has && p?.loW != null && p.hiW != null) tally(if (p.hrTarget) heart else pSeries, vel, if (p.hrTarget) fHr else f2, to, p.loW, p.hiW) else null
