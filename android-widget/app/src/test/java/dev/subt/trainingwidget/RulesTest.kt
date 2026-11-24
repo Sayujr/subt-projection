@@ -236,6 +236,17 @@ class RulesTest {
         assertEquals(145.5, work[0].loW!!, 0.01); assertEquals(164.9, work[0].hiW!!, 0.01)
     }
 
+    @Test fun subtKindSeriesCleaned() {
+        fun rep(d: String, sec: Int, pace: Double) = SubtRep("a$d$sec$pace", d, "x", 1, sec, pace, 160.0, 165.0, null)
+        val june = List(3) { rep("2026-06-0${it + 1}", 180, 4.75) } + List(3) { rep("2026-06-1$it", 600, 5.0) }
+        // July: long reps "faster" than short ones (weird data), and only 2 medium reps
+        val july = List(3) { rep("2026-07-0${it + 1}", 180, 4.75) } + List(3) { rep("2026-07-1$it", 600, 4.62) } + List(2) { rep("2026-07-2$it", 360, 4.9) }
+        val s = SubtWorkouts.kindSeries(june + july).toMap()
+        assertEquals(listOf("2026-06"), s[SubtWorkouts.Kind.LONG]!!.map { it.month })
+        assertEquals(listOf("2026-06", "2026-07"), s[SubtWorkouts.Kind.SHORT]!!.map { it.month })
+        assertNull("2 reps isn't enough for a point", s[SubtWorkouts.Kind.MEDIUM])
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {

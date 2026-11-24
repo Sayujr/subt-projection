@@ -657,7 +657,16 @@ class MainActivity : Activity() {
                     screens.verdictCard(col)
                     val chartH = (hDp * 0.6).roundToInt().coerceAtLeast(300)   // leave room so the next card peeks in
                     applyInto(col, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, chartH, inApp = true), dp(chartH))
-                    col.getChildAt(col.childCount - 1)?.let { enableScrub(it) }
+                    col.getChildAt(col.childCount - 1)?.let { card ->
+                        enableScrub(card)
+                        // Today's done workouts open their detail screen
+                        val rows = card.findViewById<ViewGroup>(R.id.workouts)
+                        val todays = Prefs.snapshot(this)?.workouts.orEmpty()
+                        if (rows != null) for (i in 0 until minOf(rows.childCount, todays.size)) {
+                            val w = todays[i]
+                            w.activityId?.let { aid -> rows.getChildAt(i).setOnClickListener { WorkoutActivity.open(this, aid, w.name) } }
+                        }
+                    }
                     col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
                     screens.deviationsCard(col)
                     screens.todayPowerCard(col)

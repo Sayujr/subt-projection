@@ -782,7 +782,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         if (reps.isEmpty()) return
         val c = card(col)
         label(c, "SubT by rep length")
-        val series = SubtWorkouts.Kind.entries.map { k -> k to SubtWorkouts.months(reps, k) }.filter { it.second.isNotEmpty() }
+        val series = SubtWorkouts.kindSeries(reps)
         image(c, Charts.subtKinds(series, chartW(), dp(170), d, TILE), 170)
         val cutoff = LocalDate.now().minusDays(30).toString()
         row(c, listOf("" to DIM, "LATEST" to DIM, "REPS 30D" to DIM, "TREND /MO" to DIM), header = true, weights = listOf(1.5f, 1f, 1f, 1.2f))
@@ -805,7 +805,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         }
         info(c, "From May 2026: SubT pace = the average pace of every work rep in your SubT workouts (runs named like \"3'x10\", \"6'x5\", \"10'x3 repeats\", or Sub-T plans), " +
             "as total time ÷ total distance per month. Short reps are under 4½ min, medium 4½–8, long 8+. CP tests and time trials in the same run are left out (named efforts, or a rep 50 W+ above its siblings). " +
-            "Months with fewer than 3 reps are faded. Trend = change per month over the last six months, ± its error: green or red only when the change is bigger than the error. " +
+            "A month needs 3+ reps of a length to be plotted, and a longer rep that came out faster than the shorter reps that month is dropped as a test effort. Trend = change per month over the last six months, ± its error: green or red only when the change is bigger than the error. " +
             "Your headline SubT is the last 28 days, adjusted for rep mix (each length's usual gap to your average is taken out), so doing more 3′ reps doesn't make it look faster. " +
             "Speed per heartbeat = metres per beat on the reps: it rises when you get faster at the same HR, and isn't fooled by an easy-paced hot day. Touch a chart to read a month. " +
             "Before May 2026 the SubT chart uses your HR rule: any lap with average HR 155–172 lasting 2–12 min (monthly average). Both rules drop anything slower than 5:45 /km.")

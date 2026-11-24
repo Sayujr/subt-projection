@@ -87,6 +87,22 @@ object SubtWorkouts {
             SubtMonth(m, avgPace(l), l.size, outlier = l.size < 3, hr = hr)
         }
 
+    /**
+     * Per-length monthly lines, cleaned: a month needs 3+ reps of that length, and a longer rep length
+     * can't be faster than a shorter one in the same month (that's a test effort or a mislabelled lap),
+     * so such points are dropped.
+     */
+    fun kindSeries(reps: List<SubtRep>): List<Pair<Kind, List<SubtMonth>>> {
+        val raw = Kind.entries.associateWith { k -> months(reps, k).filter { !it.outlier } }
+        return Kind.entries.map { k ->
+            k to raw[k].orEmpty().filter { m ->
+                Kind.entries.filter { it.ordinal < k.ordinal }.none { shorter ->
+                    raw[shorter].orEmpty().firstOrNull { it.month == m.month }?.let { m.pace < it.pace - 3 / 60.0 } == true
+                }
+            }
+        }.filter { it.second.isNotEmpty() }
+    }
+
     fun toSubtData(reps: List<SubtRep>, today: java.time.LocalDate = java.time.LocalDate.now()): SubtData {
         val cutoff = today.minusDays(30).toString()
         return SubtData(System.currentTimeMillis(), months(mixAdjusted(reps)), reps.count { it.date >= cutoff }, reps.maxOfOrNull { it.date } ?: "", source = "workouts")
