@@ -363,6 +363,64 @@ class RulesTest {
         assertNotNull(wk.reasons.firstOrNull())
     }
 
+    // ---- Time in target
+    @Test fun zonesIsLong() {
+        assertTrue(Zones.isLong("1h easy", "2026-11-22", 70 * 60))
+        assertFalse(Zones.isLong("1h easy", "2026-11-24", 60 * 60))
+        assertTrue(Zones.isLong("2h progressive", "2026-11-21", 100 * 60))
+        assertFalse(Zones.isLong("Half marathon race", "2026-11-22", 100 * 60))
+        assertFalse(Zones.isLong("6'x5 repeats", "2026-11-25", 95 * 60))
+        assertTrue(Zones.isLong("Easy run", "2026-11-25", 91 * 60))
+    }
+
+    private fun rawOf(name: String, time: List<Int>?, hr: List<Double>, vel: List<Double>): org.json.JSONObject {
+        fun st(type: String, d: List<Number>) = org.json.JSONObject().put("type", type).put("data", org.json.JSONArray(d))
+        val s = org.json.JSONArray().put(st("heartrate", hr)).put(st("velocity_smooth", vel))
+        if (time != null) s.put(st("time", time))
+        return org.json.JSONObject()
+            .put("a", org.json.JSONObject().put("id", "x1").put("name", name).put("start_date_local", "2026-11-25T07:00:00").put("moving_time", 7200).put("distance", 20000.0))
+            .put("s", s)
+    }
+
+    @Test fun zonesCompute() {
+        val hr = List(300) { 120.0 } + List(200) { 140.0 } + List(100) { 160.0 }
+        val vel = List(600) { 3.0 }
+        val time = List(600) { it }
+        val r = Zones.compute(rawOf("2h steady", time, hr, vel), 153.0, null)
+        assertTrue(r.long)
+        assertEquals(300.0, r.easySec, 1e-6); assertEquals(900.0, r.easyM, 1e-6)
+        assertEquals(200.0, r.longSec, 1e-6); assertEquals(600.0, r.longM, 1e-6)
+        val e = Zones.compute(rawOf("Tuesday jog", time, hr.map { it }, vel).also { it.getJSONObject("a").put("moving_time", 3000) }, 153.0, null)
+        assertFalse(e.long); assertEquals(0.0, e.longSec, 0.0); assertEquals(300.0, e.easySec, 1e-6)
+        // a 60 s pause (gap in the time stream) adds at most 5 s
+        val gap = List(10) { it } + List(10) { 70 + it }
+        val g = Zones.compute(rawOf("Easy", gap, List(20) { 100.0 }, List(20) { 3.0 }), 153.0, null)
+        assertEquals(9.0 + 5.0 + 9.0 + 1.0, g.easySec, 1e-9)
+    }
+
+    @Test fun zonesSubtFixture() {
+        val r = Zones.compute(Fixture.workoutRaw(), 153.0, null)
+        assertTrue(r.subt)
+        assertEquals(1440.0, r.subtWorkSec, 4.0)
+        assertTrue(r.subtInSec > 0 && r.subtInSec <= r.subtWorkSec)
+        assertTrue(r.subtInM > 0)
+    }
+
+    @Test fun zonesJsonAndTotals() {
+        val a = Zones.Run("a", "2026-11-23", "Easy", 3000, 9000.0, false, false, 0.0, 0.0, 0.0, 100.0, 300.0, 0.0, 0.0)
+        val b = Zones.Run("b", "2026-11-29", "2h steady", 7200, 20000.0, false, true, 0.0, 0.0, 0.0, 50.0, 150.0, 400.0, 1200.0)
+        val c = Zones.Run("c", "2026-11-30", "SubT", 3600, 9000.0, true, false, 900.0, 3000.0, 1200.0, 10.0, 30.0, 0.0, 0.0)
+        assertEquals(listOf(a, b, c), Zones.fromJson(Zones.toJson(listOf(a, b, c))))
+        val t = Zones.total(listOf(a, b, c), LocalDate.parse("2026-11-23"), LocalDate.parse("2026-11-29"))
+        assertEquals(2, t.runs); assertEquals(150.0, t.easySec, 1e-9); assertEquals(400.0, t.longSec, 1e-9); assertEquals(0.0, t.subtInSec, 0.0)
+        val w = Zones.weekly(listOf(a, b, c), 12, LocalDate.parse("2026-11-26"))
+        assertEquals(12, w.size)
+        assertTrue(w.all { it.first.dayOfWeek == java.time.DayOfWeek.MONDAY })
+        assertEquals(LocalDate.parse("2026-11-23"), w.last().first)
+        assertEquals(LocalDate.parse("2026-09-07"), w.first().first)
+        assertEquals(2, w.last().second.runs)
+    }
+
     // ---- Your numbers override intervals.icu, and only for today
     @Test fun todayOverrides() {
         Prefs.setRhrOverride(ctx, 61.0)

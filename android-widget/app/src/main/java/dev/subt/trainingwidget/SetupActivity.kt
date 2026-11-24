@@ -444,6 +444,8 @@ class SetupActivity : Activity() {
                 { Prefs.fatigueMin(c) }, { Prefs.setFatigueMin(c, it) }, 90, 105, 5, "%"),
             stepper("Marathon power", "Marathon race power as % of CP, used by the power race model.",
                 { Prefs.fmPct(c) }, { Prefs.setFmPct(c, it) }, 84, 90, 2, "%"),
+            stepper("LT1 heart rate", "Top of the long-run aerobic band. Default 153 = 89% of threshold HR 172 (a rule of thumb, not a lab value).",
+                { Prefs.lt1(c) }, { if (it != Prefs.lt1(c)) { Prefs.setLt1(c, it); Prefs.saveZones(c, emptyList()) } }, 135, 170, 1, " bpm"),
         )
     }
 

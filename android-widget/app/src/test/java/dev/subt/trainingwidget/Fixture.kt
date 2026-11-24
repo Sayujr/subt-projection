@@ -159,5 +159,21 @@ object Fixture {
         Prefs.saveSubtReps(ctx, reps)
         Prefs.saveSubtPage(ctx, subt())
         Prefs.saveSubt(ctx, SubtWorkouts.merge(subt(), reps)!!)
+        // Time in target over the last 12 weeks (made-up numbers)
+        val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val zr = mutableListOf<Zones.Run>()
+        for (k in 0 until 12) {
+            val m = monday.minusWeeks((11 - k).toLong())
+            val f = 0.6 + 0.4 * sin(k * 0.9) + k * 0.03
+            zr += Zones.Run("z${k}a", m.plusDays(3).toString(), "3x10' SubT", 4200, 14000.0, true, false,
+                1100 * f, 4100 * f, 1800.0, 600.0, 1700.0, 0.0, 0.0)
+            zr += Zones.Run("z${k}b", m.plusDays(1).toString(), "Easy run", 3000, 9000.0, false, false,
+                0.0, 0.0, 0.0, 2300 * f, 6800 * f, 0.0, 0.0)
+            zr += Zones.Run("z${k}c", m.plusDays(6).toString(), "Long run", 6600, 21000.0, false, true,
+                0.0, 0.0, 0.0, 700.0, 2000.0, 3400 * f, 10600 * f)
+        }
+        zr += Zones.Run("i999", today.minusDays(2).toString(), "6'x4 repeats", 3420, 9800.0, true, false,
+            1260.0, 4600.0, 1440.0, 300.0, 800.0, 0.0, 0.0)
+        Prefs.saveZones(ctx, zr)
     }
 }

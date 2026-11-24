@@ -160,7 +160,7 @@ object WorkoutDetail {
 
     // ---------------------------------------------------------------- build
 
-    private fun stream(streams: JSONArray?, type: String): List<Double?> {
+    internal fun stream(streams: JSONArray?, type: String): List<Double?> {
         for (i in 0 until (streams?.length() ?: 0)) {
             val s = streams!!.optJSONObject(i) ?: continue
             if (s.optString("type") == type) {

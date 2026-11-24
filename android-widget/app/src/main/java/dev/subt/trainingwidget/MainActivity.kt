@@ -3,6 +3,10 @@ package dev.subt.trainingwidget
 import android.app.Activity
 import android.app.DatePickerDialog
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.util.TypedValue
@@ -50,6 +54,9 @@ class MainActivity : Activity() {
     private var layoutRetries = 0
     /** When each background load last failed: no automatic retry for 5 minutes (stops offline retry loops). */
     private val failedAt = mutableMapOf<String, Long>()
+    private val ZC_SUBT = 0xFFFF9F5A.toInt()
+    private val ZC_EASY = 0xFF3DD68C.toInt()
+    private val ZC_LONG = 0xFF4EA1FF.toInt()
     private lateinit var content: FrameLayout
     private lateinit var controls: HorizontalScrollView
     private lateinit var chips: LinearLayout
@@ -66,6 +73,8 @@ class MainActivity : Activity() {
     private var rangeError: String? = null
     private var raceIndex = 0
     private var racePast = false
+    private val zonesLoading = mutableSetOf<String>()
+    private val zonesLoaded = mutableSetOf<String>()
     private var histLoading = false
     private var histError: String? = null
 
@@ -327,6 +336,35 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /** Time-in-target numbers for runs in [start]..[end]: fetched once per session per range, merged into the cache by id. */
+    private fun loadZones(start: LocalDate, end: LocalDate) {
+        val creds = Prefs.credentials(this) ?: return
+        val last = minOf(end, LocalDate.now())
+        if (last < start) return
+        val key = "zones:$start..$last:${Prefs.lt1(this)}"
+        if (key in zonesLoading || key in zonesLoaded) return
+        if (System.currentTimeMillis() - failedAt.getOrDefault(key, 0L) < 5 * 60_000L) return
+        zonesLoading += key
+        val have = Prefs.zones(this).map { it.id }.toSet()
+        val lt1 = Prefs.lt1(this).toDouble()
+        val ftp = Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp
+        Thread {
+            val r = runCatching { IcuApi(creds).fetchZones(start, last, lt1, ftp, have) }
+            runOnUiThread {
+                zonesLoading -= key
+                r.onSuccess { got ->
+                    zonesLoaded += key
+                    if (got.isNotEmpty()) {
+                        val byId = Prefs.zones(this).associateBy { it.id }.toMutableMap()
+                        got.forEach { byId[it.id] = it }
+                        Prefs.saveZones(this, byId.values.sortedBy { it.date })
+                    }
+                }.onFailure { failedAt[key] = System.currentTimeMillis() }
+                if (tab == Tab.WEEK) drawContent()
+            }
+        }.start()
+    }
+
     /** Multi-year Fitness history for the calendar: loaded only when the calendar is opened, cached for a day. */
     private fun loadLongHistory(force: Boolean) {
         val creds = Prefs.credentials(this) ?: return
@@ -474,6 +512,9 @@ class MainActivity : Activity() {
             }.start()
         }
 
+        val today0 = LocalDate.now()
+        loadZones(start, end)
+        loadZones(monday.minusWeeks(11), today0)
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val chartH = (hDp * 0.48).roundToInt().coerceAtLeast(200)
         val range = WeekRange(
@@ -507,6 +548,7 @@ class MainActivity : Activity() {
             }
         })
         list.addView(legend)
+        list.addView(zonesCard(wDp, start, end, "zones:$start..${minOf(end, today0)}:${Prefs.lt1(this)}"))
         when {
             creds == null -> list.addView(note("Connect intervals.icu in ⚙ settings"))
             items == null && rangeError != null -> list.addView(note("Couldn't load: $rangeError"))
@@ -516,6 +558,81 @@ class MainActivity : Activity() {
         }
         content.removeAllViews()
         content.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    // ---------------------------------------------------------------- Time in target
+
+    private fun zonesCard(wDp: Int, start: LocalDate, end: LocalDate, key: String): View {
+        val all = Prefs.zones(this)
+        val tot = Zones.total(all, start, end)
+        val lt1 = Prefs.lt1(this)
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.tile_bg)
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8); bottomMargin = dp(4) }
+        }
+        fun label(t: String, size: Float, color: Int, top: Int = 0) = TextView(this).apply {
+            text = t; setTextColor(color); setTextSize(TypedValue.COMPLEX_UNIT_SP, size); setPadding(0, dp(top), 0, 0)
+        }
+        card.addView(label("TIME IN TARGET", 12f, 0xFF6B7386.toInt()).apply { letterSpacing = 0.06f })
+        if (key in zonesLoading && tot.runs == 0) {
+            card.addView(label("Loading…", 14f, 0xFF9AA3B2.toInt(), 6))
+        } else {
+            fun km(m: Double) = if (m > 0) "%.1f km".format(m / 1000) else "–"
+            fun tm(sec: Double) = if (sec > 0) SubtModel.time(sec) else "–"
+            fun row(title: String, value: String, color: Int) {
+                card.addView(label(title, 12.5f, 0xFF9AA3B2.toInt(), 8))
+                card.addView(label(value, 16f, color))
+            }
+            val pct = if (tot.subtWorkSec > 0) " · ${(tot.subtInSec / tot.subtWorkSec * 100).roundToInt()}% of work time" else ""
+            row("SubT in power target", if (tot.subtInSec > 0) "${tm(tot.subtInSec)} · ${km(tot.subtInM)}$pct" else "–", ZC_SUBT)
+            row("Easy · HR under ${Zones.EASY_HR.toInt()}", if (tot.easySec > 0) "${tm(tot.easySec)} · ${km(tot.easyM)}" else "–", ZC_EASY)
+            row("Long-run aerobic · HR ${Zones.EASY_HR.toInt()}–$lt1", if (tot.longSec > 0) "${tm(tot.longSec)} · ${km(tot.longM)}" else "–", ZC_LONG)
+        }
+        card.addView(label("LAST 12 WEEKS", 12f, 0xFF6B7386.toInt(), 14).apply { letterSpacing = 0.06f })
+        val weeks = Zones.weekly(all, 12, LocalDate.now())
+        val charts = listOf<Triple<String, Int, (Zones.Total) -> Double>>(
+            Triple("SubT in target", ZC_SUBT, { t: Zones.Total -> t.subtInSec }),
+            Triple("Easy · HR under ${Zones.EASY_HR.toInt()}", ZC_EASY, { t: Zones.Total -> t.easySec }),
+            Triple("Long-run aerobic", ZC_LONG, { t: Zones.Total -> t.longSec }),
+        )
+        val widthPx = dp(wDp - 56).coerceAtLeast(dp(200))
+        for ((name, color, pick) in charts) {
+            val mins = weeks.map { pick(it.second) / 60.0 }
+            card.addView(label("$name · this week ${mins.last().roundToInt()}′", 12f, 0xFF9AA3B2.toInt(), 8))
+            val bmp = trendBitmap(widthPx, dp(46), mins, weeks.map { it.first }, color)
+            card.addView(android.widget.ImageView(this).apply {
+                setImageBitmap(bmp); scaleType = android.widget.ImageView.ScaleType.FIT_XY
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)))
+        }
+        return card
+    }
+
+    /** Minutes per week as bars, the current (last) week bright, the max labelled top-left, month letters underneath. */
+    private fun trendBitmap(w: Int, h: Int, mins: List<Double>, mondays: List<LocalDate>, barColor: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val d = resources.displayMetrics.density
+        val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f * d; this.color = 0xFF6B7386.toInt() }
+        val top = 11f * d; val bottom = h - 12f * d
+        val max = mins.maxOrNull() ?: 0.0
+        val n = mins.size
+        val slot = w.toFloat() / n
+        val bar = Paint(Paint.ANTI_ALIAS_FLAG)
+        for (i in 0 until n) {
+            val x0 = i * slot + slot * 0.15f; val x1 = (i + 1) * slot - slot * 0.15f
+            val last = i == n - 1
+            bar.color = if (last) barColor else (barColor and 0x00FFFFFF) or 0x66000000
+            val bh = if (max > 0) ((mins[i] / max) * (bottom - top)).toFloat() else 0f
+            c.drawRoundRect(RectF(x0, bottom - maxOf(bh, if (mins[i] > 0) 1.5f * d else 0f), x1, bottom), 2f * d, 2f * d, bar)
+            if (i == 0 || mondays[i].month != mondays[i - 1].month) {
+                val letter = mondays[i].month.getDisplayName(java.time.format.TextStyle.NARROW, Locale.getDefault())
+                c.drawText(letter, x0, h - 2f * d, txt)
+            }
+        }
+        if (max > 0) c.drawText("${max.roundToInt()}′", 0f, 9f * d, txt)
+        return bmp
     }
 
     private fun note(text: String) = TextView(this).apply {
@@ -557,7 +674,14 @@ class MainActivity : Activity() {
         }
         row.findViewById<TextView>(R.id.row_sport).text = WidgetRenderer.sportIcon(w.type)
         name.text = w.name
-        row.findViewById<TextView>(R.id.row_meta).text = WidgetRenderer.meta(w) + (if (missed) " · missed" else "") + (if (w.activityId != null) "  ›" else "")
+        val zr = w.activityId?.let { aid -> Prefs.zones(this).firstOrNull { it.id == aid } }
+        val inTarget = when {
+            zr == null -> ""
+            zr.subt && zr.subtWorkSec > 0 -> " · ${(zr.subtInSec / 60).roundToInt()}′ in target"
+            zr.long && zr.longSec > 0 -> " · ${(zr.longSec / 60).roundToInt()}′ aerobic"
+            else -> ""
+        }
+        row.findViewById<TextView>(R.id.row_meta).text = WidgetRenderer.meta(w) + inTarget + (if (missed) " · missed" else "") + (if (w.activityId != null) "  ›" else "")
         // Done workouts open the detail screen (steps against targets)
         w.activityId?.let { aid -> row.setOnClickListener { WorkoutActivity.open(this, aid, w.name) } }
         return row

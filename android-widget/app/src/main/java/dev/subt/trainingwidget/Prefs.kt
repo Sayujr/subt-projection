@@ -205,6 +205,13 @@ object Prefs {
     fun saveSubtReps(ctx: Context, reps: List<SubtRep>) =
         sp(ctx).edit().putString("subt_reps", SubtRep.listToJson(reps, System.currentTimeMillis())).apply()
 
+    // ---- time in target
+
+    fun zones(ctx: Context): List<Zones.Run> = sp(ctx).getString("zones_v1", null)?.let { Zones.fromJson(it) }.orEmpty()
+    fun saveZones(ctx: Context, list: List<Zones.Run>) = sp(ctx).edit().putString("zones_v1", Zones.toJson(list)).apply()
+    fun lt1(ctx: Context): Int = sp(ctx).getInt("lt1_hr", 153)
+    fun setLt1(ctx: Context, v: Int) = sp(ctx).edit().putInt("lt1_hr", v).apply()
+
     // ---- per-widget settings
 
     fun style(ctx: Context, id: Int): GraphStyle =

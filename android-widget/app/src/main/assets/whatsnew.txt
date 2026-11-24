@@ -1,3 +1,4 @@
+- Week screen: time in target (SubT in power target, easy HR under 130, long-run aerobic) with time, km and a 12-week trend
 - Workout detail: tap a done workout (Week list, or "Done this week" on Today) for its steps against your power targets
 - Work-steps average: power, pace and HR (avg, min, max) across all work steps, where you sat in the target range, time in target, and time with HR ≤ 165 / ≤ 172
 - SubT: HR rule (155–172 bpm, 2–12 min) before May, 3-6-10 reps after; anything slower than 5:45 /km is dropped

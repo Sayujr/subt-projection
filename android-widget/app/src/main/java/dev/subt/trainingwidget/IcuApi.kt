@@ -188,6 +188,35 @@ class IcuApi(private val creds: Credentials) {
         return out
     }
 
+    /**
+     * Time-in-target numbers for the runs in [start]..[end] that aren't in [have] yet (read-only GETs).
+     * SubT workouts need the whole workout (steps, planned targets); other runs only need the streams.
+     * A run whose fetch fails is left out so it is tried again next time.
+     */
+    fun fetchZones(start: LocalDate, end: LocalDate, lt1: Double, fallbackFtp: Double?, have: Set<String>): List<Zones.Run> {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val s = start.toString(); val e = end.toString()
+        val acts = getArray("/athlete/$ath/activities", mapOf("oldest" to s, "newest" to end.plusDays(1).toString()))
+            .objects().filter { it.optString("type").contains("Run", ignoreCase = true) && date(it) in s..e && it.optString("id") !in have }
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
+        try {
+            val futures = acts.map { act ->
+                pool.submit<Zones.Run?> {
+                    runCatching {
+                        val id = act.optString("id")
+                        val raw = if (SubtWorkouts.isSubtWorkout(act.optString("name"))) fetchWorkoutRaw(id)
+                        else JSONObject().put("a", act).put("s", getArray("/activity/${URLEncoder.encode(id, "UTF-8")}/streams",
+                            mapOf("types" to "time,heartrate,velocity_smooth,watts")))
+                        Zones.compute(raw, lt1, fallbackFtp)
+                    }.getOrNull()
+                }
+            }
+            return futures.mapNotNull { it.get() }
+        } finally {
+            pool.shutdown()
+        }
+    }
+
     data class SubtScan(val reps: List<SubtRep>, val scanned: Set<String>)
 
     /**
