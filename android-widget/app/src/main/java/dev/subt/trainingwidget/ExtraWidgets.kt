@@ -27,6 +27,8 @@ data class WeekRange(
     val loading: Boolean,
     /** Last week's completed load, shown only for the current week. */
     val lastWeekLoad: Int? = null,
+    /** In-app only: load per category for finished days (see [Charts.rangeBars]). */
+    val split: Map<String, IntArray>? = null,
 )
 
 /** This week, Race countdown, Recovery and SubT pace: as widgets and as in-app screens. */
@@ -180,7 +182,7 @@ object ExtraWidgets {
         val chartH = hDp - 24 - 28 - 18 - 6
         v.setImageViewBitmap(
             R.id.week_chart,
-            Charts.rangeBars(r.items, r.start, r.end, s.today, px(ctx, wDp - 24), px(ctx, chartH), ctx.resources.displayMetrics.density, Prefs.planTolerance(ctx))
+            Charts.rangeBars(r.items, r.start, r.end, s.today, px(ctx, wDp - 24), px(ctx, chartH), ctx.resources.displayMetrics.density, Prefs.planTolerance(ctx), r.split)
         )
         return v
     }

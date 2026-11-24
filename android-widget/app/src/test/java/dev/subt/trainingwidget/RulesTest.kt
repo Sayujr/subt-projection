@@ -621,4 +621,66 @@ class RulesTest {
         val t = Zones.total(listOf(r, r), LocalDate.parse("2026-11-16"), LocalDate.parse("2026-11-22"))
         assertEquals(590.0, t.subtOverSec, 1e-9); assertEquals(2 * 295.0 * 3.7, t.subtOverM, 1e-6)
     }
+
+    // ---- Categories and the load split
+
+    @Test fun categoriesAddUp() {
+        // fixture 6'x4: every sample in a category; SubT = the four work steps, whole length
+        val r = Zones.compute(Fixture.workoutRaw(), 153.0, null)
+        assertEquals(2880.0, r.catSec.sum(), 1e-9)
+        assertEquals(4 * 360.0, r.catSec[Zones.SUBT], 1e-9)
+        assertTrue(r.catSec[Zones.EASY] > 0)
+        assertEquals(r.catSec.sum() > 0, r.catM.sum() > 0)
+        // hand-built easy run: 300 s under 135, 200 s at 140 (under LT1 153), 100 s at 160
+        val hr = List(300) { 120.0 } + List(200) { 140.0 } + List(100) { 160.0 }
+        val e = Zones.compute(rawOf("Tuesday jog", List(600) { it }, hr, List(600) { 3.0 }), 153.0, null)
+        assertEquals(listOf(300.0, 200.0, 0.0, 100.0), e.catSec)
+        assertEquals(listOf(900.0, 600.0, 0.0, 300.0), e.catM)
+        assertEquals(e, Zones.fromJson(Zones.toJson(listOf(e))).single())
+    }
+
+    @Test fun subtWorkStepsAndTestsInCategories() {
+        val segs = listOf(Seg("REC", 900, 200.0), Seg("WORK", 180, 400.0), Seg("REC", 300, 200.0)) +
+            (0 until 3).flatMap { listOf(Seg("WORK", 600, 312.0), Seg("REC", 120, 170.0)) } + Seg("REC", 900, 200.0)
+        val doc = listOf(pw(55, 70, 900).put("warmup", true), pw(112, 120, 180), pw(44, 70, 300),
+            grp(3, pw(88, 91, 600), pw(40, 60, 120)), pw(55, 70, 900).put("cooldown", true))
+        val r = Zones.compute(buildRaw(segs, doc, name = "10'x3 repeats"), 153.0, null)
+        assertEquals(4440.0, r.catSec.sum(), 1e-9)
+        assertEquals(1800.0, r.catSec[Zones.SUBT], 1e-9)      // the three 10' reps, nothing else
+        assertEquals(180.0, r.catSec[Zones.OTHER], 1e-9)      // the test effort
+        assertEquals(4440.0 - 1980.0, r.catSec[Zones.STEADY], 1e-9)   // HR 150: between 135 and LT1
+    }
+
+    @Test fun loadSplitAddsUp() {
+        val run = Zones.Run("a", "2026-11-23", "x", 0, 0.0, false, false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, catSec = listOf(600.0, 0.0, 1200.0, 0.0))
+        // weights 0.42 and 0.86: 252 : 1032
+        assertEquals(listOf(20, 0, 80, 0), Zones.loadSplit(100, listOf(run), 0).toList())
+        assertEquals(listOf(18, 0, 72, 10), Zones.loadSplit(100, listOf(run), 10).toList())
+        for (load in listOf(0, 1, 7, 33, 100, 251)) for (free in listOf(0, 3, 500)) {
+            val p = Zones.loadSplit(load, listOf(run, run.copy(catSec = listOf(10.0, 700.0, 50.0, 300.0))), free)
+            assertEquals(4, p.size); assertEquals(load, p.sum()); assertTrue(p.all { it >= 0 })
+        }
+        // no runs: everything is OTHER
+        assertEquals(listOf(0, 0, 0, 64), Zones.loadSplit(64, emptyList(), 0).toList())
+        assertEquals(listOf(0, 0, 0, 64), Zones.loadSplit(64, emptyList(), 20).toList())
+    }
+
+    @Test fun splitBarsStackWithSameHeight() {
+        val d = LocalDate.parse("2026-11-18")
+        val wk = listOf(Workout("x", "Run", 3000, 40, 9000.0, WorkoutStatus.DONE, date = d.toString(), plannedLoad = 40))
+        fun col(split: Map<String, IntArray>?): List<Int> {
+            val bmp = Charts.rangeBars(wk, LocalDate.parse("2026-11-16"), LocalDate.parse("2026-11-22"), LocalDate.parse("2026-11-24"), 700, 400, 1f, 10, split)
+            val x = (700 / 7 * 2 + 700 / 14)
+            return (0 until 400).map { bmp.getPixel(x, it) }
+        }
+        val plain = col(null); val stacked = col(mapOf(d.toString() to intArrayOf(10, 0, 30, 0)))
+        val green = Charts.SPLIT_COLORS[0]; val orange = Charts.SPLIT_COLORS[2]
+        assertTrue(plain.none { it == orange })
+        assertTrue(stacked.contains(green) && stacked.contains(orange))
+        // the bar spans the same rows with or without the split
+        fun rows(c: List<Int>, vararg k: Int) = c.indices.filter { c[it] in k }
+        val p = rows(plain, green); val q = rows(stacked, green, orange)
+        assertTrue("top ${p.first()} vs ${q.first()}", kotlin.math.abs(p.first() - q.first()) <= 2)
+        assertTrue("bottom ${p.last()} vs ${q.last()}", kotlin.math.abs(p.last() - q.last()) <= 2)
+    }
 }

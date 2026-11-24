@@ -143,6 +143,20 @@ class ScreensTest {
             ev(android.view.MotionEvent.ACTION_UP, iv.width * 0.6f)
             ctl.pause().stop().destroy()
         }
+        // Tap a day column on the Week chart: the category split panel shows under it
+        safely("week_day") {
+            val ctl = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "WEEK")).setup()
+            settle()
+            val act = ctl.get()
+            val iv = act.window.decorView.findViewById<View>(R.id.week_chart) ?: error("no week chart")
+            check(iv.width > 0) { "week chart not laid out" }
+            fun ev(a: Int, x: Float) = android.view.MotionEvent.obtain(0, 0, a, x, iv.height / 2f, 0).also { iv.dispatchTouchEvent(it); it.recycle() }
+            val x = iv.width * 1.5f / 7
+            ev(android.view.MotionEvent.ACTION_DOWN, x); ev(android.view.MotionEvent.ACTION_UP, x)
+            settle()
+            capture("app_week_day_tapped", act.window.decorView)
+            ctl.pause().stop().destroy()
+        }
         // Workout detail from a made-up 6'x4 workout, with the first work step opened
         safely("workout") {
             WorkoutDetail.save(ctx, "i999", Fixture.workoutRaw())

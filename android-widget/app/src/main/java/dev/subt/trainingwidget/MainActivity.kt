@@ -59,6 +59,8 @@ class MainActivity : Activity() {
     private val ZC_LONG = 0xFF4EA1FF.toInt()
     private val ZC_BAND = 0xFFFF9F5A.toInt()
     private var longBandsOpen = false
+    /** Day (yyyy-MM-dd) picked by tapping the week chart; its category split shows under the chart. */
+    private var selectedDay: String? = null
     private lateinit var content: FrameLayout
     private lateinit var controls: HorizontalScrollView
     private lateinit var chips: LinearLayout
@@ -519,11 +521,34 @@ class MainActivity : Activity() {
         loadZones(monday.minusWeeks(11), today0)
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val chartH = (hDp * 0.48).roundToInt().coerceAtLeast(200)
+        val nDays = (ChronoUnit.DAYS.between(start, end) + 1).toInt()
+        val zr = Prefs.zones(this)
+        val split = if (nDays <= 35 && items != null) daySplit(items, zr) else null
         val range = WeekRange(
             start, end, items.orEmpty(), rangeTitle(start, end), loading = items == null,
             lastWeekLoad = if (isThisWeek) snap?.lastWeekLoad else null,
+            split = split,
         )
         applyInto(col, ExtraWidgets.buildWeek(this, wDp, chartH, inApp = true, range = range), dp(chartH))
+        if (split != null) {
+            col.addView(TextView(this).apply {
+                val sb = android.text.SpannableStringBuilder()
+                listOf("Easy", "Steady", "SubT", "Other").forEachIndexed { k, name ->
+                    val s0 = sb.length; sb.append("●"); sb.setSpan(android.text.style.ForegroundColorSpan(Charts.SPLIT_COLORS[k]), s0, sb.length, 0)
+                    sb.append(" $name" + if (k < 3) "   " else "")
+                }
+                sb.append("  ·  tap a day")
+                text = sb; setTextColor(0xFF9AA3B2.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f); setPadding(dp(8), dp(2), dp(4), dp(2))
+            })
+            col.findViewById<android.widget.ImageView>(R.id.week_chart)?.setOnTouchListener { v, e ->
+                if (e.actionMasked == android.view.MotionEvent.ACTION_UP && v.width > 0) {
+                    val day = start.plusDays(Charts.dayAt(e.x, v.width.toFloat(), nDays).toLong()).toString()
+                    selectedDay = if (selectedDay == day) null else day
+                    drawContent()
+                }
+                true
+            }
+        }
 
         val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(6), dp(4), dp(12)) }
@@ -550,6 +575,8 @@ class MainActivity : Activity() {
             }
         })
         list.addView(legend)
+        val picked = selectedDay
+        if (split != null && picked != null && picked in start.toString()..end.toString()) list.addView(dayPanel(picked, zr))
         list.addView(zonesCard(wDp, start, end, "zones:$start..${minOf(end, today0)}:${Prefs.lt1(this)}"))
         when {
             creds == null -> list.addView(note("Connect intervals.icu in ⚙ settings"))
@@ -560,6 +587,53 @@ class MainActivity : Activity() {
         }
         content.removeAllViews()
         content.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    // ---------------------------------------------------------------- Load split by category
+
+    /** Per finished day: the day's done load split into easy, steady, SubT and other (see [Zones.loadSplit]); null when no run has numbers yet. */
+    private fun daySplit(items: List<Workout>, zr: List<Zones.Run>): Map<String, IntArray>? {
+        val byId = zr.associateBy { it.id }
+        val out = mutableMapOf<String, IntArray>()
+        var any = false
+        for ((date, ws) in items.filter { it.status == WorkoutStatus.DONE }.groupBy { it.date }) {
+            val dayLoad = ws.sumOf { it.load }
+            if (dayLoad <= 0) continue
+            val runs = ws.mapNotNull { w -> w.activityId?.let { byId[it] } }
+            if (runs.isNotEmpty()) any = true
+            val zoned = ws.filter { w -> w.activityId?.let { byId.containsKey(it) } == true }.sumOf { it.load }
+            out[date] = Zones.loadSplit(dayLoad, runs, dayLoad - zoned)
+        }
+        return if (any) out else null
+    }
+
+    /** Small panel for the tapped day: share of running time, time and distance in each category. */
+    private fun dayPanel(day: String, zr: List<Zones.Run>): View {
+        val runs = zr.filter { it.date == day }
+        val sec = List(4) { k -> runs.sumOf { it.catSec[k] } }
+        val m = List(4) { k -> runs.sumOf { it.catM[k] } }
+        val total = sec.sum()
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.tile_bg)
+            setPadding(dp(14), dp(10), dp(14), dp(12))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4); bottomMargin = dp(4) }
+        }
+        val title = runCatching { LocalDate.parse(day).format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())) }.getOrDefault(day)
+        card.addView(TextView(this).apply { text = title; setTextColor(0xFFF2F4F8.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f) })
+        if (total <= 0) {
+            card.addView(TextView(this).apply { text = "No running time with numbers for this day."; setTextColor(0xFF9AA3B2.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, dp(4), 0, 0) })
+        } else {
+            val lt1 = Prefs.lt1(this)
+            for ((k, name) in listOf(Zones.SUBT to "SubT", Zones.EASY to "Easy under ${Zones.EASY_HR.toInt()}", Zones.STEADY to "Steady ${Zones.EASY_HR.toInt()}–$lt1", Zones.OTHER to "Other")) {
+                card.addView(BandViews.statRow(this, name, sec[k], sec[k] / total * 100, m[k]))
+            }
+        }
+        card.addView(TextView(this).apply {
+            text = "Load split is an estimate; time and distance are measured."
+            setTextColor(0xFF6B7386.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f); setPadding(0, dp(6), 0, 0)
+        })
+        return card
     }
 
     // ---------------------------------------------------------------- Time in target

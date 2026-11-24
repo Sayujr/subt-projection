@@ -439,6 +439,12 @@ object Charts {
         else -> 0
     }
 
+    /** Easy, steady, SubT and other: the colours of the split load bars. */
+    val SPLIT_COLORS = intArrayOf(0xFF3DD68C.toInt(), 0xFF4EA1FF.toInt(), 0xFFFF9F5A.toInt(), 0xFF6B7386.toInt())
+
+    /** Index of the day column at [x] (pixels) in a daily [rangeBars] chart of [n] equal columns over [w] pixels. */
+    fun dayAt(x: Float, w: Float, n: Int): Int = ((x / w) * n).toInt().coerceIn(0, n - 1)
+
     /** Mon–Sun columns for the week widget. */
     fun weekBars(week: List<Workout>, monday: LocalDate, today: LocalDate, w: Int, h: Int, density: Float, tolPct: Int = 10): Bitmap =
         rangeBars(week, monday, monday.plusDays(6), today, w, h, density, tolPct)
@@ -448,7 +454,11 @@ object Charts {
      * Completed load is green, missed planned load (before today) a dashed outline, and still-to-do
      * planned load amber. The bar containing today is highlighted.
      */
-    fun rangeBars(items: List<Workout>, start: LocalDate, end: LocalDate, today: LocalDate, w: Int, h: Int, density: Float, tolPct: Int = 10): Bitmap {
+    fun rangeBars(
+        items: List<Workout>, start: LocalDate, end: LocalDate, today: LocalDate, w: Int, h: Int, density: Float, tolPct: Int = 10,
+        /** yyyy-MM-dd → load per category (easy, steady, SubT, other): stacks the done bar of finished days (daily ranges only). */
+        split: Map<String, IntArray>? = null,
+    ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val nDays = java.time.temporal.ChronoUnit.DAYS.between(start, end).toInt() + 1
@@ -544,7 +554,20 @@ object Charts {
                 // Finished: the dashed outline is the plan, the green bar is what you did.
                 // Gap above the bar = short of plan; bar above the outline = more than plan.
                 val pl = planned[i]; val dn = done[i]
-                seg(dn, doneP)
+                val parts = if (daily && dn > 0) split?.get(bucketStarts[i].toString())?.takeIf { it.size == 4 && it.sum() == dn } else null
+                if (parts != null) {
+                    // stacked from the bottom: easy, steady, SubT, other; same total height as the plain green bar
+                    val bar = Path().apply { addRoundRect(left, y - hOf(dn), right, y, r, r, Path.Direction.CW) }
+                    c.save(); c.clipPath(bar)
+                    var acc = 0
+                    for (k in 0 until 4) {
+                        if (parts[k] <= 0) continue
+                        val y0 = baseY - hOf(acc); acc += parts[k]; val y1 = baseY - hOf(acc)
+                        c.drawRect(left, y1, right, y0, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SPLIT_COLORS[k] })
+                    }
+                    c.restore()
+                    y -= hOf(dn)
+                } else seg(dn, doneP)
                 val planTop = baseY - hOf(pl)
                 if (pl > 0) c.drawRoundRect(left, planTop, right, baseY, r, r, missP)
                 val top = minOf(y, if (pl > 0) planTop else y)

@@ -27,6 +27,39 @@ object Zones {
     }
 
     private val ZEROS = List(7) { 0.0 }
+    private val ZEROS4 = List(4) { 0.0 }
+
+    /** Run categories, in the order used for [Run.catSec] and the load split. */
+    const val EASY = 0
+    const val STEADY = 1
+    const val SUBT = 2
+    const val OTHER = 3
+    /** Relative load per second of each category (about intensity squared at typical intensities). */
+    val LOAD_WEIGHT = doubleArrayOf(0.42, 0.61, 0.86, 0.72)
+
+    /**
+     * A day's [dayLoad] split over the four categories: load from [loadWithoutZones] (activities with no zone
+     * numbers) goes to OTHER, the rest in proportion to category seconds × weight over [runs]. Parts add up
+     * to [dayLoad] exactly (largest remainder); with no run seconds everything is OTHER.
+     */
+    fun loadSplit(dayLoad: Int, runs: List<Run>, loadWithoutZones: Int): IntArray {
+        val total = dayLoad.coerceAtLeast(0)
+        val free = loadWithoutZones.coerceIn(0, total)
+        val zoned = total - free
+        val wsec = DoubleArray(4) { k -> runs.sumOf { it.catSec.getOrElse(k) { 0.0 } } * LOAD_WEIGHT[k] }
+        val sum = wsec.sum()
+        val out = IntArray(4)
+        if (zoned > 0 && sum > 0) {
+            val exact = DoubleArray(4) { zoned * wsec[it] / sum }
+            for (k in 0 until 4) out[k] = Math.floor(exact[k]).toInt()
+            var left = zoned - out.sum()
+            val order = (0 until 4).sortedWith(compareByDescending<Int> { exact[it] - out[it] }.thenBy { it })
+            var j = 0
+            while (left > 0) { out[order[j % 4]]++; left--; j++ }
+        } else out[OTHER] += zoned
+        out[OTHER] += free
+        return out
+    }
 
     data class BandRow(val group: String, val label: String, val sec: Double, val m: Double, val pct: Double, val emphasised: Boolean)
 
@@ -57,6 +90,8 @@ object Zones {
         val bandSec: List<Double> = ZEROS, val bandM: List<Double> = ZEROS,
         /** SubT work judged under / over the planned power range. */
         val subtUnderSec: Double = 0.0, val subtUnderM: Double = 0.0, val subtOverSec: Double = 0.0, val subtOverM: Double = 0.0,
+        /** Every sample of the run in one of four categories ([EASY], [STEADY], [SUBT], [OTHER]): seconds and metres. */
+        val catSec: List<Double> = ZEROS4, val catM: List<Double> = ZEROS4,
     )
 
     data class Total(
@@ -65,6 +100,7 @@ object Zones {
         val bandSec: List<Double> = ZEROS, val bandM: List<Double> = ZEROS,
         val longBandSec: List<Double> = ZEROS, val longBandM: List<Double> = ZEROS,
         val subtUnderSec: Double = 0.0, val subtUnderM: Double = 0.0, val subtOverSec: Double = 0.0, val subtOverM: Double = 0.0,
+        val catSec: List<Double> = ZEROS4, val catM: List<Double> = ZEROS4,
     )
 
     private val LONG_NAME = Regex("long|progress|steady", RegexOption.IGNORE_CASE)
@@ -112,8 +148,21 @@ object Zones {
 
         var inSec = 0.0; var inM = 0.0; var workSec = 0.0
         var underSec = 0.0; var underM = 0.0; var overSec = 0.0; var overM = 0.0
-        if (subt && raw.optJSONObject("i") != null) {
-            val det = WorkoutDetail.fromRaw(raw, fallbackFtp)
+        val det = if (subt && raw.optJSONObject("i") != null) WorkoutDetail.fromRaw(raw, fallbackFtp) else null
+        // Categories: every sample in a SubT work step is SUBT; outside, HR decides (test steps and missing HR are OTHER)
+        val cat = IntArray(n) { -1 }
+        if (det != null) for (st in det.steps) {
+            if (st.start < 0 || !(st.isWork || st.isTest)) continue
+            for (i in st.start..minOf(st.end, n - 1)) cat[i] = if (st.isWork) SUBT else OTHER
+        }
+        val catSec = DoubleArray(4); val catM = DoubleArray(4)
+        for (i in 0 until n) {
+            val h = hr.getOrNull(i)
+            val k = if (cat[i] >= 0) cat[i] else if (h == null) OTHER else if (h < EASY_HR) EASY else if (h < lt1) STEADY else OTHER
+            val d = dt(i)
+            catSec[k] += d; catM[k] += dist(i, d)
+        }
+        if (det != null) {
             for (st in det.steps) {
                 val lo = st.loW; val hi = st.hiW
                 if (!(st.isWork && !st.hrTarget && lo != null && hi != null && st.start >= 0)) continue
@@ -132,7 +181,7 @@ object Zones {
                 }
             }
         }
-        return Run(id, date, name, seconds, a.numOrNull("distance") ?: 0.0, subt, long, inSec, inM, workSec, easySec, easyM, longSec, longM, bandSec.toList(), bandM.toList(), underSec, underM, overSec, overM)
+        return Run(id, date, name, seconds, a.numOrNull("distance") ?: 0.0, subt, long, inSec, inM, workSec, easySec, easyM, longSec, longM, bandSec.toList(), bandM.toList(), underSec, underM, overSec, overM, catSec.toList(), catM.toList())
     }
 
     fun toJson(list: List<Run>): String {
@@ -142,9 +191,12 @@ object Zones {
             .put("subtInSec", r.subtInSec).put("subtInM", r.subtInM).put("subtWorkSec", r.subtWorkSec)
             .put("easySec", r.easySec).put("easyM", r.easyM).put("longSec", r.longSec).put("longM", r.longM)
             .put("bandSec", JSONArray(r.bandSec)).put("bandM", JSONArray(r.bandM))
-            .put("subtUnderSec", r.subtUnderSec).put("subtUnderM", r.subtUnderM).put("subtOverSec", r.subtOverSec).put("subtOverM", r.subtOverM))
+            .put("subtUnderSec", r.subtUnderSec).put("subtUnderM", r.subtUnderM).put("subtOverSec", r.subtOverSec).put("subtOverM", r.subtOverM)
+            .put("catSec", JSONArray(r.catSec)).put("catM", JSONArray(r.catM)))
         return arr.toString()
     }
+
+    private fun arr4(a: JSONArray?): List<Double> = if (a == null) ZEROS4 else List(4) { a.optDouble(it, 0.0) }
 
     private fun arr7(a: JSONArray?): List<Double> = if (a == null) ZEROS else List(7) { a.optDouble(it, 0.0) }
 
@@ -158,7 +210,8 @@ object Zones {
                 o.optDouble("subtInSec", 0.0), o.optDouble("subtInM", 0.0), o.optDouble("subtWorkSec", 0.0),
                 o.optDouble("easySec", 0.0), o.optDouble("easyM", 0.0), o.optDouble("longSec", 0.0), o.optDouble("longM", 0.0),
                 arr7(o.optJSONArray("bandSec")), arr7(o.optJSONArray("bandM")),
-                o.optDouble("subtUnderSec", 0.0), o.optDouble("subtUnderM", 0.0), o.optDouble("subtOverSec", 0.0), o.optDouble("subtOverM", 0.0))
+                o.optDouble("subtUnderSec", 0.0), o.optDouble("subtUnderM", 0.0), o.optDouble("subtOverSec", 0.0), o.optDouble("subtOverM", 0.0),
+                arr4(o.optJSONArray("catSec")), arr4(o.optJSONArray("catM")))
         }
     }.getOrDefault(emptyList())
 
@@ -170,7 +223,8 @@ object Zones {
             l.sumOf { it.easySec }, l.sumOf { it.easyM }, l.sumOf { it.longSec }, l.sumOf { it.longM }, l.size,
             sumBands(l) { it.bandSec }, sumBands(l) { it.bandM },
             sumBands(l.filter { it.long }) { it.bandSec }, sumBands(l.filter { it.long }) { it.bandM },
-            l.sumOf { it.subtUnderSec }, l.sumOf { it.subtUnderM }, l.sumOf { it.subtOverSec }, l.sumOf { it.subtOverM })
+            l.sumOf { it.subtUnderSec }, l.sumOf { it.subtUnderM }, l.sumOf { it.subtOverSec }, l.sumOf { it.subtOverM },
+            List(4) { k -> l.sumOf { it.catSec[k] } }, List(4) { k -> l.sumOf { it.catM[k] } })
     }
 
     /** The last [weeks] Mon–Sun weeks, oldest first, the last one being the week of [today]. */

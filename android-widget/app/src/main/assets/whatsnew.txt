@@ -1,3 +1,4 @@
+- Week: SubT under / in / over target; load bars split into easy, steady, SubT and other (tap a day for time and distance)
 - Work steps: under / in / over target with time, % and km; heart rate on the work (155–165, 155–172); test efforts shown separately; min values ignore walking and stops
 - Heart-rate bands on every run and on the Week screen: time, % and km under 125, under 135, 135–155, 155–165, 165–172, 155–172, 165–175 and over 172
 - Week screen: time in target (SubT in power target, easy HR under 130, long-run aerobic) with time, km and a 12-week trend
