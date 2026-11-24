@@ -11,14 +11,17 @@ import kotlin.math.abs
  *
  * Steps come from intervals.icu's own split of the activity. Targets come from the paired planned
  * workout and are turned into watts with the FTP intervals.icu recorded for that day (not today's).
- * "Work" steps are the planned steps (not warm-up / cool-down) whose target is within 20 % of the
- * hardest step's target, so recoveries drop out, and an easy day where every step is easy still counts.
+ * "Work" steps are the planned steps (not warm-up / cool-down, 40 s or longer) whose target is within
+ * 25 % of the hardest step of 2 min or more, so recoveries and short strides drop out, a time trial in
+ * the same session doesn't push the SubT reps out, and an easy day where every step is easy still counts.
+ * Steps with a heart-rate target instead of power (e.g. bike sessions) are judged against that HR range.
  */
 object WorkoutDetail {
     enum class Kind(val label: String) { WARMUP("Warm-up"), WORK("Work"), RECOVERY("Recovery"), COOLDOWN("Cool-down"), OTHER("Step") }
 
     data class Stat(val avg: Double?, val min: Double?, val max: Double?)
-    data class Plan(val kind: Kind, val seconds: Int, val distance: Double, val loW: Double?, val hiW: Double?, val group: Int, val reps: Int)
+    /** [loW]/[hiW] hold the target range: watts, or bpm when [hrTarget]. */
+    data class Plan(val kind: Kind, val seconds: Int, val distance: Double, val loW: Double?, val hiW: Double?, val group: Int, val reps: Int, val hrTarget: Boolean = false)
 
     data class Step(
         val index: Int, val kind: Kind, val seconds: Int, val distance: Double,
@@ -29,15 +32,19 @@ object WorkoutDetail {
         /** Share of the step (0–1) with HR at or under 165 / 172. */
         val hr165: Double?, val hr172: Double?,
         val start: Int, val end: Int, val group: Int, val reps: Int,
+        /** The target range is heart rate (bpm), not power. */
+        val hrTarget: Boolean = false,
     ) {
         val isWork get() = kind == Kind.WORK
+        /** The average the target applies to: HR for HR targets, else power. */
+        val targetAvg: Double? get() = if (hrTarget) hr.avg else power.avg
         val mid: Double? get() = if (loW != null && hiW != null) (loW + hiW) / 2 else null
         /** Average power as % of the middle of the target. */
-        val pctOfTarget: Double? get() = power.avg?.let { a -> mid?.takeIf { it > 0 }?.let { a / it * 100 } }
+        val pctOfTarget: Double? get() = targetAvg?.let { a -> mid?.takeIf { it > 0 }?.let { a / it * 100 } }
         /** −1 below the range, 0 inside, +1 above. */
-        val vsTarget: Int? get() = power.avg?.let { a -> if (loW == null || hiW == null) null else if (a < loW - 0.5) -1 else if (a > hiW + 0.5) 1 else 0 }
+        val vsTarget: Int? get() = targetAvg?.let { a -> if (loW == null || hiW == null) null else if (a < loW - 0.5) -1 else if (a > hiW + 0.5) 1 else 0 }
         /** Where the average sits: 0 = bottom of the range, 1 = top (can fall outside 0–1). */
-        val position: Double? get() = power.avg?.let { a -> if (loW == null || hiW == null) null else if (hiW - loW < 1) (a - loW) / (0.04 * hiW) + 0.5 else (a - loW) / (hiW - loW) }
+        val position: Double? get() = targetAvg?.let { a -> if (loW == null || hiW == null) null else if (hiW - loW < 1) (a - loW) / (0.04 * hiW) + 0.5 else (a - loW) / (hiW - loW) }
     }
 
     /** All work steps rolled into one. */
@@ -46,7 +53,10 @@ object WorkoutDetail {
         val power: Stat, val speed: Stat, val hr: Stat,
         val pctOfTarget: Double?, val position: Double?, val loW: Double?, val hiW: Double?,
         val inTarget: Double?, val hr165: Double?, val hr172: Double?,
-    )
+        val hrTarget: Boolean = false,
+    ) {
+        val targetAvg: Double? get() = if (hrTarget) hr.avg else power.avg
+    }
 
     data class Detail(
         val id: String, val name: String, val date: String, val type: String,
@@ -66,9 +76,23 @@ object WorkoutDetail {
     private fun JSONObject.num(k: String): Double? = if (has(k) && !isNull(k)) optDouble(k).takeUnless { it.isNaN() } else null
 
     /** Planned steps in the order they're run (repeats expanded), targets in watts. */
-    fun flattenPlan(doc: JSONObject?, ftp: Double?): List<Plan> {
+    fun flattenPlan(doc: JSONObject?, ftp: Double?, maxHr: Double? = null, lthr: Double? = null): List<Plan> {
         if (doc == null) return emptyList()
-        data class Raw(val warm: Boolean, val cool: Boolean, val seconds: Int, val distance: Double, val lo: Double?, val hi: Double?, val group: Int, val reps: Int)
+        data class Raw(val warm: Boolean, val cool: Boolean, val seconds: Int, val distance: Double, val lo: Double?, val hi: Double?, val group: Int, val reps: Int, val hr: Boolean)
+        fun hrTarget(st: JSONObject): Pair<Double?, Double?> {
+            val p = st.optJSONObject("hr") ?: return null to null
+            val units = p.optString("units")
+            val lo = p.num("start") ?: p.num("value") ?: return null to null
+            val hi = p.num("end") ?: lo
+            fun b(v: Double): Double? = when {
+                units.contains("lthr", true) -> lthr?.let { v / 100 * it }
+                units.contains("%") -> maxHr?.let { v / 100 * it }
+                units.contains("bpm", true) -> v
+                else -> null
+            }
+            val x = b(lo); val y = b(hi)
+            return if (x == null || y == null) null to null else minOf(x, y) to maxOf(x, y)
+        }
         val out = mutableListOf<Raw>()
         var groupId = 0
         fun target(st: JSONObject): Pair<Double?, Double?> {
@@ -93,22 +117,27 @@ object WorkoutDetail {
                     val g = ++groupId
                     repeat(n) { walk(inner, g, n) }
                 } else {
-                    val (lo, hi) = target(st)
-                    out += Raw(st.optBoolean("warmup"), st.optBoolean("cooldown"), st.optInt("duration", 0), st.num("distance") ?: 0.0, lo, hi, group, reps)
+                    var (lo, hi) = target(st)
+                    var isHr = false
+                    if (lo == null) { val h = hrTarget(st); lo = h.first; hi = h.second; isHr = lo != null }
+                    out += Raw(st.optBoolean("warmup"), st.optBoolean("cooldown"), st.optInt("duration", 0), st.num("distance") ?: 0.0, lo, hi, group, reps, isHr)
                 }
             }
         }
         walk(doc.optJSONArray("steps"), 0, 1)
-        val hardest = out.filter { !it.warm && !it.cool && it.lo != null }.maxOfOrNull { (it.lo!! + it.hi!!) / 2 }
+        // Hardest step of 2 min+ (or 400 m+) sets the bar, so 20–30 s strides don't; fall back to any step
+        val main = out.filter { !it.warm && !it.cool && it.lo != null }
+        val hardest = (main.filter { it.seconds >= 120 || it.distance >= 400 }.ifEmpty { main }).maxOfOrNull { (it.lo!! + it.hi!!) / 2 }
         return out.map { r ->
             val kind = when {
                 r.warm -> Kind.WARMUP
                 r.cool -> Kind.COOLDOWN
                 r.lo == null || hardest == null -> Kind.OTHER
-                (r.lo!! + r.hi!!) / 2 >= hardest!! * 0.8 -> Kind.WORK
+                r.seconds in 1..39 && r.distance <= 0 -> if ((r.lo!! + r.hi!!) / 2 >= hardest!! * 0.75) Kind.OTHER else Kind.RECOVERY
+                (r.lo!! + r.hi!!) / 2 >= hardest!! * 0.75 -> Kind.WORK
                 else -> Kind.RECOVERY
             }
-            Plan(kind, r.seconds, r.distance, r.lo, r.hi, r.group, r.reps)
+            Plan(kind, r.seconds, r.distance, r.lo, r.hi, r.group, r.reps, r.hr)
         }
     }
 
@@ -163,11 +192,16 @@ object WorkoutDetail {
         return if (hi < lo) null else lo to hi
     }
 
-    fun build(activity: JSONObject, intervals: JSONObject?, streams: JSONArray?, event: JSONObject?, fallbackFtp: Double?): Detail {
+    fun build(
+        activity: JSONObject, intervals: JSONObject?, streams: JSONArray?, event: JSONObject?, fallbackFtp: Double?,
+        fallbackMaxHr: Double? = 194.0, fallbackLthr: Double? = 172.0,
+    ): Detail {
         val ftp = activity.num("icu_ftp")?.takeIf { it > 0 } ?: fallbackFtp
         val watts = stream(streams, "watts"); val heart = stream(streams, "heartrate"); val vel = stream(streams, "velocity_smooth")
         val time = stream(streams, "time")
-        val plan = flattenPlan(event?.optJSONObject("workout_doc"), ftp)
+        val maxHr = activity.num("athlete_max_hr")?.takeIf { it > 100 } ?: fallbackMaxHr
+        val lthr = activity.num("lthr")?.takeIf { it > 100 } ?: fallbackLthr
+        val plan = flattenPlan(event?.optJSONObject("workout_doc"), ftp, maxHr, lthr)
         val ivs = intervals?.optJSONArray("icu_intervals")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
         fun secs(iv: JSONObject) = iv.num("moving_time") ?: iv.num("elapsed_time") ?: 0.0
         val matched = align(plan, ivs.map { secs(it) to (it.num("distance") ?: 0.0) })
@@ -177,7 +211,7 @@ object WorkoutDetail {
             val has = from >= 0 && to >= from
             val type = iv.optString("type")
             val kind = p?.kind ?: when {
-                plan.isNotEmpty() -> Kind.OTHER
+                plan.any { it.loW != null } -> Kind.OTHER
                 type.equals("WORK", true) -> Kind.WORK
                 type.equals("RECOVERY", true) -> Kind.RECOVERY
                 else -> Kind.OTHER
@@ -193,10 +227,11 @@ object WorkoutDetail {
                 hr = Stat(iv.num("average_heartrate")?.takeIf { it > 0 }, hrr?.first ?: iv.num("min_heartrate"), hrr?.second ?: iv.num("max_heartrate")),
                 cadence = iv.num("average_cadence")?.takeIf { it > 0 }, elevGain = iv.num("total_elevation_gain"),
                 loW = p?.loW, hiW = p?.hiW,
-                inTarget = if (has && p?.loW != null && p.hiW != null) share(watts, from, to) { it >= p.loW - 0.5 && it <= p.hiW + 0.5 } else null,
+                inTarget = if (has && p?.loW != null && p.hiW != null) share(if (p.hrTarget) heart else watts, from, to) { it >= p.loW - 0.5 && it <= p.hiW + 0.5 } else null,
                 hr165 = if (has) share(heart, from, to) { it <= 165.0 } else null,
                 hr172 = if (has) share(heart, from, to) { it <= 172.0 } else null,
                 start = from, end = to, group = p?.group ?: 0, reps = p?.reps ?: 1,
+                hrTarget = p?.hrTarget == true && p.loW != null,
             )
         }
         val work = steps.filter { it.isWork }
@@ -215,6 +250,7 @@ object WorkoutDetail {
                 pctOfTarget = wavg { it.pctOfTarget }, position = wavg { it.position },
                 loW = wavg { it.loW }, hiW = wavg { it.hiW },
                 inTarget = wavg { it.inTarget }, hr165 = wavg { it.hr165 }, hr172 = wavg { it.hr172 },
+                hrTarget = work.all { it.hrTarget },
             )
         }
         // Chart streams, at most ~700 points

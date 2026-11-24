@@ -212,6 +212,30 @@ class RulesTest {
         assertNull(m[2]); assertEquals(WorkoutDetail.Kind.RECOVERY, m[3]!!.kind); assertEquals(WorkoutDetail.Kind.COOLDOWN, m[9]!!.kind)
     }
 
+    @Test fun workoutPlanRealShapes() {
+        fun pw(lo: Int, hi: Int, dur: Int) = org.json.JSONObject().put("duration", dur).put("power", org.json.JSONObject().put("start", lo).put("end", hi).put("units", "%ftp"))
+        fun grp(n: Int, vararg st: org.json.JSONObject) = org.json.JSONObject().put("reps", n).put("steps", org.json.JSONArray().apply { st.forEach { put(it) } })
+        // Strides + a 3' time trial + 10' SubT reps in one session: the SubT reps must still be work
+        val mixed = org.json.JSONObject().put("steps", org.json.JSONArray()
+            .put(pw(55, 70, 900).put("warmup", true))
+            .put(grp(2, pw(115, 125, 30), pw(20, 60, 60)))
+            .put(pw(120, 150, 20)).put(pw(112, 120, 180)).put(pw(44, 70, 300))
+            .put(grp(3, pw(88, 91, 600), pw(40, 60, 120)))
+            .put(pw(55, 70, 900).put("cooldown", true)))
+        val plan = WorkoutDetail.flattenPlan(mixed, 351.0)
+        val tens = plan.filter { it.seconds == 600 }
+        assertEquals(3, tens.size); assertTrue("10' reps are work", tens.all { it.kind == WorkoutDetail.Kind.WORK })
+        assertTrue("strides aren't work", plan.filter { it.seconds in 1..39 }.none { it.kind == WorkoutDetail.Kind.WORK })
+        assertEquals(WorkoutDetail.Kind.RECOVERY, plan.first { it.seconds == 300 }.kind)
+        // Bike session with HR-only targets (75–85 % of max HR 194 = 145.5–164.9 bpm)
+        fun hr(lo: Int, hi: Int, dur: Int) = org.json.JSONObject().put("duration", dur).put("hr", org.json.JSONObject().put("start", lo).put("end", hi).put("units", "%hr"))
+        val bike = org.json.JSONObject().put("steps", org.json.JSONArray().put(hr(50, 65, 600).put("warmup", true)).put(grp(5, hr(75, 85, 360), hr(50, 60, 60))).put(hr(50, 65, 600).put("cooldown", true)))
+        val bp = WorkoutDetail.flattenPlan(bike, 351.0, 194.0, 172.0)
+        val work = bp.filter { it.kind == WorkoutDetail.Kind.WORK }
+        assertEquals(5, work.size); assertTrue(work.all { it.hrTarget })
+        assertEquals(145.5, work[0].loW!!, 0.01); assertEquals(164.9, work[0].hiW!!, 0.01)
+    }
+
     // ---- TT / race / CP test detection by name
     @Test fun ttNames() {
         listOf("5K TT", "Time trial 3K", "Parkrun", "CP test", "CPT 9min", "Race", "Spring race").forEach {

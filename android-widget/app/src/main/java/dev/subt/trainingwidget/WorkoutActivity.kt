@@ -194,11 +194,11 @@ class WorkoutActivity : Activity() {
         return bmp
     }
 
-    private fun vsText(avg: Double?, lo: Double?, hi: Double?): Pair<String, Int> {
+    private fun vsText(avg: Double?, lo: Double?, hi: Double?, unit: String = "W"): Pair<String, Int> {
         if (avg == null || lo == null || hi == null) return "" to DIM
         return when {
-            avg < lo - 0.5 -> "${(lo - avg).roundToInt()} W under" to WARN
-            avg > hi + 0.5 -> "${(avg - hi).roundToInt()} W over" to WARN
+            avg < lo - 0.5 -> "${(lo - avg).roundToInt()} $unit under" to WARN
+            avg > hi + 0.5 -> "${(avg - hi).roundToInt()} $unit over" to WARN
             else -> "in range" to GOOD
         }
     }
@@ -236,11 +236,11 @@ class WorkoutActivity : Activity() {
             metric(c, if (ride) "Speed" else "Pace", PACE, spd(wk.speed.avg, ride), "Min ${spd(wk.speed.min, ride, false)} · Max ${spd(wk.speed.max, ride, false)}")
             metric(c, "Heart rate", HEART, bpm(wk.hr.avg), "Min ${wk.hr.min?.roundToInt() ?: "–"} · Max ${wk.hr.max?.roundToInt() ?: "–"}")
             if (wk.loW != null && wk.hiW != null) {
-                val (vt, vc) = vsText(wk.power.avg, wk.loW, wk.hiW)
-                text(c, spans("Against target  " to DIM, "${wk.pctOfTarget?.roundToInt() ?: "–"}%" to vc, "  $vt" to vc), 15f, top = 12)
+                val (vt, vc) = vsText(wk.targetAvg, wk.loW, wk.hiW, if (wk.hrTarget) "bpm" else "W")
+                text(c, spans((if (wk.hrTarget) "Against HR target  " else "Against target  ") to DIM, "${wk.pctOfTarget?.roundToInt() ?: "–"}%" to vc, "  $vt" to vc), 15f, top = 12)
                 image(c, targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true), 30, top = 2)
-                det.ftp?.let { f -> wk.power.avg?.let { text(c, "${(it / f * 100).roundToInt()}% of CP · target ${(wk.loW / f * 100).roundToInt()}–${(wk.hiW / f * 100).roundToInt()}% of CP", 12f, FAINT, top = 4) } }
-                metric(c, "Time in power target", GOOD, pct(wk.inTarget), "work steps only")
+                if (!wk.hrTarget) det.ftp?.let { f -> wk.power.avg?.let { text(c, "${(it / f * 100).roundToInt()}% of CP · target ${(wk.loW / f * 100).roundToInt()}–${(wk.hiW / f * 100).roundToInt()}% of CP", 12f, FAINT, top = 4) } }
+                metric(c, if (wk.hrTarget) "Time in HR target" else "Time in power target", GOOD, pct(wk.inTarget), "work steps only")
             }
             metric(c, "Time with HR ≤ 165", HEART, pct(wk.hr165), null)
             metric(c, "Time with HR ≤ 172", HEART, pct(wk.hr172), null)
@@ -296,7 +296,7 @@ class WorkoutActivity : Activity() {
             val main = pctT?.let { "${it.roundToInt()}%" } ?: w(st.power.avg)
             val sb = SpannableStringBuilder(main)
             sb.setSpan(ForegroundColorSpan(if (pctT == null) DIM else if (vs == 0) GOOD else WARN), 0, sb.length, 0)
-            val sub = if (pctT != null) "of target" + (det.ftp?.let { f -> st.power.avg?.let { " · ${(it / f * 100).roundToInt()}% CP" } } ?: "") else ""
+            val sub = if (pctT != null) (if (st.hrTarget) "of HR target" else "of target") + (det.ftp?.let { f -> st.power.avg?.let { " · ${(it / f * 100).roundToInt()}% CP" } } ?: "") else ""
             if (sub.isNotEmpty()) { val s0 = sb.length; sb.append("\n$sub"); sb.setSpan(RelativeSizeSpan(0.62f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(FAINT), s0, sb.length, 0) }
             text = sb; textSize = if (st.isWork) 19f else 15f
             setPadding(0, 0, dp(if (st.isWork) 0 else 6), 0)
@@ -312,10 +312,11 @@ class WorkoutActivity : Activity() {
         if (st.isWork) {
             val detail = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(2), 0, dp(6)); visibility = if (st.index in opened) View.VISIBLE else View.GONE }
             if (st.loW != null && st.hiW != null) {
-                val (vt, vc) = vsText(st.power.avg, st.loW, st.hiW)
-                text(detail, spans("Target ${st.loW.roundToInt()}–${st.hiW.roundToInt()} W  " to DIM, vt to vc), 13f, top = 6)
+                val u = if (st.hrTarget) "bpm" else "W"
+                val (vt, vc) = vsText(st.targetAvg, st.loW, st.hiW, u)
+                text(detail, spans("Target ${st.loW.roundToInt()}–${st.hiW.roundToInt()} $u  " to DIM, vt to vc), 13f, top = 6)
             }
-            tiles(detail, listOf("Time" to dur(st.seconds), "Distance" to km(st.distance), "In power target" to pct(st.inTarget)))
+            tiles(detail, listOf("Time" to dur(st.seconds), "Distance" to km(st.distance), (if (st.hrTarget) "In HR target" else "In power target") to pct(st.inTarget)))
             metric(detail, "Power", POWER, w(st.power.avg), "Min ${st.power.min?.roundToInt() ?: "–"} · Max ${st.power.max?.roundToInt() ?: "–"}")
             metric(detail, if (ride) "Speed" else "Pace", PACE, spd(st.speed.avg, ride), "Min ${spd(st.speed.min, ride, false)} · Max ${spd(st.speed.max, ride, false)}")
             metric(detail, "Heart rate", HEART, bpm(st.hr.avg), "Min ${st.hr.min?.roundToInt() ?: "–"} · Max ${st.hr.max?.roundToInt() ?: "–"}")
@@ -366,7 +367,7 @@ object WorkoutChart {
             // robust range: ignore the top / bottom 1 % so a spike doesn't flatten the line
             val sorted = present.sorted()
             var lo = sorted[(sorted.size * 0.01).toInt()]; var hi = sorted[((sorted.size - 1) * 0.995).toInt()]
-            if (k == 0) det.steps.forEach { st -> st.hiW?.let { if (it > hi) hi = it }; st.loW?.let { if (st.isWork && it < lo) lo = it } }
+            if (k == 0) det.steps.filter { !it.hrTarget }.forEach { st -> st.hiW?.let { if (it > hi) hi = it }; st.loW?.let { if (st.isWork && it < lo) lo = it } }
             if (k == 2) { if (hi < 174) hi = 174.0 }
             if (hi - lo < 1e-6) { hi += 1; lo -= 1 }
             val pad = (hi - lo) * 0.08; lo -= pad; hi += pad
@@ -375,10 +376,11 @@ object WorkoutChart {
             c.drawLine(r.left, r.bottom, r.right, r.bottom, grid)
             c.drawText(fmt(hi - pad), 0f, r.top + 9f * d, label)
             c.drawText(fmt(lo + pad), 0f, r.bottom - 1f * d, label)
-            if (k == 0) {
-                // target band per step
+            if (k == 0 || k == 2) {
+                // target band per step (power targets on the power panel, HR targets on the HR panel)
                 val band = Paint().apply { this.color = 0x553DD68C }
                 for (st in det.steps) {
+                    if (st.hrTarget != (k == 2)) continue
                     val a = st.loW ?: continue; val b = st.hiW ?: continue
                     if (st.start < 0) continue
                     val top = y(b); val bot = maxOf(y(a), top + 2f * d)
