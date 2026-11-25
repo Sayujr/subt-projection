@@ -1,3 +1,4 @@
+- Workout: each step now says how far its average landed from the target (e.g. 326 W · 8 W (2.4%) under), coloured like its bar
 - Workout: the average and the target bar are coloured by the average against the range again (green inside, yellow within 3%, red beyond); the big % keeps the time-on-target colour
 - Workout: one verdict colour per measure (number, average and bar agree; HR uses the same 85/70 rule); "On or over target" is now the total with in and over beneath it; over target shown in light green; heart rate on the work as one bar; km to two decimals on the workout screen
 - Workout: step strip packed tighter so more reps fit; work-steps average shows its % on the right like each step

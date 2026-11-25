@@ -279,11 +279,17 @@ class WorkoutActivity : Activity() {
         return if (avg >= lo - 0.5 && avg <= hi + 0.5) GOOD else if (avg < lo - tol || avg > hi + tol) BAD else WARN
     }
 
+    /** Gap from the nearest edge of the range as a % of that edge: one decimal under 10 %. */
+    private fun gapPct(gap: Double, edge: Double): String {
+        val v = gap / edge * 100
+        return if (v < 9.95) String.format(Locale.US, "%.1f%%", v) else "${v.roundToInt()}%"
+    }
+
     private fun vsText(avg: Double?, lo: Double?, hi: Double?, unit: String = "W"): Pair<String, Int> {
         if (avg == null || lo == null || hi == null) return "" to DIM
         return when {
-            avg < lo - 0.5 -> "${(lo - avg).roundToInt()} $unit under" to WARN
-            avg > hi + 0.5 -> "${(avg - hi).roundToInt()} $unit over" to WARN
+            avg < lo - 0.5 -> "${(lo - avg).roundToInt()} $unit (${gapPct(lo - avg, lo)}) under" to WARN
+            avg > hi + 0.5 -> "${(avg - hi).roundToInt()} $unit (${gapPct(avg - hi, hi)}) over" to WARN
             else -> "in range" to GOOD
         }
     }
@@ -564,7 +570,11 @@ class WorkoutActivity : Activity() {
             if (judged && inShare != null) {
                 part("\non target ${SubtModel.time(st.inSec)} (${(inShare * 100).roundToInt()}%)", DIM)
                 part("  ·  ", FAINT)
-                part(if (st.hrTarget) bpm(st.hr.avg) else w(st.power.avg), if (st.vsTarget == 0) GOOD else WARN)
+                run {
+                    val vsT = vsText(st.targetAvg, st.loW, st.hiW, if (st.hrTarget) "bpm" else "W").first
+                    val avgS = if (st.hrTarget) bpm(st.hr.avg) else w(st.power.avg)
+                    part(avgS + (if (vsT.isEmpty() || vsT == "in range") "" else " · $vsT"), avgColor(st.targetAvg, st.loW, st.hiW))
+                }
             }
             val band = st.hrB
             if (judged && band != null && !st.hrTarget) {
