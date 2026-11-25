@@ -1,3 +1,4 @@
+- Workout: the work-steps totals (big %, minutes, time on target) use the full work time; only single steps leave out their first 5 s
 - Workout: under the big % on the work-steps card, the minutes behind it (e.g. 11:18 of 20:31)
 - Workout: each step now says how far its average landed from the target (e.g. 326 W · 8 W (2.4%) under), coloured like its bar
 - Workout: the average and the target bar are coloured by the average against the range again (green inside, yellow within 3%, red beyond); the big % keeps the time-on-target colour

@@ -359,8 +359,15 @@ object WorkoutDetail {
             }
             val dist = work.sumOf { it.distance }
             val jw = work.filter { it.inT != null }
-            val uS = jw.sumOf { it.underSec }; val iS = jw.sumOf { it.inSec }; val oS = jw.sumOf { it.overSec }
-            val uM = jw.sumOf { it.underM }; val iM = jw.sumOf { it.inM }; val oM = jw.sumOf { it.overM }
+            val iS = jw.sumOf { it.inSec }; val oS = jw.sumOf { it.overSec }
+            val iM = jw.sumOf { it.inM }; val oM = jw.sumOf { it.overM }
+            var uS = jw.sumOf { it.underSec }; var uM = jw.sumOf { it.underM }
+            // Totals use the full work time: the seconds a step skips when judging (its first 5 s, gaps)
+            // were not on target, so they count as under. Single steps keep the judged-only figures.
+            if (jw.isNotEmpty() && !jw.all { it.hrTarget }) {
+                val full = jw.sumOf { it.seconds.toDouble() }; val fullM = jw.sumOf { it.distance }
+                uS = maxOf(uS, full - iS - oS); uM = maxOf(uM, fullM - iM - oM)
+            }
             val jt = uS + iS + oS
             val hnAll = work.sumOf { it.hrN }
             fun hsum(f: (Step) -> Cut?): Cut? {

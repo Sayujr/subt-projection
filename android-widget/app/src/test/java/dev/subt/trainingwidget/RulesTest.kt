@@ -535,7 +535,8 @@ class RulesTest {
         val wk = det.work!!
         assertEquals(1.0, wk.under!! + wk.inT!! + wk.over!!, 1e-9)
         assertEquals(det.steps.filter { it.isWork }.sumOf { it.inSec }, wk.inSec, 1e-9)
-        assertEquals(wk.underSec + wk.inSec + wk.overSec, 4.0 * (360 - 5), 1e-9)
+        // Totals count the full work time: the skipped first 5 s of each rep count as under
+        assertEquals(wk.underSec + wk.inSec + wk.overSec, 4.0 * 360, 1e-9)
         // heart rate on the work: bands cover the work-step samples, with no ramp skipped
         val hn = det.steps.filter { it.isWork }.sumOf { it.hrN }
         assertEquals(4.0 * 360, hn, 1e-9)

@@ -460,7 +460,7 @@ class WorkoutActivity : Activity() {
             }
             if (wk.inT != null && wk.over != null && wk.under != null) {
                 BandViews.heading(this, c, "TIME ON TARGET",
-                    "How long your power was under, inside or over the planned range. Running power wobbles, so with a narrow range you can average in range yet spend many seconds just outside it. 'On or over' is the share of the rep done at or above target: in target plus over target. On the bar, grey is under, green is in and light green is over. Reps of 90 s or more are judged on a 10 s average and skip the first 5 s; shorter reps (e.g. 45/15) are judged second by second.",
+                    "How long your power was under, inside or over the planned range. Running power wobbles, so with a narrow range you can average in range yet spend many seconds just outside it. 'On or over' is the share of the rep done at or above target: in target plus over target. On the bar, grey is under, green is in and light green is over. Reps of 90 s or more are judged on a 10 s average and skip the first 5 s; shorter reps (e.g. 45/15) are judged second by second. These totals use the full work time: the skipped seconds count as under.",
                     topDp = 14)
                 c.addView(BandViews.stripView(this, listOf(wk.underSec, wk.inSec, wk.overSec), listOf(UNDER_C, IN_C, OVER_HIT), contentW()))
                 // "On or over" is the total; "in" and "over" are its two parts, indented beneath it
