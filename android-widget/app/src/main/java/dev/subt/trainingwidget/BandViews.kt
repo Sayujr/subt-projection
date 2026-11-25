@@ -67,14 +67,14 @@ object BandViews {
     }
 
     /** One table row: label, time, share (0–100, null = hidden), distance (null = hidden). */
-    fun statRow(ctx: Context, label: String, sec: Double, pct: Double?, m: Double?, emphasised: Boolean = false, decimals: Int = 1): LinearLayout {
+    fun statRow(ctx: Context, label: String, sec: Double, pct: Double?, m: Double?, emphasised: Boolean = false, decimals: Int = 1, pctColor: Int? = null): LinearLayout {
         val d = ctx.resources.displayMetrics.density
         val line = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, (3 * d).roundToInt(), 0, (3 * d).roundToInt()) }
         val c = if (emphasised) TEXT else 0xFFD3D8E2.toInt()
         val sp = if (emphasised) 15f else 14f
         line.addView(cell(ctx, label, sp, c, 0, emphasised, Gravity.START))
         line.addView(cell(ctx, if (sec > 0) SubtModel.time(sec) else "–", sp, c, 66, emphasised, Gravity.END))
-        if (pct != null) line.addView(cell(ctx, if (sec > 0) "${pct.roundToInt()}%" else "–", sp, c, 48, emphasised, Gravity.END))
+        if (pct != null) line.addView(cell(ctx, if (sec > 0) "${pct.roundToInt()}%" else "–", sp, pctColor ?: c, 48, emphasised, Gravity.END))
         if (m != null) line.addView(cell(ctx, if (m > 0) String.format(Locale.US, "%.${decimals}f km", m / 1000) else "–", sp, c, 66, emphasised, Gravity.END))
         return line
     }
@@ -108,7 +108,7 @@ object BandViews {
         }
 
     /** Stacked bar, then rows grouped under small headings, then the overlap note. */
-    fun build(ctx: Context, sec: List<Double>, m: List<Double>, widthPx: Int): LinearLayout {
+    fun build(ctx: Context, sec: List<Double>, m: List<Double>, widthPx: Int, decimals: Int = 1): LinearLayout {
         val d = ctx.resources.displayMetrics.density
         fun dp(v: Int) = (v * d).roundToInt()
         val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -131,7 +131,7 @@ object BandViews {
             line.addView(cell(ctx, r.label, sp, c, 0, r.emphasised, Gravity.START))
             line.addView(cell(ctx, if (r.sec > 0) SubtModel.time(r.sec) else "–", sp, c, 66, r.emphasised, Gravity.END))
             line.addView(cell(ctx, if (r.sec > 0) "${r.pct.roundToInt()}%" else "–", sp, c, 48, r.emphasised, Gravity.END))
-            line.addView(cell(ctx, if (r.m > 0) String.format(Locale.US, "%.1f km", r.m / 1000) else "–", sp, c, 66, r.emphasised, Gravity.END))
+            line.addView(cell(ctx, if (r.m > 0) String.format(Locale.US, "%.${decimals}f km", r.m / 1000) else "–", sp, c, 66, r.emphasised, Gravity.END))
             box.addView(line)
         }
         return box

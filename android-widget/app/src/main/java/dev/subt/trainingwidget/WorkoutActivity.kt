@@ -51,6 +51,9 @@ class WorkoutActivity : Activity() {
         private const val UNDER_C = 0xFF6B7386.toInt()
         private const val IN_C = 0xFF3DD68C.toInt()
         private const val OVER_C = 0xFF4EA1FF.toInt()
+        /** Over target still counts as a hit: a lighter step of the in-target green. */
+        private const val OVER_HIT = 0xFFA6F0C9.toInt()
+        private const val HR_LOW = 0xFF2A9C66.toInt()
         const val POWER = 0xFFFFB02E.toInt()
         const val PACE = 0xFF4EA1FF.toInt()
         const val HEART = 0xFFFF7A90.toInt()
@@ -173,7 +176,7 @@ class WorkoutActivity : Activity() {
      * Target bar: the middle third is the target range (ticks at its ends), the fill runs to where
      * your average sat. Green inside the range, yellow outside.
      */
-    private fun targetBar(wPx: Int, position: Double?, vs: Int?, lo: Double?, hi: Double?, labels: Boolean): Bitmap {
+    private fun targetBar(wPx: Int, position: Double?, vs: Int?, lo: Double?, hi: Double?, labels: Boolean, verdict: Int? = null): Bitmap {
         val h = dp(if (labels) 34 else 16)
         val bmp = Bitmap.createBitmap(wPx.coerceAtLeast(10), h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
@@ -185,7 +188,7 @@ class WorkoutActivity : Activity() {
         val mid = if (lo != null && hi != null) (lo + hi) / 2 else null
         val avg = if (lo != null && hi != null && position != null) lo + position * (hi - lo) else null
         val far = mid != null && avg != null && lo != null && hi != null && (avg < lo - 0.03 * mid || avg > hi + 0.03 * mid)
-        val lineC = if (position == null) 0xFF3A4150.toInt() else if (vs == 0) GOOD else if (far) BAD else WARN
+        val lineC = if (position == null) 0xFF3A4150.toInt() else verdict ?: if (vs == 0) GOOD else if (far) BAD else WARN
         p.color = (lineC and 0x00FFFFFF) or 0x66000000
         c.drawRoundRect(RectF(0f, y, bmp.width.toFloat(), y + bh), bh / 2, bh / 2, p)
         // Target range between the ticks, in the full colour
@@ -280,12 +283,11 @@ class WorkoutActivity : Activity() {
 
     /** Headline colour for "on or over target": green 85 %+, yellow 70–85 %, red below. */
     private fun onColor(share: Double) = if (share >= 0.85) GOOD else if (share >= 0.70) WARN else BAD
-    /** HR colour: red when over 172 for more than 20 % of the step, green when 70 %+ sat in 155–172, else yellow. */
+    /** HR colour: same rule as power (green 85 %+ in 155–172, yellow 70–85 %, red below), and red when over 172 for more than 20 %. */
     private fun hrColor(inBand: Double?, over: Double?) = when {
         inBand == null -> DIM
         (over ?: 0.0) > 0.20 -> BAD
-        inBand >= 0.70 -> GOOD
-        else -> WARN
+        else -> onColor(inBand)
     }
 
     private fun spans(vararg parts: Pair<String, Int>): CharSequence {
@@ -406,44 +408,47 @@ class WorkoutActivity : Activity() {
             if (wk.loW != null && wk.hiW != null) {
                 val (vt, vc) = vsText(wk.targetAvg, wk.loW, wk.hiW, if (wk.hrTarget) "bpm" else "W")
                 BandViews.heading(this, c, if (wk.hrTarget) "Against HR target" else "Against target",
-                    "The big % is how much of the work was at or above the bottom of the planned range (for an HR target, which is a ceiling: at or under the top). Green 85%+, yellow 70–85%, red below. On the bar, the thin ticks mark your target range and the thick white line is your average. The bar's colour is the verdict: green when the average is inside the range, yellow just outside, red more than 3% outside. The HR figure is green when 70%+ of the work was at 155–172, red when more than 20% was over 172.", topDp = 14)
+                    "The big % is how much of the work was at or above the bottom of the planned range (for an HR target, which is a ceiling: at or under the top). Green 85%+, yellow 70–85%, red below. On the bar, the thin ticks mark your target range and the thick white line is your average. The bar's colour is the verdict: green when the average is inside the range, yellow just outside, red more than 3% outside. ", topDp = 14)
                 val avgTxt = if (wk.hrTarget) bpm(wk.targetAvg) else w(wk.targetAvg)
                 // An HR target on an easy run is a ceiling: what counts is staying in or under it
                 val ceiling = wk.hrTarget
                 val share = if (ceiling) (if (wk.inT != null && wk.under != null) wk.inT + wk.under else null) else wk.inOrOver
-                // Same layout as a step row: details on the left, the big % on the right, the bar below
-                val bandAll = wk.hrB
+                // Same layout as a step row: average on the left, the big % on the right, the bar below.
+                // One verdict colour (the 85/70 rule on the big %) for the number, the average and the bar.
+                val verdict = share?.let { onColor(it) } ?: vc
                 val cpTxt2 = if (!wk.hrTarget && ftpD != null) wk.power.avg?.let { "${(it / ftpD * 100).roundToInt()}% of CP" } ?: "" else ""
                 val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, 0) }
                 val left = TextView(this).apply {
-                    textSize = 13f
+                    textSize = 14f
                     text = spans(
-                        avgTxt + (if (vt.isEmpty()) "" else " $vt") to vc,
-                        "\nin range ${SubtModel.time(wk.inSec)} (${((wk.inT ?: 0.0) * 100).roundToInt()}%)" to DIM,
-                        (if (bandAll != null && !wk.hrTarget) "\nHR ${(bandAll.frac * 100).roundToInt()}% in 155–172" else "") to hrColor(bandAll?.frac, wk.hrOver?.frac),
+                        "$avgTxt avg" + (if (vt.isEmpty() || vt == "in range") "" else " · $vt") to verdict,
+                        (if (cpTxt2.isNotEmpty()) "\n$cpTxt2" else "") to DIM,
                     )
                 }
                 row.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 val right = TextView(this).apply {
                     gravity = Gravity.END
                     val sb = SpannableStringBuilder(share?.let { "${(it * 100).roundToInt()}%" } ?: avgTxt)
-                    sb.setSpan(ForegroundColorSpan(share?.let { onColor(it) } ?: vc), 0, sb.length, 0)
-                    val sub = (if (ceiling) "on or under target" else "on or over target") + (if (cpTxt2.isNotEmpty()) "\n$cpTxt2" else "")
+                    sb.setSpan(ForegroundColorSpan(verdict), 0, sb.length, 0)
+                    val sub = if (ceiling) "on or under target" else "on or over target"
                     val s0 = sb.length; sb.append("\n$sub"); sb.setSpan(RelativeSizeSpan(0.45f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(FAINT), s0, sb.length, 0)
                     text = sb; textSize = 26f; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 }
                 row.addView(right)
                 c.addView(row)
-                val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true)); scaleType = ImageView.ScaleType.FIT_XY }
+                val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true, verdict = verdict)); scaleType = ImageView.ScaleType.FIT_XY }
                 c.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(4) })
             }
             if (wk.inT != null && wk.over != null && wk.under != null) {
                 BandViews.heading(this, c, "TIME ON TARGET",
-                    "How long your power was under, inside or over the planned range. Running power wobbles, so with a narrow range you can average in range yet spend many seconds just outside it. 'In or over' is the share of the rep done at or above target. Reps of 90 s or more are judged on a 10 s average and skip the first 5 s; shorter reps (e.g. 45/15) are judged second by second.",
+                    "How long your power was under, inside or over the planned range. Running power wobbles, so with a narrow range you can average in range yet spend many seconds just outside it. 'On or over' is the share of the rep done at or above target: in target plus over target. On the bar, grey is under, green is in and light green is over. Reps of 90 s or more are judged on a 10 s average and skip the first 5 s; shorter reps (e.g. 45/15) are judged second by second.",
                     topDp = 14)
-                c.addView(BandViews.stripView(this, listOf(wk.underSec, wk.inSec, wk.overSec), listOf(UNDER_C, IN_C, OVER_C), contentW()))
-                c.addView(BandViews.statRow(this, "In target", wk.inSec, wk.inT * 100, wk.inM, decimals = 2))
-                c.addView(BandViews.statRow(this, "In or over target", wk.inSec + wk.overSec, (wk.inT + wk.over) * 100, wk.inM + wk.overM, emphasised = true, decimals = 2))
+                c.addView(BandViews.stripView(this, listOf(wk.underSec, wk.inSec, wk.overSec), listOf(UNDER_C, IN_C, OVER_HIT), contentW()))
+                // "On or over" is the total; "in" and "over" are its two parts, indented beneath it
+                val hit = wk.inT + wk.over
+                c.addView(BandViews.statRow(this, "On or over target", wk.inSec + wk.overSec, hit * 100, wk.inM + wk.overM, emphasised = true, decimals = 2, pctColor = onColor(hit)))
+                c.addView(BandViews.statRow(this, "     in target", wk.inSec, wk.inT * 100, wk.inM, decimals = 2))
+                c.addView(BandViews.statRow(this, "     over target", wk.overSec, wk.over * 100, wk.overM, decimals = 2))
                 c.addView(BandViews.statRow(this, "Under target", wk.underSec, wk.under * 100, wk.underM, decimals = 2))
             }
             if (easyRun) {
@@ -457,10 +462,13 @@ class WorkoutActivity : Activity() {
                     c.addView(BandViews.statRow(this, "Over 135", sec(2, 3, 4, 5, 6), sec(2, 3, 4, 5, 6) / tot * 100, mm(2, 3, 4, 5, 6), decimals = 2))
                 }
             } else if (wk.hrA != null && wk.hrB != null && wk.hrOver != null) {
-                BandViews.heading(this, c, "HEART RATE ON THE WORK", "Heart rate during work steps only. 155–172 is your SubT band; over 172 means the rep went too hard.", topDp = 14)
-                c.addView(BandViews.statRow(this, "155–165", wk.hrA.sec, wk.hrA.frac * 100, wk.hrA.m, decimals = 2))
-                c.addView(BandViews.statRow(this, "155–172", wk.hrB.sec, wk.hrB.frac * 100, wk.hrB.m, emphasised = true, decimals = 2))
-                c.addView(BandViews.statRow(this, "Over 172", wk.hrOver.sec, wk.hrOver.frac * 100, wk.hrOver.m, decimals = 2))
+                BandViews.heading(this, c, "HEART RATE ON THE WORK", "Heart rate during work steps only. 155–172 is your SubT band; over 172 means the rep went too hard. On the bar: grey under 155, dark green 155–165, green 165–172, red over 172. The 155–172 % is green at 85%+, yellow 70–85%, red below, and red whenever more than 20% was over 172.", topDp = 14)
+                // One bar: under 155 grey, 155–165 darker green, 165–172 green, over 172 red
+                val fUnder = (1.0 - wk.hrB.frac - wk.hrOver.frac).coerceAtLeast(0.0)
+                c.addView(BandViews.stripView(this, listOf(fUnder, wk.hrA.frac, (wk.hrB.frac - wk.hrA.frac).coerceAtLeast(0.0), wk.hrOver.frac),
+                    listOf(UNDER_C, HR_LOW, GOOD, BAD), contentW()))
+                c.addView(BandViews.statRow(this, "155–172", wk.hrB.sec, wk.hrB.frac * 100, wk.hrB.m, emphasised = true, decimals = 2, pctColor = hrColor(wk.hrB.frac, wk.hrOver.frac)))
+                c.addView(BandViews.statRow(this, "Over 172", wk.hrOver.sec, wk.hrOver.frac * 100, wk.hrOver.m, decimals = 2, pctColor = if (wk.hrOver.frac > 0.20) BAD else null))
             }
             CoachSheet.attach(this, c) { Coach.workout(det, z) }
         }
@@ -481,7 +489,7 @@ class WorkoutActivity : Activity() {
             if (z != null && z.bandSec.sum() > 0) {
                 val c = card()
                 label(c, "Heart rate bands")
-                c.addView(BandViews.build(this, z.bandSec, z.bandM, contentW()))
+                c.addView(BandViews.build(this, z.bandSec, z.bandM, contentW(), decimals = 2))
             }
         }
 
@@ -513,6 +521,13 @@ class WorkoutActivity : Activity() {
             }
             if (det.work == null) CoachSheet.attach(this, c) { Coach.workout(det, z) }
         } else text(card(), "intervals.icu has no steps for this activity.", 13f, DIM)
+    }
+
+    /** A judged step's headline share: on or over target (for an HR ceiling, on or under). */
+    private fun stepShare(st: WorkoutDetail.Step): Double? {
+        if (!(st.isWork || st.isTest)) return null
+        val u = st.under; val i = st.inT
+        return if (st.hrTarget) (if (i != null && u != null) i + u else null) else st.inOrOver
     }
 
     private fun stepRow(parent: LinearLayout, det: WorkoutDetail.Detail, st: WorkoutDetail.Step, no: Int) {
@@ -572,7 +587,7 @@ class WorkoutActivity : Activity() {
         box.addView(r)
         if (st.loW != null) {
             // Target range (watts or bpm) written above the ticks, visible without opening the step
-            val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), st.position, vs, st.loW, st.hiW, labels = true)); scaleType = ImageView.ScaleType.FIT_XY }
+            val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), st.position, vs, st.loW, st.hiW, labels = true, verdict = stepShare(st)?.let { onColor(it) })); scaleType = ImageView.ScaleType.FIT_XY }
             box.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(2) })
         }
         // Work and test steps open up for the full numbers; other steps only show % against target
