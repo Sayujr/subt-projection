@@ -445,7 +445,11 @@ class WorkoutActivity : Activity() {
                     gravity = Gravity.END
                     val sb = SpannableStringBuilder(share?.let { "${(it * 100).roundToInt()}%" } ?: avgTxt)
                     sb.setSpan(ForegroundColorSpan(verdict), 0, sb.length, 0)
-                    val sub = if (ceiling) "on or under target" else "on or over target"
+                    // Minutes behind the %: the hit time out of the judged work time
+                    val judgedSec = wk.underSec + wk.inSec + wk.overSec
+                    val hitSec = if (ceiling) wk.underSec + wk.inSec else wk.inSec + wk.overSec
+                    val sub = (if (ceiling) "on or under target" else "on or over target") +
+                        (if (share != null && judgedSec > 0) "\n${SubtModel.time(hitSec)} of ${SubtModel.time(judgedSec)}" else "")
                     val s0 = sb.length; sb.append("\n$sub"); sb.setSpan(RelativeSizeSpan(0.45f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(FAINT), s0, sb.length, 0)
                     text = sb; textSize = 26f; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 }
