@@ -701,8 +701,103 @@ class MainActivity : Activity() {
                 setImageBitmap(bmp); scaleType = android.widget.ImageView.ScaleType.FIT_XY
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)))
         }
+        addMixChart(card, weeks, widthPx)
         CoachSheet.attach(this, card) { Coach.week(this, start, end) }
         return card
+    }
+
+    private val MIX_COLORS = intArrayOf(BandViews.ORANGE, BandViews.RED, 0xFF5FA88A.toInt(), BandViews.GREY, BandViews.GREEN)
+    private val MIX_NAMES = listOf("SubT", "Above SubT", "Long-run LT1", "In between", "Easy")
+
+    /** "TRAINING MIX · WEEKLY": stacked minutes per week, tap a bar for that week's rows. */
+    private fun addMixChart(card: LinearLayout, weeks: List<Pair<LocalDate, Zones.Total>>, widthPx: Int) {
+        BandViews.heading(this, card, "TRAINING MIX · WEEKLY",
+            "Runs only, every second in one band. SubT: work steps of SubT workouts, unless over the target range. Above SubT: over-target seconds, tests, races and 45/15-type reps. " +
+                "Long-run LT1: long runs at HR ${Zones.MIX_LT1_LOW.toInt()}–${Prefs.lt1(this)}. Easy: easy runs, warm-ups and cool-downs under 65% CP and HR ${Zones.MIX_LT1_LOW.toInt()}. In between: the rest. " +
+                "Orange numbers are SubT minutes; the white dot is the easy share of the week (0–100%).",
+            0xFF6B7386.toInt(), 12f, topDp = 16)
+        val totals = weeks.map { w -> w.second.mixSec.sum() }
+        if ((totals.maxOrNull() ?: 0.0) <= 0.0) {
+            card.addView(TextView(this).apply { text = "No runs with data yet."; setTextColor(0xFF9AA3B2.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, dp(6), 0, 0) })
+            return
+        }
+        val h = dp(160)
+        var sel = weeks.size - 1
+        val iv = android.widget.ImageView(this).apply { scaleType = android.widget.ImageView.ScaleType.FIT_XY }
+        val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun fill() {
+            iv.setImageBitmap(mixBitmap(widthPx, h, weeks, sel))
+            details.removeAllViews()
+            val (monday, t) = weeks[sel]
+            val total = t.mixSec.sum()
+            details.addView(TextView(this).apply {
+                text = "Week of ${monday.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))} · ${if (total > 0) SubtModel.time(total) else "no runs"}"
+                setTextColor(0xFFF2F4F8.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, dp(8), 0, dp(2))
+            })
+            if (total > 0) for (k in 4 downTo 0) details.addView(
+                BandViews.statRow(this, MIX_NAMES[k], t.mixSec[k], t.mixSec[k] / total * 100, t.mixM[k], decimals = 1, pctColor = MIX_COLORS[k]))
+        }
+        iv.setOnTouchListener { v, e ->
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN || e.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                val i = (e.x / v.width.coerceAtLeast(1) * weeks.size).toInt().coerceIn(0, weeks.size - 1)
+                if (i != sel) { sel = i; fill() }
+            }
+            true
+        }
+        fill()
+        card.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h).apply { topMargin = dp(6) })
+        for (grp in listOf(listOf(0, 1, 2), listOf(3, 4))) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4), 0, 0) }
+            for (k in grp) {
+                row.addView(View(this).apply { setBackgroundColor(MIX_COLORS[k]) }, LinearLayout.LayoutParams(dp(9), dp(9)).apply { gravity = Gravity.CENTER_VERTICAL; rightMargin = dp(4) })
+                row.addView(TextView(this).apply { text = MIX_NAMES[k]; setTextColor(0xFF9AA3B2.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(12) })
+            }
+            if (grp.size == 2) {
+                row.addView(View(this).apply { background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFFFFFFFF.toInt()) } }, LinearLayout.LayoutParams(dp(7), dp(7)).apply { gravity = Gravity.CENTER_VERTICAL; rightMargin = dp(4) })
+                row.addView(TextView(this).apply { text = "Easy share"; setTextColor(0xFF9AA3B2.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f) })
+            }
+            card.addView(row)
+        }
+        card.addView(details)
+    }
+
+    private fun mixBitmap(w: Int, h: Int, weeks: List<Pair<LocalDate, Zones.Total>>, sel: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val d = resources.displayMetrics.density
+        val n = weeks.size
+        val top = 14f * d; val bottom = h - 14f * d
+        val slot = w.toFloat() / n
+        val maxSec = weeks.maxOf { it.second.mixSec.sum() }.coerceAtLeast(1.0)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8f * d; color = 0xFF6B7386.toInt(); textAlign = Paint.Align.CENTER }
+        val orange = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f * d; color = BandViews.ORANGE; textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+        val fmt = DateTimeFormatter.ofPattern("d/M", Locale.getDefault())
+        for (i in 0 until n) {
+            val t = weeks[i].second
+            val x0 = i * slot + slot * 0.15f; val x1 = (i + 1) * slot - slot * 0.15f
+            val cx = (x0 + x1) / 2
+            if (i == sel) { p.color = 0x22FFFFFF; c.drawRect(i * slot, 0f, (i + 1) * slot, h.toFloat(), p) }
+            var y = bottom
+            for (k in 0 until 5) {
+                val bh = (t.mixSec[k] / maxSec * (bottom - top)).toFloat()
+                if (bh <= 0f) continue
+                p.color = MIX_COLORS[k]
+                c.drawRect(x0, y - bh, x1, y, p)
+                y -= bh
+            }
+            val subtMin = (t.mixSec[Zones.MIX_SUBT] / 60.0).roundToInt()
+            if (subtMin > 0) c.drawText("$subtMin′", cx, y - 3f * d, orange)
+            val total = t.mixSec.sum()
+            if (total > 0) {
+                val share = t.mixSec[Zones.MIX_EASY] / total
+                val dy = bottom - (share * (bottom - top)).toFloat()
+                p.color = 0xFF161A22.toInt(); c.drawCircle(cx, dy, 3.6f * d, p)
+                p.color = 0xFFFFFFFF.toInt(); c.drawCircle(cx, dy, 2.6f * d, p)
+            }
+            c.drawText(weeks[i].first.format(fmt), cx, h - 3f * d, txt)
+        }
+        return bmp
     }
 
     /** Minutes per week as bars, the current (last) week bright, the max labelled top-left, month letters underneath. */

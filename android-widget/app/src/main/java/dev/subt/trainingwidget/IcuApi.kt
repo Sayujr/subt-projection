@@ -204,7 +204,11 @@ class IcuApi(private val creds: Credentials) {
                 pool.submit<Zones.Run?> {
                     runCatching {
                         val id = act.optString("id")
-                        val raw = if (SubtWorkouts.isSubtWorkout(act.optString("name"))) fetchWorkoutRaw(id)
+                        // steps are needed for SubT workouts, planned workouts (warm-up / cool-down, tests, 45/15) and races / tests
+                        val nm = act.optString("name")
+                        val needSteps = SubtWorkouts.isSubtWorkout(nm) || Streaks.isTtName(nm) || act.optBoolean("race") ||
+                            act.optNum("paired_event_id") != null
+                        val raw = if (needSteps) fetchWorkoutRaw(id)
                         else JSONObject().put("a", act).put("s", getArray("/activity/${URLEncoder.encode(id, "UTF-8")}/streams",
                             mapOf("types" to "time,heartrate,velocity_smooth,watts")))
                         Zones.compute(raw, lt1, fallbackFtp)

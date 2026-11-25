@@ -467,6 +467,41 @@ class RulesTest {
         assertTrue(r.subtInM > 0)
     }
 
+    @Test fun trainingMixSubtFixture() {
+        val r = Zones.compute(Fixture.workoutRaw(), 153.0, null)
+        assertEquals(5, r.mixSec.size); assertEquals(5, r.mixM.size)
+        assertTrue(r.mixSec.all { it >= 0.0 } && r.mixM.all { it >= 0.0 })
+        assertEquals(r.catSec.sum(), r.mixSec.sum(), 1e-6)
+        assertTrue(r.mixSec[Zones.MIX_SUBT] > 0.0)
+        assertTrue(r.subtOverSec > 0.0)
+        assertEquals(r.subtOverSec, r.mixSec[Zones.MIX_ABOVE], 1e-6)
+        assertEquals(r, Zones.fromJson(Zones.toJson(listOf(r))).single())
+        val t = Zones.total(listOf(r), LocalDate.now().minusDays(30), LocalDate.now())
+        assertEquals(r.mixSec, t.mixSec)
+    }
+
+    @Test fun trainingMixEasyAndInBetween() {
+        // CP 300 W: 150 W is 50 % of CP
+        fun run(name: String, hr: Double, watts: Double): Zones.Run {
+            val raw = rawOf(name, List(600) { it }, List(600) { hr }, List(600) { 3.0 }).also {
+                it.getJSONArray("s").put(org.json.JSONObject().put("type", "watts").put("data", org.json.JSONArray(List(600) { watts })))
+                it.getJSONObject("a").put("moving_time", 600)
+            }
+            return Zones.compute(raw, 153.0, 300.0)
+        }
+        val easy = run("Tuesday jog", 140.0, 150.0)
+        assertEquals(600.0, easy.mixSec[Zones.MIX_EASY], 1e-6)
+        assertEquals(1800.0, easy.mixM[Zones.MIX_EASY], 1e-6)
+        val hi = run("Tuesday jog", 150.0, 150.0)
+        assertEquals(600.0, hi.mixSec[Zones.MIX_BETWEEN], 1e-6)
+        val pw = run("Tuesday jog", 140.0, 220.0)   // 73 % of CP
+        assertEquals(600.0, pw.mixSec[Zones.MIX_BETWEEN], 1e-6)
+        val lt1 = run("Long run", 150.0, 150.0)
+        assertEquals(600.0, lt1.mixSec[Zones.MIX_LT1], 1e-6)
+        val race = run("Spring 10K race", 175.0, 280.0)
+        assertEquals(600.0, race.mixSec[Zones.MIX_ABOVE], 1e-6)
+    }
+
     @Test fun zonesJsonAndTotals() {
         val a = Zones.Run("a", "2026-11-23", "Easy", 3000, 9000.0, false, false, 0.0, 0.0, 0.0, 100.0, 300.0, 0.0, 0.0)
         val b = Zones.Run("b", "2026-11-29", "2h steady", 7200, 20000.0, false, true, 0.0, 0.0, 0.0, 50.0, 150.0, 400.0, 1200.0)

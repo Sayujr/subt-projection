@@ -28,6 +28,19 @@ object Zones {
 
     private val ZEROS = List(7) { 0.0 }
     private val ZEROS4 = List(4) { 0.0 }
+    private val ZEROS5 = List(5) { 0.0 }
+
+    /** Training-mix bands, bottom to top in the weekly chart; every second of a run lands in exactly one. */
+    const val MIX_SUBT = 0
+    const val MIX_ABOVE = 1
+    const val MIX_LT1 = 2
+    const val MIX_BETWEEN = 3
+    const val MIX_EASY = 4
+    /** Long-run LT1 band: HR from this value up to the LT1 setting. */
+    const val MIX_LT1_LOW = 145.0
+    /** Easy limits for the training mix: HR under [MIX_LT1_LOW] and power under this share of CP. */
+    const val MIX_EASY_CP = 0.65
+    private val FIFTEEN = Regex("\\b45\\s*(s|sec)?\\s*[/-]\\s*15", RegexOption.IGNORE_CASE)
 
     /** Run categories, in the order used for [Run.catSec] and the load split. */
     const val EASY = 0
@@ -92,6 +105,8 @@ object Zones {
         val subtUnderSec: Double = 0.0, val subtUnderM: Double = 0.0, val subtOverSec: Double = 0.0, val subtOverM: Double = 0.0,
         /** Every sample of the run in one of four categories ([EASY], [STEADY], [SUBT], [OTHER]): seconds and metres. */
         val catSec: List<Double> = ZEROS4, val catM: List<Double> = ZEROS4,
+        /** Training mix: seconds and metres in the five bands ([MIX_SUBT] .. [MIX_EASY]). */
+        val mixSec: List<Double> = ZEROS5, val mixM: List<Double> = ZEROS5,
     )
 
     data class Total(
@@ -101,6 +116,7 @@ object Zones {
         val longBandSec: List<Double> = ZEROS, val longBandM: List<Double> = ZEROS,
         val subtUnderSec: Double = 0.0, val subtUnderM: Double = 0.0, val subtOverSec: Double = 0.0, val subtOverM: Double = 0.0,
         val catSec: List<Double> = ZEROS4, val catM: List<Double> = ZEROS4,
+        val mixSec: List<Double> = ZEROS5, val mixM: List<Double> = ZEROS5,
     )
 
     private val LONG_NAME = Regex("long|progress|steady", RegexOption.IGNORE_CASE)
@@ -147,6 +163,7 @@ object Zones {
         }
 
         var inSec = 0.0; var inM = 0.0; var workSec = 0.0
+        val over = BooleanArray(n)
         var underSec = 0.0; var underM = 0.0; var overSec = 0.0; var overM = 0.0
         val det = if (subt && raw.optJSONObject("i") != null) WorkoutDetail.fromRaw(raw, fallbackFtp) else null
         // Categories: every sample in a SubT work step is SUBT; outside, HR decides (test steps and missing HR are OTHER)
@@ -175,13 +192,50 @@ object Zones {
                     workSec += d
                     when {
                         w < lo - 0.5 -> { underSec += d; underM += dist(i, d) }
-                        w > hi + 0.5 -> { overSec += d; overM += dist(i, d) }
+                        w > hi + 0.5 -> { overSec += d; overM += dist(i, d); if (i < n) over[i] = true }
                         else -> { inSec += d; inM += dist(i, d) }
                     }
                 }
             }
         }
-        return Run(id, date, name, seconds, a.numOrNull("distance") ?: 0.0, subt, long, inSec, inM, workSec, easySec, easyM, longSec, longM, bandSec.toList(), bandM.toList(), underSec, underM, overSec, overM, catSec.toList(), catM.toList())
+        // ---- Training mix
+        val ftp = a.numOrNull("icu_ftp")?.takeIf { it > 0 } ?: fallbackFtp
+        val detAll = det ?: if (raw.optJSONObject("i") != null) runCatching { WorkoutDetail.fromRaw(raw, fallbackFtp) }.getOrNull() else null
+        val race = a.optBoolean("race") || Streaks.isTtName(name) ||
+            (raw.optJSONObject("e")?.optString("category") ?: "").startsWith("RACE", ignoreCase = true)
+        val fifteen = FIFTEEN.containsMatchIn(name)
+        val kinds = arrayOfNulls<WorkoutDetail.Kind>(n)
+        val fast = BooleanArray(n)
+        var structured = false
+        if (detAll != null) for (st in detAll.steps) {
+            if (st.start < 0) continue
+            if (st.isWork || st.isTest) structured = true
+            val mid = st.mid
+            // 45/15-type reps: under 90 s at a power target around CP or harder
+            val hardShort = st.isWork && !st.hrTarget && WorkoutDetail.isShort(st.start, st.end) &&
+                ((ftp != null && mid != null && mid >= 0.95 * ftp) || fifteen)
+            for (i in st.start..minOf(st.end, n - 1)) { kinds[i] = st.kind; if (hardShort) fast[i] = true }
+        }
+        val easyRun = !subt && !long && !race && !structured
+        val mixSec = DoubleArray(5); val mixM = DoubleArray(5)
+        for (i in 0 until n) {
+            val d = dt(i)
+            val h = hr.getOrNull(i)
+            val w = watts.getOrNull(i)
+            val k = kinds[i]
+            val easyOk = (h != null || w != null) && (h == null || h < MIX_LT1_LOW) &&
+                (w == null || ftp == null || w < MIX_EASY_CP * ftp)
+            val band = when {
+                subt && k == WorkoutDetail.Kind.WORK -> if (over[i]) MIX_ABOVE else MIX_SUBT
+                k == WorkoutDetail.Kind.TEST || fast[i] -> MIX_ABOVE
+                race && (detAll == null || (k != WorkoutDetail.Kind.WARMUP && k != WorkoutDetail.Kind.COOLDOWN && k != WorkoutDetail.Kind.RECOVERY)) -> MIX_ABOVE
+                long && h != null && h >= MIX_LT1_LOW && h <= lt1 -> MIX_LT1
+                (easyRun || k == WorkoutDetail.Kind.WARMUP || k == WorkoutDetail.Kind.COOLDOWN) && easyOk -> MIX_EASY
+                else -> MIX_BETWEEN
+            }
+            mixSec[band] += d; mixM[band] += dist(i, d)
+        }
+        return Run(id, date, name, seconds, a.numOrNull("distance") ?: 0.0, subt, long, inSec, inM, workSec, easySec, easyM, longSec, longM, bandSec.toList(), bandM.toList(), underSec, underM, overSec, overM, catSec.toList(), catM.toList(), mixSec.toList(), mixM.toList())
     }
 
     fun toJson(list: List<Run>): String {
@@ -192,11 +246,14 @@ object Zones {
             .put("easySec", r.easySec).put("easyM", r.easyM).put("longSec", r.longSec).put("longM", r.longM)
             .put("bandSec", JSONArray(r.bandSec)).put("bandM", JSONArray(r.bandM))
             .put("subtUnderSec", r.subtUnderSec).put("subtUnderM", r.subtUnderM).put("subtOverSec", r.subtOverSec).put("subtOverM", r.subtOverM)
-            .put("catSec", JSONArray(r.catSec)).put("catM", JSONArray(r.catM)))
+            .put("catSec", JSONArray(r.catSec)).put("catM", JSONArray(r.catM))
+            .put("mixSec", JSONArray(r.mixSec)).put("mixM", JSONArray(r.mixM)))
         return arr.toString()
     }
 
     private fun arr4(a: JSONArray?): List<Double> = if (a == null) ZEROS4 else List(4) { a.optDouble(it, 0.0) }
+
+    private fun arr5(a: JSONArray?): List<Double> = if (a == null) ZEROS5 else List(5) { a.optDouble(it, 0.0) }
 
     private fun arr7(a: JSONArray?): List<Double> = if (a == null) ZEROS else List(7) { a.optDouble(it, 0.0) }
 
@@ -211,7 +268,8 @@ object Zones {
                 o.optDouble("easySec", 0.0), o.optDouble("easyM", 0.0), o.optDouble("longSec", 0.0), o.optDouble("longM", 0.0),
                 arr7(o.optJSONArray("bandSec")), arr7(o.optJSONArray("bandM")),
                 o.optDouble("subtUnderSec", 0.0), o.optDouble("subtUnderM", 0.0), o.optDouble("subtOverSec", 0.0), o.optDouble("subtOverM", 0.0),
-                arr4(o.optJSONArray("catSec")), arr4(o.optJSONArray("catM")))
+                arr4(o.optJSONArray("catSec")), arr4(o.optJSONArray("catM")),
+                arr5(o.optJSONArray("mixSec")), arr5(o.optJSONArray("mixM")))
         }
     }.getOrDefault(emptyList())
 
@@ -224,7 +282,8 @@ object Zones {
             sumBands(l) { it.bandSec }, sumBands(l) { it.bandM },
             sumBands(l.filter { it.long }) { it.bandSec }, sumBands(l.filter { it.long }) { it.bandM },
             l.sumOf { it.subtUnderSec }, l.sumOf { it.subtUnderM }, l.sumOf { it.subtOverSec }, l.sumOf { it.subtOverM },
-            List(4) { k -> l.sumOf { it.catSec[k] } }, List(4) { k -> l.sumOf { it.catM[k] } })
+            List(4) { k -> l.sumOf { it.catSec[k] } }, List(4) { k -> l.sumOf { it.catM[k] } },
+            List(5) { k -> l.sumOf { it.mixSec[k] } }, List(5) { k -> l.sumOf { it.mixM[k] } })
     }
 
     /** The last [weeks] Mon–Sun weeks, oldest first, the last one being the week of [today]. */
