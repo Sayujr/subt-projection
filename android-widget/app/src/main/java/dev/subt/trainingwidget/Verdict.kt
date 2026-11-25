@@ -12,6 +12,34 @@ object Verdict {
         HOLD("Hold", 0xFFFFC53D.toInt()),
         BACK_OFF("Back off", 0xFFFF7A7A.toInt()),
         TAPER("Taper", 0xFF5EC8FF.toInt()),
+        /** Recovery is good but today's plan is easy or long: build the volume. */
+        BUILD("Build", 0xFF3DD68C.toInt()),
+        /** Recovery is good and nothing is planned today. */
+        RECOVER("Recover", 0xFF3DD68C.toInt()),
+    }
+
+    /** What today's plan asks for. */
+    enum class Plan { QUALITY, LONG, EASY, REST }
+
+    private val QUALITY_NAME = Regex("interval|tempo|threshold|vo2|hill rep|\\b45\\s*[/-]\\s*15|race pace|fartlek", RegexOption.IGNORE_CASE)
+
+    private fun isQuality(name: String) = SubtWorkouts.isSubtWorkout(name) || Streaks.isTtName(name) || QUALITY_NAME.containsMatchIn(name)
+
+    /** Today's main session (planned, race or already done), judged by its name and length. */
+    fun planOf(s: Snapshot): Plan {
+        val today = s.workouts.filter { it.date.isEmpty() || it.date == s.today }
+        if (today.isEmpty()) return Plan.REST
+        return when {
+            today.any { it.status == WorkoutStatus.RACE || isQuality(it.name) } -> Plan.QUALITY
+            today.any { it.type.contains("Run", ignoreCase = true) && Zones.isLong(it.name, s.today, it.seconds) } -> Plan.LONG
+            else -> Plan.EASY
+        }
+    }
+
+    /** Yesterday had a SubT, test, race or other quality session done. */
+    private fun hardYesterday(s: Snapshot): Boolean {
+        val y = runCatching { LocalDate.parse(s.today).minusDays(1).toString() }.getOrNull() ?: return false
+        return s.week.any { it.date == y && it.status == WorkoutStatus.DONE && isQuality(it.name) }
     }
 
     data class Result(val call: Call, val reasons: List<Pair<Int, String>>, val headline: String)
@@ -72,16 +100,27 @@ object Verdict {
         val race = s.races.firstOrNull { it.date >= today.toString() }
         val taperDays = when (race?.category) { "RACE_A" -> 14L; "RACE_B" -> 10L; "RACE_C" -> 5L; else -> 0L }
         val daysTo = race?.let { ChronoUnit.DAYS.between(today, LocalDate.parse(it.date)) } ?: Long.MAX_VALUE
+        // The call reads recovery; the wording follows what today's plan asks for
+        val plan = planOf(s)
         val call = when {
             daysTo <= taperDays -> Call.TAPER
             score <= -3 -> Call.BACK_OFF
             score <= -1 -> Call.HOLD
-            else -> Call.PUSH
+            plan == Plan.QUALITY -> Call.PUSH
+            plan == Plan.REST -> Call.RECOVER
+            else -> Call.BUILD
         }
+        if (call == Call.BUILD && plan == Plan.EASY && hardYesterday(s)) reasons.add(0, GOOD to "Yesterday's hard session absorbed")
         val headline = when (call) {
             Call.PUSH -> "Good day for quality work"
-            Call.HOLD -> "Train, but keep intensity controlled"
-            Call.BACK_OFF -> "Easy or rest today"
+            Call.BUILD -> if (plan == Plan.LONG) "Recovering well: good day for the long run" else "Recovering well: easy day, build the volume"
+            Call.RECOVER -> "Recovery going well"
+            Call.HOLD -> when (plan) {
+                Plan.QUALITY -> "Do the session, but stay at the bottom of the range and cap HR at 172"
+                Plan.REST -> "Rest well today"
+                else -> "Easy day fits: keep it truly easy"
+            }
+            Call.BACK_OFF -> if (plan == Plan.QUALITY) "Swap today's session for easy or rest" else "Keep it short and easy, or rest"
             Call.TAPER -> "Taper: ${race?.name?.take(22)} in $daysTo d. Keep it short and sharp"
         }
         return Result(call, reasons, headline)
