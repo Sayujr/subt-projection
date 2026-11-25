@@ -73,7 +73,7 @@ object Coach {
         val facts = Verdict.explain(s, rhrToday, hrvToday, Prefs.loadIndex(ctx)?.first)
         val d = s.days.last()
         val lines = mutableListOf<Line>()
-        val callLevel = when (v.call) { Verdict.Call.PUSH, Verdict.Call.BUILD, Verdict.Call.RECOVER -> Level.GOOD; Verdict.Call.HOLD -> Level.WATCH; Verdict.Call.BACK_OFF -> Level.ACT; Verdict.Call.TAPER -> Level.INFO }
+        val callLevel = when (v.call) { Verdict.Call.PUSH -> Level.GOOD; Verdict.Call.HOLD -> Level.WATCH; Verdict.Call.BACK_OFF -> Level.ACT; Verdict.Call.TAPER -> Level.INFO }
         lines += Line(callLevel, if (v.call == Verdict.Call.TAPER) v.headline else "Today's call is ${v.call.label}: ${v.headline}")
         val z = FormZone.of(d.form)
         lines += Line(formLevel(z), "Form ${signed(d.form)} (${z.label}): Fitness ${d.ctl.roundToInt()}, Fatigue ${d.atl.roundToInt()}")

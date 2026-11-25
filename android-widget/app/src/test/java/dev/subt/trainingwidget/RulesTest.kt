@@ -314,26 +314,11 @@ class RulesTest {
     }
 
     // ---- Verdict
-    private fun snapWith(rhrToday: Double, formToday: Double, today: List<Workout> = listOf(Workout("3x10' SubT", "Run", 4200, 65, 0.0, WorkoutStatus.PLANNED)), week: List<Workout> = emptyList()): Snapshot {
+    private fun snapWith(rhrToday: Double, formToday: Double): Snapshot {
         val t = LocalDate.now()
         val days = (40 downTo 1).map { Day(t.minusDays(it.toLong()).toString(), 55.0, 57.0, rhr = 50.0 + (it % 3) * 0.5) } +
             Day(t.toString(), 55.0, 55.0 - formToday, rhr = rhrToday)
-        return Snapshot(System.currentTimeMillis(), t.toString(), days, today, week = week)
-    }
-
-    @Test fun verdictFollowsPlan() {
-        val t = LocalDate.now()
-        val easy = listOf(Workout("60m Easy", "Run", 3600, 40, 0.0, WorkoutStatus.PLANNED, date = t.toString()))
-        val yHard = listOf(Workout("6'x4 repeats SubT", "Run", 3400, 66, 0.0, WorkoutStatus.DONE, date = t.minusDays(1).toString()))
-        val v = Verdict.compute(snapWith(50.5, -2.0, easy, yHard))!!
-        assertEquals(Verdict.Call.BUILD, v.call)
-        assertTrue(v.headline, v.headline.contains("build the volume"))
-        assertTrue(v.reasons.first().second.contains("absorbed"))
-        val long = listOf(Workout("Long run 26 km", "Run", 7800, 120, 0.0, WorkoutStatus.PLANNED, date = t.toString()))
-        assertTrue(Verdict.compute(snapWith(50.5, -2.0, long))!!.headline.contains("long run"))
-        assertEquals(Verdict.Call.RECOVER, Verdict.compute(snapWith(50.5, -2.0, emptyList()))!!.call)
-        // Hold on an easy day says keep it easy, not "keep intensity controlled"
-        assertTrue(Verdict.compute(snapWith(58.0, -2.0, easy))!!.headline.contains("truly easy"))
+        return Snapshot(System.currentTimeMillis(), t.toString(), days, emptyList())
     }
 
     @Test fun verdictCalls() {
