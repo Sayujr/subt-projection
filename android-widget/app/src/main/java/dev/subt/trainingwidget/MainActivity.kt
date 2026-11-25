@@ -350,7 +350,8 @@ class MainActivity : Activity() {
         if (key in zonesLoading || key in zonesLoaded) return
         if (System.currentTimeMillis() - failedAt.getOrDefault(key, 0L) < 5 * 60_000L) return
         zonesLoading += key
-        val have = Prefs.zones(this).map { it.id }.toSet()
+        // Runs cached before the training-mix update have no mix yet: fetch those again quietly, keep showing the rest
+        val have = Prefs.zones(this).filter { it.mixSec.sum() > 0 }.map { it.id }.toSet()
         val lt1 = Prefs.lt1(this).toDouble()
         val ftp = Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp
         Thread {
@@ -718,7 +719,7 @@ class MainActivity : Activity() {
             0xFF6B7386.toInt(), 12f, topDp = 16)
         val totals = weeks.map { w -> w.second.mixSec.sum() }
         if ((totals.maxOrNull() ?: 0.0) <= 0.0) {
-            card.addView(TextView(this).apply { text = "No runs with data yet."; setTextColor(0xFF9AA3B2.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, dp(6), 0, 0) })
+            card.addView(TextView(this).apply { text = if (zonesLoading.isNotEmpty()) "Working out your weekly mix in the background…" else "No runs with data yet."; setTextColor(0xFF9AA3B2.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, dp(6), 0, 0) })
             return
         }
         val h = dp(160)

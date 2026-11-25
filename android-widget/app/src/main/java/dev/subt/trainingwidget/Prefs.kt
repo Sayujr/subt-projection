@@ -207,7 +207,8 @@ object Prefs {
 
     // ---- time in target
 
-    fun zones(ctx: Context): List<Zones.Run> = sp(ctx).getString("zones_v7", null)?.let { Zones.fromJson(it) }.orEmpty()
+    /** Cached runs; before the training-mix update the v6 cache is used as-is (no mix yet) so nothing waits on a re-fetch. */
+    fun zones(ctx: Context): List<Zones.Run> = (sp(ctx).getString("zones_v7", null) ?: sp(ctx).getString("zones_v6", null))?.let { Zones.fromJson(it) }.orEmpty()
     fun saveZones(ctx: Context, list: List<Zones.Run>) = sp(ctx).edit().putString("zones_v7", Zones.toJson(list)).apply()
     fun lt1(ctx: Context): Int = sp(ctx).getInt("lt1_hr", 153)
     fun setLt1(ctx: Context, v: Int) = sp(ctx).edit().putInt("lt1_hr", v).apply()

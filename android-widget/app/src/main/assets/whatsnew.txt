@@ -1,3 +1,4 @@
+- Week: the training-mix update no longer blanks the Week screen; existing numbers show at once while the mix fills in the background
 - Week: Training mix chart — weekly minutes of SubT, above SubT, long-run LT1 (HR 145–153), easy (under 65% CP and HR 145) and in between; tap a week for the numbers
 - Workout: the work-steps totals (big %, minutes, time on target) use the full work time; only single steps leave out their first 5 s
 - Workout: under the big % on the work-steps card, the minutes behind it (e.g. 11:18 of 20:31)
