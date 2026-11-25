@@ -226,7 +226,7 @@ class WorkoutActivity : Activity() {
      * every other step is a small dot coloured by whether it was in its range.
      */
     private fun stepStrip(det: WorkoutDetail.Detail): Bitmap {
-        val colW = 46f * d; val dotW = 14f * d
+        val colW = 34f * d; val dotW = 8f * d
         val hPx = dp(92)
         val total = det.steps.sumOf { (if (it.isWork || it.isTest) colW else dotW).toDouble() }.toFloat()
         val bmp = Bitmap.createBitmap(maxOf(total.toInt() + dp(4), 10), hPx, Bitmap.Config.ARGB_8888)
@@ -262,7 +262,7 @@ class WorkoutActivity : Activity() {
                 x += colW
             } else {
                 p.color = rangeColor(st)
-                c.drawCircle(x + dotW / 2, top + gh / 2, 3.5f * d, p)
+                c.drawCircle(x + dotW / 2, top + gh / 2, 3f * d, p)
                 x += dotW
             }
         }
@@ -411,30 +411,31 @@ class WorkoutActivity : Activity() {
                 // An HR target on an easy run is a ceiling: what counts is staying in or under it
                 val ceiling = wk.hrTarget
                 val share = if (ceiling) (if (wk.inT != null && wk.under != null) wk.inT + wk.under else null) else wk.inOrOver
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM; setPadding(0, dp(6), 0, 0) }
-                val leftW = dp(92)
-                val head = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                head.addView(TextView(this).apply { text = if (ceiling) "On or under\ntarget" else "On or over\ntarget"; textSize = 11.5f; setTextColor(DIM) })
-                head.addView(TextView(this).apply {
-                    text = share?.let { "${(it * 100).roundToInt()}%" } ?: avgTxt
-                    textSize = 26f; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                    setTextColor(share?.let { onColor(it) } ?: vc)
-                })
-                row.addView(head, LinearLayout.LayoutParams(leftW, ViewGroup.LayoutParams.WRAP_CONTENT))
-                val barW = contentW() - leftW
-                val iv = ImageView(this).apply { setImageBitmap(targetBar(barW, wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true)); scaleType = ImageView.ScaleType.FIT_XY }
-                row.addView(iv, LinearLayout.LayoutParams(0, dp(34), 1f).apply { bottomMargin = dp(4) })
-                c.addView(row)
-                // Just below the bar: average and verdict, time in the range, HR in band, % of CP
+                // Same layout as a step row: details on the left, the big % on the right, the bar below
                 val bandAll = wk.hrB
                 val cpTxt2 = if (!wk.hrTarget && ftpD != null) wk.power.avg?.let { "${(it / ftpD * 100).roundToInt()}% of CP" } ?: "" else ""
-                text(c, spans(
-                    avgTxt + (if (vt.isEmpty()) "" else " $vt") to vc, "  ·  " to FAINT,
-                    "in range ${SubtModel.time(wk.inSec)} (${((wk.inT ?: 0.0) * 100).roundToInt()}%)" to DIM,
-                    (if (bandAll != null && !wk.hrTarget) "  ·  " else "") to FAINT,
-                    (if (bandAll != null && !wk.hrTarget) "HR ${(bandAll.frac * 100).roundToInt()}% in 155–172" else "") to hrColor(bandAll?.frac, wk.hrOver?.frac),
-                    (if (cpTxt2.isNotEmpty()) "  ·  $cpTxt2" else "") to FAINT,
-                ), 13f, top = 4)
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, 0) }
+                val left = TextView(this).apply {
+                    textSize = 13f
+                    text = spans(
+                        avgTxt + (if (vt.isEmpty()) "" else " $vt") to vc,
+                        "\nin range ${SubtModel.time(wk.inSec)} (${((wk.inT ?: 0.0) * 100).roundToInt()}%)" to DIM,
+                        (if (bandAll != null && !wk.hrTarget) "\nHR ${(bandAll.frac * 100).roundToInt()}% in 155–172" else "") to hrColor(bandAll?.frac, wk.hrOver?.frac),
+                    )
+                }
+                row.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                val right = TextView(this).apply {
+                    gravity = Gravity.END
+                    val sb = SpannableStringBuilder(share?.let { "${(it * 100).roundToInt()}%" } ?: avgTxt)
+                    sb.setSpan(ForegroundColorSpan(share?.let { onColor(it) } ?: vc), 0, sb.length, 0)
+                    val sub = (if (ceiling) "on or under target" else "on or over target") + (if (cpTxt2.isNotEmpty()) "\n$cpTxt2" else "")
+                    val s0 = sb.length; sb.append("\n$sub"); sb.setSpan(RelativeSizeSpan(0.45f), s0, sb.length, 0); sb.setSpan(ForegroundColorSpan(FAINT), s0, sb.length, 0)
+                    text = sb; textSize = 26f; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                }
+                row.addView(right)
+                c.addView(row)
+                val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true)); scaleType = ImageView.ScaleType.FIT_XY }
+                c.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(4) })
             }
             if (wk.inT != null && wk.over != null && wk.under != null) {
                 BandViews.heading(this, c, "TIME ON TARGET",
