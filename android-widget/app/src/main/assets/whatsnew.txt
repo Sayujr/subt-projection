@@ -1,3 +1,4 @@
+- Workout: the average and the target bar are coloured by the average against the range again (green inside, yellow within 3%, red beyond); the big % keeps the time-on-target colour
 - Workout: one verdict colour per measure (number, average and bar agree; HR uses the same 85/70 rule); "On or over target" is now the total with in and over beneath it; over target shown in light green; heart rate on the work as one bar; km to two decimals on the workout screen
 - Workout: step strip packed tighter so more reps fit; work-steps average shows its % on the right like each step
 - Coach's recap on each workout with targets: the app's draft straight away, the full recap after the evening coach run; ask questions with the arrow button and get answers in the same place (kept as one note per day in intervals.icu)

@@ -272,6 +272,13 @@ class WorkoutActivity : Activity() {
         return bmp
     }
 
+    /** Average against the range: green inside, yellow within 3 % of the range's middle, red further out (same as the bar). */
+    private fun avgColor(avg: Double?, lo: Double?, hi: Double?): Int {
+        if (avg == null || lo == null || hi == null) return DIM
+        val tol = 0.03 * (lo + hi) / 2
+        return if (avg >= lo - 0.5 && avg <= hi + 0.5) GOOD else if (avg < lo - tol || avg > hi + tol) BAD else WARN
+    }
+
     private fun vsText(avg: Double?, lo: Double?, hi: Double?, unit: String = "W"): Pair<String, Int> {
         if (avg == null || lo == null || hi == null) return "" to DIM
         return when {
@@ -408,20 +415,22 @@ class WorkoutActivity : Activity() {
             if (wk.loW != null && wk.hiW != null) {
                 val (vt, vc) = vsText(wk.targetAvg, wk.loW, wk.hiW, if (wk.hrTarget) "bpm" else "W")
                 BandViews.heading(this, c, if (wk.hrTarget) "Against HR target" else "Against target",
-                    "The big % is how much of the work was at or above the bottom of the planned range (for an HR target, which is a ceiling: at or under the top). Green 85%+, yellow 70–85%, red below. On the bar, the thin ticks mark your target range and the thick white line is your average. The bar's colour is the verdict: green when the average is inside the range, yellow just outside, red more than 3% outside. ", topDp = 14)
+                    "The big % is how much of the work was at or above the bottom of the planned range (for an HR target, which is a ceiling: at or under the top). Green 85%+, yellow 70–85%, red below. On the bar, the thin ticks mark your target range and the thick white line is your average. The average and the bar are coloured by where the average sits: green inside the range, yellow just outside (within 3%), red further out. ", topDp = 14)
                 val avgTxt = if (wk.hrTarget) bpm(wk.targetAvg) else w(wk.targetAvg)
                 // An HR target on an easy run is a ceiling: what counts is staying in or under it
                 val ceiling = wk.hrTarget
                 val share = if (ceiling) (if (wk.inT != null && wk.under != null) wk.inT + wk.under else null) else wk.inOrOver
                 // Same layout as a step row: average on the left, the big % on the right, the bar below.
-                // One verdict colour (the 85/70 rule on the big %) for the number, the average and the bar.
+                // The big % takes the 85/70 colour; the average and the bar take the average-vs-range colour.
                 val verdict = share?.let { onColor(it) } ?: vc
+                // The average (text and bar) is judged on where it sits against the range, not on time in target
+                val avgC = avgColor(wk.targetAvg, wk.loW, wk.hiW)
                 val cpTxt2 = if (!wk.hrTarget && ftpD != null) wk.power.avg?.let { "${(it / ftpD * 100).roundToInt()}% of CP" } ?: "" else ""
                 val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, 0) }
                 val left = TextView(this).apply {
                     textSize = 14f
                     text = spans(
-                        "$avgTxt avg" + (if (vt.isEmpty() || vt == "in range") "" else " · $vt") to verdict,
+                        "$avgTxt avg" + (if (vt.isEmpty() || vt == "in range") "" else " · $vt") to avgC,
                         (if (cpTxt2.isNotEmpty()) "\n$cpTxt2" else "") to DIM,
                     )
                 }
@@ -436,7 +445,7 @@ class WorkoutActivity : Activity() {
                 }
                 row.addView(right)
                 c.addView(row)
-                val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true, verdict = verdict)); scaleType = ImageView.ScaleType.FIT_XY }
+                val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), wk.position, if (vt == "in range") 0 else 1, wk.loW, wk.hiW, labels = true)); scaleType = ImageView.ScaleType.FIT_XY }
                 c.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(4) })
             }
             if (wk.inT != null && wk.over != null && wk.under != null) {
@@ -587,7 +596,7 @@ class WorkoutActivity : Activity() {
         box.addView(r)
         if (st.loW != null) {
             // Target range (watts or bpm) written above the ticks, visible without opening the step
-            val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), st.position, vs, st.loW, st.hiW, labels = true, verdict = stepShare(st)?.let { onColor(it) })); scaleType = ImageView.ScaleType.FIT_XY }
+            val iv = ImageView(this).apply { setImageBitmap(targetBar(contentW(), st.position, vs, st.loW, st.hiW, labels = true)); scaleType = ImageView.ScaleType.FIT_XY }
             box.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(2) })
         }
         // Work and test steps open up for the full numbers; other steps only show % against target
