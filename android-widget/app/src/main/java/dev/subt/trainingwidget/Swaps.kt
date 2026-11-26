@@ -36,7 +36,7 @@ object Swaps {
         data class AddEasy(override val date: LocalDate, val minutes: Int, val startMin: Int = DEFAULT_EASY_START, val name: String = "Easy run") : Change()
         data class AddDouble(override val date: LocalDate, val minutes: Int, val startMin: Int, val forName: String) : Change()
         data class AddCopy(override val date: LocalDate, val minutes: Int, val name: String, val startMin: Int) : Change()
-        data class LeaveInPlace(val eventId: Long?, val name: String, override val date: LocalDate, val note: String = "skip this one") : Change()
+        data class LeaveInPlace(val eventId: Long?, val name: String, override val date: LocalDate, val note: String = "not deleted: it stays in intervals.icu and shows as not done") : Change()
     }
 
     enum class Tag { PLAN, MOVED, ADDED, DOUBLE, SKIP, MISSED }
@@ -273,7 +273,7 @@ object Swaps {
         is Change.AddEasy -> "Add an easy run (${ch.minutes}′) on ${dayLabel(ch.date)}"
         is Change.AddDouble -> "Add a ${ch.minutes}′ double on ${dayLabel(ch.date)} at ${hhmm(ch.startMin)}"
         is Change.AddCopy -> "Add a copy of ${ch.name} on ${dayLabel(ch.date)}"
-        is Change.LeaveInPlace -> "Leave ${ch.name} on ${dayLabel(ch.date)} (${ch.note})"
+        is Change.LeaveInPlace -> "${ch.name} stays on ${dayLabel(ch.date)} (${ch.note})"
     }
 
     private fun rowsFor(c: Ctx, changes: List<Change>): List<Row> {
@@ -390,7 +390,7 @@ object Swaps {
             Change.LeaveInPlace(c.missed.eventId, c.missed.name, c.d0),
             Change.AddDouble(fri, c.dbl, startFor(c, fri), c.missed.name),
         )
-        out += option(c, "thursday", "Skip it, add a double on Friday", ch)
+        out += option(c, "thursday", "Let it go, add a double on Friday", ch)
     }
 
     private fun easyOptions(c: Ctx, out: MutableList<Option>) {

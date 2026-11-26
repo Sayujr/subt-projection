@@ -262,7 +262,7 @@ class SwapActivity : Activity() {
             c.setOnClickListener { selected = i; render() }
         }
         if (opts.isNotEmpty()) {
-            text(col, "Green boxes are added doubles (with the time of the better window). White outline = moved, green outline = added. Nothing changes in intervals.icu until you tap Apply and confirm.", 12f, FAINT).setPadding(dp(4), 0, 0, dp(6))
+            text(col, "Green boxes are added doubles (with the time of the better window). White outline = moved, green outline = added. Nothing changes in intervals.icu until you tap Apply and confirm. Workouts are never deleted: they are moved, or a missed one stays and shows as not done.", 12f, FAINT).setPadding(dp(4), 0, 0, dp(6))
         }
         val c = card()
         status?.let { text(c, it, 13.5f, if (it.startsWith("Couldn't")) WARN else GOOD) }
@@ -272,7 +272,7 @@ class SwapActivity : Activity() {
         val dismissLabel = when (trigger) {
             Swaps.Trigger.AT_RISK, Swaps.Trigger.TIGHT -> "I'll still run it"
             Swaps.Trigger.MANUAL -> "Close"
-            else -> "Not now · I'll skip it"
+            else -> "Not now"
         }
         button(c, dismissLabel) {
             if (trigger != Swaps.Trigger.MANUAL) m.workout.eventId?.let { SwapFlow.mark(this, it, "dismissed") }
