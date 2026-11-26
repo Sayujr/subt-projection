@@ -1440,7 +1440,7 @@ class RulesTest {
         assertEquals(0, RwStore.callsThisMonth(ctx))
         RwStore.addCall(ctx); RwStore.addCall(ctx)
         assertEquals(2, RwStore.callsThisMonth(ctx))
-        assertTrue(WeatherApi.rainbowForecastUrl(40.015, -105.27).startsWith("https://api.rainbow.ai/weather/v1/forecast/-105.2700/40.0150?forecast_days=7&forecast_hours=168"))
+        assertTrue(WeatherApi.rainbowForecastUrl(40.015, -105.27).startsWith("https://api.rainbow.ai/weather/v1/forecast/-105.2700/40.0150?forecast_days=7&forecast_hours=96"))
         assertTrue(WeatherApi.rainbowNowcastUrl(40.015, -105.27).endsWith("/nowcast/v1/precip/-105.2700/40.0150"))
     }
 

@@ -147,7 +147,8 @@ object WeatherApi {
     private fun msg(e: Exception): String = (e.message ?: e.javaClass.simpleName).take(80)
 
     /** The Rainbow forecast URL (the key goes in a header, never in the URL). */
-    fun rainbowForecastUrl(lat: Double, lon: Double, days: Int = 7, hours: Int = 168) =
+    /** Rainbow allows at most about 100 forecast hours (120+ is refused with HTTP 400), so ask for 96: four days hourly. */
+    fun rainbowForecastUrl(lat: Double, lon: Double, days: Int = 7, hours: Int = 96) =
         "https://$RAINBOW_HOST/weather/v1/forecast/${f4(lon)}/${f4(lat)}?forecast_days=$days&forecast_hours=$hours"
 
     fun rainbowNowcastUrl(lat: Double, lon: Double) = "https://$RAINBOW_HOST/nowcast/v1/precip/${f4(lon)}/${f4(lat)}"

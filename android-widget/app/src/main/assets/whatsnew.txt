@@ -1,3 +1,4 @@
+- Run windows: Rainbow hourly forecast fixed (it allows 4 days of hours; asking for 7 was refused)
 - Run windows: search any address, neighbourhood or ZIP / PIN code for your location (e.g. "downtown Denver"), and pick from the matches
 - Run windows: the Rainbow key is cleaned of spaces and invisible characters picked up when copying
 - Run windows: the location box now accepts coordinates as Google Maps shows them (39.9532° N, 75.1972° W), with N/S/E/W or degrees-minutes-seconds
