@@ -171,6 +171,14 @@ object SwapFlow {
         val api = IcuApi(creds)
         val moved = ArrayList<Mv>()
         val created = ArrayList<Long>()
+        // intervals.icu only counts load for planned runs written as workout steps ("- 35m 61-65%"),
+        // so added runs copy the power range of this week's own easy run (default 61-65 % of CP)
+        val easyPct = run {
+            val ref = RunWindows.weekRuns(ctx).firstOrNull { it.eventId != null && it.status != WorkoutStatus.DONE && Weather.typeOf(it) == Weather.RunType.EASY }
+            val desc = ref?.eventId?.let { api.eventDescription(it) }
+            desc?.let { Regex("""(\d{2,3})\s*-\s*(\d{2,3})\s*%""").find(it) }?.let { "${it.groupValues[1]}-${it.groupValues[2]}%" } ?: "61-65%"
+        }
+        fun easyDoc(minutes: Int, note: String) = "- ${minutes}m $easyPct\n\n$note"
         try {
             for (ch in opt.changes) {
                 when (ch) {
@@ -179,11 +187,11 @@ object SwapFlow {
                         moved += Mv(ch.eventId, ch.from.toString(), ch.startLocal, ch.to.toString())
                     }
                     is Swaps.Change.AddEasy -> created += api.createRunEvent(ch.date.toString(), ch.startMin, ch.name, ch.minutes,
-                        "Added by Training Today (easy run to keep the week balanced, for $missedName)")
+                        easyDoc(ch.minutes, "Added by Training Today (easy run to keep the week balanced, for $missedName)"))
                     is Swaps.Change.AddDouble -> created += api.createRunEvent(ch.date.toString(), ch.startMin, "Easy run (double)", ch.minutes,
-                        "Added by Training Today (double for ${ch.forName})")
+                        easyDoc(ch.minutes, "Added by Training Today (double for ${ch.forName})"))
                     is Swaps.Change.AddCopy -> created += api.createRunEvent(ch.date.toString(), ch.startMin, ch.name, ch.minutes,
-                        "Added by Training Today (copy of missed ${ch.name})")
+                        (missedEventId?.let { api.eventDescription(it) }?.let { "$it\n\n" } ?: "") + "Added by Training Today (copy of missed ${ch.name})")
                     is Swaps.Change.LeaveInPlace -> Unit
                 }
             }

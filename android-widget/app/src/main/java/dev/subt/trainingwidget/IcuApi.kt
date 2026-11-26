@@ -524,6 +524,12 @@ class IcuApi(private val creds: Credentials) {
         return JSONObject(sendJson("POST", "/athlete/$ath/events", body)).getLong("id")
     }
 
+    /** A planned event's description (its workout text), or null. */
+    fun eventDescription(eventId: Long): String? = runCatching {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        getObject("/athlete/$ath/events/$eventId").optString("description").takeIf { it.isNotBlank() }
+    }.getOrNull()
+
     /** Deletes an event. Only used by Undo, and only for events the missed-session feature itself created. */
     fun deleteEvent(eventId: Long) {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
