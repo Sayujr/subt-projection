@@ -1,4 +1,4 @@
-- Run windows: if your window passes and today's run isn't done yet, you get the next best window today; once the run syncs as done the card shows ✓ and moves on to tomorrow
+- Run windows: once your window starts and today's run isn't done, you get the next best window today straight away; once the run syncs as done the card shows ✓ and moves on to tomorrow
 - Run windows: "window shifted" alerts only point to windows still ahead today (never to a time already gone), and stop once your window has started
 - Today: cards can be reordered in Settings → Home screen. New default: Today's call, Today (workouts and chart), Today's power targets, then Best run window
 - Run windows: if the Rainbow monthly allowance runs out, the app pauses Rainbow and retries once a day until it resets; the other forecasts carry on

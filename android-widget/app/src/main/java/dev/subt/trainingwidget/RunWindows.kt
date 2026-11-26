@@ -146,13 +146,12 @@ object RunWindows {
             if (new.start < nowSec) continue
             val key = "rw_sig_${p.date}"
             val old = Weather.Sig.decode(RwStore.getStr(ctx, key))
-            // The old window is under way (maybe you're running it): wait until it has ended + 15 min
-            if (old != null && old.start <= nowSec && nowSec < old.end + 900) continue
             RwStore.putStr(ctx, key, new.encode())
             if (!notify) continue
-            if (old != null && old.end + 900 <= nowSec && old.start != new.start) {
+            // The old window has started or passed and the run isn't done: point to the next best one straight away
+            if (old != null && old.start <= nowSec && old.start != new.start) {
                 if (!NotifySettings.isOn(ctx, NotifySettings.cat("rw_shift"))) continue
-                Notifier.windowShifted(ctx, "Missed your window (${Weather.hhmm(old.start, zone)}–${Weather.hhmm(old.end, zone)})? Next best today: ${Weather.hhmm(new.start, zone)}–${Weather.hhmm(new.end, zone)}" +
+                Notifier.windowShifted(ctx, (if (nowSec < old.end) "Your window started at ${Weather.hhmm(old.start, zone)}. Not out yet? " else "Missed your window (${Weather.hhmm(old.start, zone)}–${Weather.hhmm(old.end, zone)})? ") + "Next best today: ${Weather.hhmm(new.start, zone)}–${Weather.hhmm(new.end, zone)}" +
                     (if (p.run.planned) " for ${p.run.name}" else ""), p.date, title = "Next best run window")
                 continue
             }
