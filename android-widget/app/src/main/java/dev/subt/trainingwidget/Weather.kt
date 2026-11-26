@@ -82,7 +82,10 @@ object Weather {
      */
     fun parseCoords(raw: String): Pair<Double, Double>? {
         val s = raw.trim().replace('′', '\'').replace('″', '"').replace("''", "\"")
-        val part = Regex("""([NSEWnsew])?\s*(-?\d+(?:\.\d+)?)\s*°?\s*(?:(\d+(?:\.\d+)?)\s*'\s*)?(?:(\d+(?:\.\d+)?)\s*"\s*)?([NSEWnsew])?""")
+        // Hemisphere letter either before each number ("N 39.95 W 75.20") or after it ("39.95° N")
+        val prefix = s.firstOrNull()?.let { it in "NSEWnsew" } == true
+        val part = if (prefix) Regex("""([NSEWnsew])\s*(-?\d+(?:\.\d+)?)\s*°?\s*(?:(\d+(?:\.\d+)?)\s*'\s*)?(?:(\d+(?:\.\d+)?)\s*"\s*)?()""")
+            else Regex("""()(-?\d+(?:\.\d+)?)\s*°?\s*(?:(\d+(?:\.\d+)?)\s*'\s*)?(?:(\d+(?:\.\d+)?)\s*"\s*)?([NSEWnsew])?""")
         val found = part.findAll(s).filter { it.groupValues[2].isNotEmpty() }.toList()
         if (found.size != 2) return null
         // Anything left besides separators means it isn't just coordinates (e.g. a place name with numbers)
