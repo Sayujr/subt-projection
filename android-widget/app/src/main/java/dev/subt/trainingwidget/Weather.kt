@@ -82,7 +82,7 @@ object Weather {
      */
     fun parseCoords(raw: String): Pair<Double, Double>? {
         val s = raw.trim().replace('′', '\'').replace('″', '"').replace("''", "\"")
-        val part = Regex("""([NSEWnsew])?\s*(-?\d+(?:\\.\d+)?)\s*°?\s*(?:(\d+(?:\\.\d+)?)\s*'\s*)?(?:(\d+(?:\\.\d+)?)\s*"\s*)?([NSEWnsew])?""")
+        val part = Regex("""([NSEWnsew])?\s*(-?\d+(?:\.\d+)?)\s*°?\s*(?:(\d+(?:\.\d+)?)\s*'\s*)?(?:(\d+(?:\.\d+)?)\s*"\s*)?([NSEWnsew])?""")
         val found = part.findAll(s).filter { it.groupValues[2].isNotEmpty() }.toList()
         if (found.size != 2) return null
         // Anything left besides separators means it isn't just coordinates (e.g. a place name with numbers)
