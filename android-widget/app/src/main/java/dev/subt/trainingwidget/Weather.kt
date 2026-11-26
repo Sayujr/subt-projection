@@ -507,10 +507,27 @@ object Weather {
     fun range(w: Window, zone: ZoneId) = "${hhmm(w.start, zone)}–${hhmm(w.end, zone)}"
 
     /** Running hours for a day: daylight ± 30 min, or your custom summer / winter hours. */
-    fun allowedRange(date: LocalDate, sun: Sun?, s: RwSettings, zone: ZoneId): Pair<Long, Long> {
+    /** Winter for the evening rule: November to March. */
+    fun winter(date: LocalDate) = date.monthValue >= 11 || date.monthValue <= 3
+    /** Summer for the early-morning rule (UV season): May to September. */
+    fun uvSummer(date: LocalDate) = date.monthValue in 5..9
+
+    /** The latest a run may finish at night when nothing else fits. */
+    fun nightEnd(date: LocalDate, zone: ZoneId): Long = atMinutes(date, if (winter(date)) 20 * 60 else 22 * 60, zone)
+
+    /**
+     * Auto hours: daylight ± 30 min, plus
+     * - winter evenings: a run may start as late as 18:30 although it's dark (finishing by 20:00);
+     * - summer mornings: it may start from 05:00 before sunrise, to keep out of the UV.
+     * [lenSec] is the run plus buffer, so the 18:30 latest start becomes an end limit.
+     */
+    fun allowedRange(date: LocalDate, sun: Sun?, s: RwSettings, zone: ZoneId, lenSec: Long = 0): Pair<Long, Long> {
         if (s.auto) {
-            return if (sun != null) (sun.rise - 1800) to (sun.set + 1800)
-            else atMinutes(date, 6 * 60 + 30, zone) to atMinutes(date, 19 * 60 + 30, zone)
+            var lo = sun?.let { it.rise - 1800 } ?: atMinutes(date, 6 * 60 + 30, zone)
+            var hi = sun?.let { it.set + 1800 } ?: atMinutes(date, 19 * 60 + 30, zone)
+            if (winter(date)) hi = max(hi, min(atMinutes(date, 18 * 60 + 30, zone) + lenSec, atMinutes(date, 20 * 60, zone)))
+            if (uvSummer(date)) lo = min(lo, atMinutes(date, 5 * 60, zone))
+            return lo to hi
         }
         val summer = date.monthValue in 4..10
         val from = if (summer) s.summerFrom else s.winterFrom
@@ -690,9 +707,9 @@ object Weather {
             }
             return out
         }
-        val (lo, hi) = allowedRange(date, sun, s, zone)
+        val (lo, hi) = allowedRange(date, sun, s, zone, lenSec)
         var cands = gen(lo, hi, false)
-        if (cands.isEmpty()) cands = gen(atMinutes(date, 5 * 60, zone), atMinutes(date, 22 * 60, zone), true)
+        if (cands.isEmpty()) cands = gen(atMinutes(date, 5 * 60, zone), nightEnd(date, zone), true)
         val best = cands.minByOrNull { it.score } ?: return Pick(null, false, emptyList())
         val risky = cands.all { it.dangerous }
         val tol = 1.5
@@ -941,7 +958,7 @@ object Weather {
         val sun = sunFor(suns, date)
         val byT = hours.associateBy { it.t }
         val pens = hours.associate { it.t to penalty(it, run.type, s, date.monthValue) }
-        val (lo, hi) = allowedRange(date, sun, s, zone)
+        val (lo, hi) = allowedRange(date, sun, s, zone, 40 * 60L)
         fun gen(minutes: Int): List<Window> {
             val lenSec = minutes * 60L
             val out = ArrayList<Window>()

@@ -981,6 +981,27 @@ class RulesTest {
         assertFalse(Weather.isFrozen(h[0].precipType))   // "no_precipitation"
     }
 
+    @Test fun rwSeasonalHours() {
+        val z = java.time.ZoneId.of("America/New_York")
+        fun at(d: LocalDate, h: Int, m: Int = 0) = d.atTime(h, m).atZone(z).toEpochSecond()
+        // Winter: sunset 16:37, so daylight ends ~17:07; a 100-min run may still start at 18:30 (ends 20:10 → capped 20:00)
+        val w = LocalDate.of(2026, 11, 27)
+        val wSun = Weather.Sun(w, at(w, 6, 58), at(w, 16, 37))
+        val (wLo, wHi) = Weather.allowedRange(w, wSun, RwSettings(), z, 60 * 60L)
+        assertEquals(at(w, 6, 28), wLo)                     // mornings unchanged: sunrise − 30 min
+        assertEquals(at(w, 19, 30), wHi)                    // 18:30 start + 60 min
+        assertEquals(at(w, 20, 0), Weather.allowedRange(w, wSun, RwSettings(), z, 3 * 3600L).second)
+        assertEquals(at(w, 20, 0), Weather.nightEnd(w, z))
+        // Summer: sunrise 05:35 → starts allowed from 05:00
+        val su = LocalDate.of(2026, 7, 10)
+        val sSun = Weather.Sun(su, at(su, 5, 35), at(su, 20, 30))
+        assertEquals(at(su, 5, 0), Weather.allowedRange(su, sSun, RwSettings(), z).first)
+        // Autumn (October): unchanged daylight ± 30 min
+        val o = LocalDate.of(2026, 10, 10)
+        val oSun = Weather.Sun(o, at(o, 7, 10), at(o, 18, 30))
+        assertEquals(at(o, 6, 40) to at(o, 19, 0), Weather.allowedRange(o, oSun, RwSettings(), z, 60 * 60L))
+    }
+
     @Test fun homeOrder() {
         assertEquals(HomeOrder.DEFAULT, HomeOrder.merge(emptyList()))
         val o = HomeOrder.move(HomeOrder.DEFAULT, "window", -2)
