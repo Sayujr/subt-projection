@@ -538,7 +538,7 @@ class SetupActivity : Activity() {
         val lm = getSystemService(android.location.LocationManager::class.java)
         if (lm == null) { rwSay("This phone has no location service."); return }
         var best: android.location.Location? = null
-        for (p in listOf(android.location.LocationManager.NETWORK_PROVIDER, android.location.LocationManager.PASSIVE_PROVIDER, android.location.LocationManager.GPS_PROVIDER)) {
+        for (p in listOf(android.location.LocationManager.NETWORK_PROVIDER, android.location.LocationManager.PASSIVE_PROVIDER)) {
             val l = runCatching { lm.getLastKnownLocation(p) }.getOrNull() ?: continue
             val b = best
             if (b == null || l.time > b.time) best = l
@@ -612,6 +612,30 @@ class SetupActivity : Activity() {
         out += note("Android asks first, and offers \"Only this time\". The app never reads your location in the background; the position is stored on this phone and sent only to the weather services as coordinates.")
 
         // ---- running hours
+        // ---- location check when the app opens
+        out += head("Ask to check location")
+        val askRow = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(0, (8 * d).toInt(), 0, 0) }
+        val askChips = AskMode.entries.map { TextView(this) }
+        fun paintAsk() {
+            val cur = LocState.mode(this)
+            askChips.forEachIndexed { i, tv ->
+                val sel = AskMode.entries[i] == cur
+                tv.setBackgroundResource(if (sel) R.drawable.chip_on else R.drawable.chip_off)
+                tv.setTextColor(if (sel) 0xFFF2F4F8.toInt() else 0xFF9AA3B2.toInt())
+            }
+        }
+        askChips.forEachIndexed { i, tv ->
+            tv.apply {
+                text = AskMode.entries[i].label; textSize = 14f; gravity = android.view.Gravity.CENTER
+                setPadding((8 * d).toInt(), (9 * d).toInt(), (8 * d).toInt(), (9 * d).toInt())
+                setOnClickListener { LocState.setMode(this@SetupActivity, AskMode.entries[i]); paintAsk() }
+            }
+            askRow.addView(tv, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (i > 0) topMargin = (6 * d).toInt() })
+        }
+        paintAsk()
+        out += askRow
+        out += note("When you open the app it can ask to compare where you are with the saved location, so run windows follow you. It asks first (Android then gives a one-time permission), reads one approximate fix and never tracks you in the background. A new time zone makes it ask at once, in the first two modes.")
+
         out += head("Running hours")
         val modeRow = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; setPadding(0, (8 * d).toInt(), 0, 0) }
         val customBox = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }

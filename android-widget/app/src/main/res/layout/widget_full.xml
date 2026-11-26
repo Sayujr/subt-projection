@@ -63,6 +63,25 @@
             android:textColor="@color/text_dim"
             android:textSize="13sp" />
     </LinearLayout>
+    <TextView
+        android:id="@+id/rw_line"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:text=""
+        android:textColor="@color/text_dim"
+        android:textSize="12sp"
+        android:visibility="gone" />
+    <ImageView
+        android:id="@+id/rw_strip"
+        android:layout_width="match_parent"
+        android:layout_height="16dp"
+        android:layout_marginTop="3dp"
+        android:contentDescription="Today's run window"
+        android:scaleType="fitXY"
+        android:visibility="gone" />
     <LinearLayout
         android:id="@+id/graphs"
         android:layout_width="match_parent"

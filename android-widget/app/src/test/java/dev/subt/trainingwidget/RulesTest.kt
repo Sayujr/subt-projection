@@ -1477,4 +1477,382 @@ class RulesTest {
         assertTrue(RunWindows.asOf(ctx)!!.startsWith("as of "))
         assertNotNull("old data still shows rather than blanking", RunWindows.plan(ctx, today))
     }
+
+    // ================================================================ Run windows, part 2
+
+    // ---- location change prompt
+
+    @Test fun locDistanceAndMoved() {
+        val boulder = 40.015 to -105.27
+        val denver = LocRules.distanceKm(boulder.first, boulder.second, 39.74, -104.99)
+        assertTrue("Denver is about 38 km away: $denver", denver in 34.0..42.0)
+        assertTrue(LocRules.moved(denver))
+        val louisville = LocRules.distanceKm(boulder.first, boulder.second, 39.98, -105.13)
+        assertTrue("Louisville is about 13 km away: $louisville", louisville in 10.0..16.0)
+        assertFalse(LocRules.moved(louisville))
+        assertEquals(0.0, LocRules.distanceKm(10.0, 20.0, 10.0, 20.0), 1e-9)
+        assertEquals(111.2, LocRules.distanceKm(0.0, 0.0, 1.0, 0.0), 0.3)
+        assertFalse("exactly 25 km is not moved", LocRules.moved(25.0))
+        assertTrue(LocRules.moved(25.01))
+        assertEquals(40.01, LocRules.round2(40.0149), 1e-9)
+        assertEquals("40.01, -105.27", LocRules.latLon(40.0149, -105.2701))
+    }
+
+    @Test fun locDismissAndDue() {
+        val today = LocalDate.of(2026, 11, 26)
+        assertEquals(today.plusDays(1), LocRules.dismissUntil(today, 1))
+        assertEquals(today.plusDays(7), LocRules.dismissUntil(today, 7))
+        assertTrue(LocRules.isDismissed(today, today.plusDays(1)))
+        assertFalse("on the date itself the prompt is back", LocRules.isDismissed(today, today))
+        assertFalse(LocRules.isDismissed(today, null))
+        val d = AskMode.DAILY; val z = AskMode.ZONE_ONLY
+        assertTrue("never checked", LocRules.isDue(today, null, null, d, false))
+        assertFalse("already checked today", LocRules.isDue(today, today, null, d, false))
+        assertTrue("checked yesterday", LocRules.isDue(today, today.minusDays(1), null, d, false))
+        assertFalse("dismissed", LocRules.isDue(today, null, today.plusDays(3), d, false))
+        assertFalse("dismissed beats a zone change", LocRules.isDue(today, null, today.plusDays(3), d, true))
+        assertTrue("dismissal over", LocRules.isDue(today, null, today, d, false))
+        assertTrue("zone change is due at once", LocRules.isDue(today, today, null, d, true))
+        assertTrue("also in zone-only mode", LocRules.isDue(today, today, null, z, true))
+        assertFalse("zone-only without a change", LocRules.isDue(today, null, null, z, false))
+        assertFalse("never", LocRules.isDue(today, null, null, AskMode.NEVER, true))
+        assertFalse(LocRules.zoneChanged(null, "Europe/London"))
+        assertFalse(LocRules.zoneChanged("Europe/London", "Europe/London"))
+        assertTrue(LocRules.zoneChanged("Europe/London", "America/Denver"))
+        assertEquals(AskMode.DAILY, AskMode.of(null))
+        assertEquals(AskMode.NEVER, AskMode.of("never"))
+    }
+
+    @Test fun locStateStored() {
+        assertEquals(AskMode.DAILY, LocState.mode(ctx))
+        LocState.setMode(ctx, AskMode.ZONE_ONLY)
+        assertEquals(AskMode.ZONE_ONLY, LocState.mode(ctx))
+        assertNull(LocState.dismissUntil(ctx))
+        LocState.setDismissUntil(ctx, LocalDate.of(2026, 12, 1))
+        assertEquals(LocalDate.of(2026, 12, 1), LocState.dismissUntil(ctx))
+        assertFalse("first look just records the zone", LocState.zoneChanged(ctx))
+        RwStore.putStr(ctx, "rw_loc_zone", "Pacific/Auckland")
+        assertTrue(LocState.zoneChanged(ctx))
+        LocState.markChecked(ctx)
+        assertFalse(LocState.zoneChanged(ctx))
+        RwStore.setLocation(ctx, 40.0149, -105.2749, "Boulder")
+        assertEquals(40.01, RwStore.load(ctx).lat!!, 1e-9)
+        assertEquals(-105.27, RwStore.load(ctx).lon!!, 1e-9)
+    }
+
+    // ---- self-scoring
+
+    @Test fun weightedMedian() {
+        assertEquals(25.0, Weather.wMedian(listOf(10.0 to 1.0, 20.0 to 1.0, 30.0 to 1.0, 40.0 to 1.0))!!, 1e-9)
+        assertEquals(90.0, Weather.wMedian(listOf(10.0 to 1.0, 20.0 to 2.0, 90.0 to 7.0))!!, 1e-9)
+        assertEquals("exactly half the weight: midpoint", 15.0, Weather.wMedian(listOf(10.0 to 2.0, 20.0 to 1.0, 30.0 to 1.0))!!, 1e-9)
+        assertEquals(7.0, Weather.wMedian(listOf(7.0 to 0.3))!!, 1e-9)
+        assertNull(Weather.wMedian(emptyList()))
+    }
+
+    private fun archiveWith(n: Int = 12, hour0: Long = 1000): Scoring.Archive {
+        val a = Scoring.Archive()
+        for (i in 0 until n) {
+            val h = hour0 + i
+            a.fc[h] = hashMapOf(
+                "nws" to Scoring.Call(90, -1), "gfs" to Scoring.Call(20, 0), "ecmwf" to Scoring.Call(80, 5), Scoring.ALL to Scoring.Call(85, 0),
+            )
+            Scoring.addObs(a, Scoring.Obs(h, 1, if (i < 4) 0 else -1, "user", h * 3600))
+        }
+        return a
+    }
+
+    @Test fun scoringAccuracy() {
+        val a = archiveWith()
+        assertEquals(100, Scoring.cloudAcc(a, "nws", 0).pct)
+        assertEquals(0, Scoring.cloudAcc(a, "gfs", 0).pct)
+        assertEquals(12, Scoring.cloudAcc(a, "ecmwf", 0).total)
+        assertEquals("only calls with a forecast count", 0, Scoring.cloudAcc(a, "hrrr", 0).total)
+        assertNull(Scoring.cloudAcc(a, "hrrr", 0).pct)
+        assertEquals("observations before the window are ignored", 0, Scoring.cloudAcc(a, "nws", 5000).total)
+        // wet calls: only the 4 taps that said "not raining" carry a wet answer; gfs/ecmwf/all said dry (0) / 0.05 mm (5)
+        assertEquals(4, Scoring.wetAcc(a, "gfs", 0).total)
+        assertEquals(100, Scoring.wetAcc(a, "gfs", 0).pct)
+        assertEquals(0, Scoring.wetAcc(a, "nws", 0).total)
+        val rained = Scoring.Archive(hashMapOf(7L to hashMapOf("gfs" to Scoring.Call(50, 0))), arrayListOf(Scoring.Obs(7, 1, 1, "user", 0)))
+        assertEquals("forecast dry, it rained", 0, Scoring.wetAcc(rained, "gfs", 0).pct)
+        // a tap and a tile reading for the same hour are separate observations; the same source replaces itself
+        Scoring.addObs(a, Scoring.Obs(1000, 0, 0, "user", 1))
+        assertEquals(12, a.obs.size)
+        Scoring.addObs(a, Scoring.Obs(1000, 1, -1, "tile", 2))
+        assertEquals(13, a.obs.size)
+    }
+
+    @Test fun scoringWeights() {
+        val a = archiveWith()
+        val w = Scoring.weights(Scoring.pooled(a, 0))
+        assertTrue("accurate nws outweighs gfs: $w", w.getValue("nws") > w.getValue("gfs"))
+        assertEquals("scaled to average 1", 1.0, w.values.average(), 1e-9)
+        assertTrue(w.values.all { it > 0 })
+        assertFalse("the combined pseudo-source gets no weight", Scoring.ALL in w)
+        // default: equal weights until at least two sources have 10 observations
+        assertTrue(Scoring.weights(Scoring.pooled(archiveWith(9), 0)).isEmpty())
+        assertTrue(Scoring.weights(mapOf("nws" to Scoring.Acc(12, 12), "gfs" to Scoring.Acc(1, 3))).isEmpty())
+        // a source with too few checks gets the average
+        val m = Scoring.weights(mapOf("nws" to Scoring.Acc(12, 12), "gfs" to Scoring.Acc(6, 12), "hrrr" to Scoring.Acc(1, 2)))
+        assertEquals(1.0, m.values.average(), 1e-9)
+        val raw = (m.getValue("nws") + m.getValue("gfs")) / 2
+        assertEquals(raw, m.getValue("hrrr"), 1e-9)
+    }
+
+    @Test fun weightsChangeTheCombinedCloud() {
+        val t = rwT(RW_DATE, 12)
+        val src = mapOf(
+            "nws" to listOf(Weather.Hour(t, cloud = 90.0)),
+            "gfs" to listOf(Weather.Hour(t, cloud = 20.0)),
+            "ecmwf" to listOf(Weather.Hour(t, cloud = 20.0)),
+        )
+        assertEquals("equal weights: ordinary median", 20.0, Weather.combine(src).single().cloud!!, 1e-9)
+        val w = mapOf("nws" to 5.0, "gfs" to 1.0, "ecmwf" to 1.0)
+        assertEquals("trusting NWS", 90.0, Weather.combine(src, weights = w).single().cloud!!, 1e-9)
+    }
+
+    @Test fun scoringLineAndRecord() {
+        val a = archiveWith()
+        val now = 1012 * 3600L
+        val line = Scoring.line(a, now)!!
+        assertTrue(line, line.startsWith("Cloud calls right 100% (last 30 days)"))
+        assertTrue(line, line.endsWith("best: NWS"))
+        assertNull(Scoring.line(Scoring.Archive(), now))
+        val few = Scoring.Archive()
+        Scoring.addObs(few, Scoring.Obs(1010, 1, -1, "user", 0))
+        assertTrue(Scoring.line(few, now)!!.contains("1 observation so far"))
+        // record(): hours under 2 h ahead keep their earlier call; later ones are stored
+        val rec = Scoring.Archive()
+        val hrs = listOf(Weather.Hour(now + 3600, cloud = 40.0, rainMm = 0.1), Weather.Hour(now + 3 * 3600, cloud = 70.0, rainMm = 1.234))
+        Scoring.record(rec, mapOf("nws" to hrs), emptyList(), now)
+        assertNull(rec.fc[Scoring.hourOf(now + 3600)])
+        assertEquals(Scoring.Call(70, 123), rec.fc[Scoring.hourOf(now + 3 * 3600)]!!["nws"])
+        // prune drops what is older than 60 days
+        rec.fc[-1000L] = hashMapOf("nws" to Scoring.Call(1, 1))
+        Scoring.addObs(rec, Scoring.Obs(-1000L, 1, 1, "user", 0))
+        Scoring.prune(rec, now)
+        assertNull(rec.fc[-1000L]); assertTrue(rec.obs.isEmpty())
+        assertNotNull("recent entries stay", rec.fc[Scoring.hourOf(now + 3 * 3600)])
+        // JSON round trip
+        val back = Scoring.decode(Scoring.encode(archiveWith()))
+        assertEquals(12, back.obs.size)
+        assertEquals(Scoring.Call(90, -1), back.fc[1003L]!!["nws"])
+        assertTrue(Scoring.decode("not json").obs.isEmpty())
+    }
+
+    @Test fun scoringFileAndTaps() {
+        Scoring.recordUser(ctx, "sunny")
+        Scoring.recordUser(ctx, "rain")
+        val a = Scoring.load(ctx)
+        assertEquals("a second tap in the same hour replaces the first", 1, a.obs.size)
+        assertEquals(1, a.obs[0].wet)                       // rain
+        assertEquals(1, a.obs[0].cloudy)                    // rain implies cloud
+        assertNotNull(Scoring.accuracyLine(ctx))
+    }
+
+    // ---- Rainbow clouds tile heuristic
+
+    @Test fun cloudTilePixels() {
+        val clear = 0x00FFFFFF
+        val thick = 0xE6FFFFFF.toInt()                      // white, alpha 230
+        val thin = 0x40FFFFFF                               // white, alpha 64
+        assertEquals(0.0, CloudTile.fraction(clear), 1e-9)
+        assertEquals(230 / 255.0, CloudTile.fraction(thick), 1e-9)
+        assertEquals(1.0, CloudTile.fraction(0xFFFFFFFF.toInt()), 1e-9)
+        assertEquals("opaque black is clear sky", 0.0, CloudTile.fraction(0xFF000000.toInt()), 1e-9)
+        assertEquals("true", CloudTile.cloudy(IntArray(25) { thick })?.toString())
+        assertEquals("false", CloudTile.cloudy(IntArray(25) { clear })?.toString())
+        assertEquals("false", CloudTile.cloudy(IntArray(25) { thin })?.toString())
+        assertEquals("true", CloudTile.cloudy(IntArray(25) { 0xFFFFFFFF.toInt() })?.toString())
+        assertEquals("false", CloudTile.cloudy(IntArray(25) { 0xFF000000.toInt() })?.toString())
+        // a mix is judged on the average: 12 thick + 13 clear = 0.43 → clear; 18 thick + 7 clear = 0.65 → cloudy
+        assertEquals("false", CloudTile.cloudy(IntArray(25) { if (it < 12) thick else clear })?.toString())
+        assertEquals("true", CloudTile.cloudy(IntArray(25) { if (it < 18) thick else clear })?.toString())
+        assertNull(CloudTile.cloudy(IntArray(0)))
+    }
+
+    @Test fun cloudTileMathAndSnapshotId() {
+        val o = CloudTile.tileFor(0.0, 0.0, 1)
+        assertEquals(1, o.x); assertEquals(1, o.y); assertEquals(0.0, o.fx, 1e-6); assertEquals(0.0, o.fy, 1e-6)
+        val b = CloudTile.tileFor(40.015, -105.27, 7)
+        assertEquals(26, b.x); assertEquals(48, b.y)
+        assertTrue(b.fx in 0.0..1.0 && b.fy in 0.0..1.0)
+        assertEquals("1795640400", CloudTile.parseSnapshotId("1795640400\n"))
+        assertEquals("1700000000", CloudTile.parseSnapshotId("""{"snapshot": 1700000000}"""))
+        assertEquals("123", CloudTile.parseSnapshotId("""{"snapshot": "123"}"""))
+        assertEquals("111", CloudTile.parseSnapshotId("[111, 222]"))
+        assertNull(CloudTile.parseSnapshotId("oops"))
+        assertNull(CloudTile.parseSnapshotId("""{"error": "no"}"""))
+    }
+
+    // ---- split runs
+
+    private fun wetExcept(date: LocalDate, dryHours: Set<Int>) = rwDay { h ->
+        if (h in dryHours) rwHour(date, h, rain = 0.0) else rwHour(date, h, rain = 2.0, pct = 80.0)
+    }
+
+    @Test fun splitRunFound() {
+        val date = RW_DATE
+        val run = rwRun(Weather.RunType.EASY, 70)
+        val hours = wetExcept(date, setOf(7, 17))
+        val sp = Weather.findSplit(hours, date, run, listOf(rwSun(date)), rwS, null, UTC)!!
+        assertEquals(70, sp.minA + sp.minB)
+        assertTrue(sp.minA >= Weather.SPLIT_MIN && sp.minB >= Weather.SPLIT_MIN)
+        assertEquals(rwT(date, 7), sp.first.start)
+        assertEquals(rwT(date, 17), sp.second.start)
+        assertTrue(Weather.acceptable(sp.first, rwS) && Weather.acceptable(sp.second, rwS))
+        val label = Weather.splitLabel(sp, UTC)
+        assertTrue(label, label.startsWith("Split: ") && label.contains("07:00") && label.contains("17:00"))
+        // the day plan carries it into the summary
+        val plan = rwPlan(date, hours, run = run)
+        assertNotNull(plan.split)
+        assertTrue(plan.summary.suggestion.startsWith("Split: "))
+        assertTrue(plan.summary.short.startsWith("Split: "))
+    }
+
+    @Test fun splitRunNotNeeded() {
+        val date = RW_DATE
+        val run = rwRun(Weather.RunType.EASY, 70)
+        val dry = rwDay { rwHour(date, it) }
+        assertNull("a single window works", Weather.findSplit(dry, date, run, listOf(rwSun(date)), rwS, null, UTC))
+        assertNull(rwPlan(date, dry, run = run).split)
+        val allWet = wetExcept(date, emptySet())
+        assertNull("no good window at all", Weather.findSplit(allWet, date, run, listOf(rwSun(date)), rwS, null, UTC))
+        val gaps = wetExcept(date, setOf(7, 17))
+        assertNull("nothing planned", Weather.findSplit(gaps, date, run.copy(planned = false), listOf(rwSun(date)), rwS, null, UTC))
+        assertNull("too short to split", Weather.findSplit(gaps, date, rwRun(Weather.RunType.EASY, 40), listOf(rwSun(date)), rwS, null, UTC))
+        // windows that touch (a dry hour split in two) are not "two windows": they need an hour between them
+        val oneGap = wetExcept(date, setOf(7, 8))
+        val s2 = Weather.findSplit(oneGap, date, rwRun(Weather.RunType.EASY, 90), listOf(rwSun(date)), rwS, null, UTC)
+        assertNull(s2)
+    }
+
+    @Test fun splitRunSkipsWindowsAlreadyStarted() {
+        val date = RW_DATE
+        val run = rwRun(Weather.RunType.EASY, 70)
+        val gaps = wetExcept(date, setOf(7, 17))
+        val noon = rwT(date, 12)
+        assertNull("the morning slot has gone", Weather.findSplit(gaps, date, run, listOf(rwSun(date)), rwS, noon, UTC))
+    }
+
+    // ---- swap with another day
+
+    private fun rwWorkout(name: String, date: LocalDate, id: Long?, status: WorkoutStatus = WorkoutStatus.PLANNED) =
+        Workout(name, "Run", 3600, 50, 10000.0, status, date.toString(), eventId = id, startLocal = "${date}T07:00:00")
+
+    private fun swapPlans(wet: Set<Int>, week: List<Workout>): List<Weather.DayPlan> = (0..2).map { i ->
+        val d = RW_DATE.plusDays(i.toLong())
+        val hours = if (i in wet) rwDay { rwHour(d, it, rain = 2.0, pct = 90.0) } else rwDay { rwHour(d, it) }
+        Weather.plan(d, hours, emptyList(), listOf(rwSun(d)), Weather.runOf(week, d.toString()), rwS, null, UTC)
+    }
+
+    @Test fun swapSuggested() {
+        val d0 = RW_DATE; val d1 = d0.plusDays(1)
+        val week = listOf(rwWorkout("Long run 26 km", d0, 101), rwWorkout("Easy + strides", d1, 102))
+        val plans = swapPlans(setOf(0, 2), week)
+        val s = Weather.swapSuggestions(plans, week, d0)
+        val sp = s.getValue(d0)
+        assertEquals(101L, sp.a.eventId); assertEquals(d1, sp.aTo)
+        assertEquals(102L, sp.b!!.eventId); assertEquals(d0, sp.bTo)
+        val text = Weather.swapText(sp)
+        assertTrue(text, text.startsWith("Move 'Long run 26 km' from ") && text.contains("and 'Easy + strides' from ") && text.endsWith("?"))
+        assertNull("tomorrow is fine, nothing to swap", s[d1])
+        // a day with no run: only the bad day's session moves
+        val alone = listOf(rwWorkout("Long run 26 km", d0, 101))
+        val s1 = Weather.swapSuggestions(swapPlans(setOf(0, 2), alone), alone, d0).getValue(d0)
+        assertNull(s1.b); assertNull(s1.bTo); assertEquals(d1, s1.aTo)
+        assertTrue(Weather.swapText(s1).let { it.startsWith("Move 'Long run 26 km' from ") && !it.contains(" and ") && it.endsWith("?") })
+    }
+
+    @Test fun swapNotSuggested() {
+        val d0 = RW_DATE; val d1 = d0.plusDays(1)
+        val week = listOf(rwWorkout("Long run 26 km", d0, 101), rwWorkout("Easy + strides", d1, 102))
+        assertTrue("dry today: nothing to fix", Weather.swapSuggestions(swapPlans(emptySet(), week), week, d0).isEmpty())
+        assertTrue("every day is wet: nothing clearly better", Weather.swapSuggestions(swapPlans(setOf(0, 1, 2), week), week, d0).isEmpty())
+        val noIds = listOf(rwWorkout("Long run 26 km", d0, null), rwWorkout("Easy + strides", d1, 102))
+        assertTrue("can't move a session without its event id", Weather.swapSuggestions(swapPlans(setOf(0, 2), noIds), noIds, d0).isEmpty())
+        val otherNoId = listOf(rwWorkout("Long run 26 km", d0, 101), rwWorkout("Easy + strides", d1, null))
+        assertTrue(Weather.swapSuggestions(swapPlans(setOf(0, 2), otherNoId), otherNoId, d0).isEmpty())
+        val done = listOf(rwWorkout("Long run 26 km", d0, 101, WorkoutStatus.DONE), rwWorkout("Easy + strides", d1, 102))
+        assertTrue("a run that is already done stays", Weather.swapSuggestions(swapPlans(setOf(0, 2), done), done, d0).isEmpty())
+        val nothing = emptyList<Workout>()
+        assertTrue("no run planned: nothing to move", Weather.swapSuggestions(swapPlans(setOf(0, 2), nothing), nothing, d0).isEmpty())
+        // only today and tomorrow get an offer: the third day is bad, but it's two days out
+        val week3 = week + rwWorkout("Hills", d0.plusDays(2), 103)
+        val plans3 = swapPlans(setOf(2), week3)
+        assertTrue(Weather.swapSuggestions(plans3, week3, d0).isEmpty())
+    }
+
+    // ---- watch closely
+
+    @Test fun watchAutoRule() {
+        assertEquals("narrow window ⚠", Watch.autoReason(true, false, false, true, 5, 5))
+        assertEquals("sources disagree (3/5 agree)", Watch.autoReason(true, false, false, false, 3, 5))
+        assertNull("70% is not below 70%", Watch.autoReason(true, false, false, false, 7, 10))
+        assertNotNull(Watch.autoReason(true, false, false, false, 69, 100))
+        assertNull(Watch.autoReason(true, false, false, false, 4, 5))
+        assertNull("one source can't disagree", Watch.autoReason(true, false, false, false, 0, 1))
+        assertNull("not a run day", Watch.autoReason(false, false, false, true, 1, 5))
+        assertNull("already run", Watch.autoReason(true, true, false, true, 1, 5))
+        assertNull("window has passed", Watch.autoReason(true, false, true, true, 1, 5))
+    }
+
+    @Test fun watchToggleAndEvaluate() {
+        assertFalse(Watch.isOn(ctx))
+        assertTrue(Watch.toggle(ctx))
+        assertTrue(Watch.isOn(ctx)); assertEquals("you asked", Watch.reason(ctx))
+        assertFalse(Watch.toggle(ctx))
+        assertFalse(Watch.isOn(ctx)); assertNull(Watch.reason(ctx))
+        Watch.evaluate(ctx)                                  // no location: nothing happens
+        assertFalse(Watch.isOn(ctx))
+    }
+
+    @Test fun shiftMessageInWatchMode() {
+        val old = Weather.Sig(rwT(RW_DATE, 7), rwT(RW_DATE, 8), emptySet())
+        val moved10 = Weather.Sig(rwT(RW_DATE, 7, 10), rwT(RW_DATE, 8, 10), emptySet())
+        assertNull("normally 10 minutes is ignored", Weather.shiftMessage(old, moved10, UTC))
+        assertNotNull("watching: any change counts", Weather.shiftMessage(old, moved10, UTC, any = true))
+        assertNull(Weather.shiftMessage(old, old, UTC, any = true))
+    }
+
+    // ---- whole chain: snapshot with event ids, split and swap on the made-up forecast
+
+    @Test fun snapshotKeepsEventIds() {
+        Fixture.seed(ctx)
+        val snap = Prefs.snapshot(ctx)!!
+        assertTrue(snap.week.filter { it.status == WorkoutStatus.PLANNED }.all { it.eventId != null && it.startLocal != null })
+        assertEquals(snap.ahead.size, snap.ahead.count { it.eventId != null })
+        val back = Snapshot.fromJson(snap.toJson())!!
+        assertEquals(snap.ahead, back.ahead)
+        assertEquals(snap.week, back.week)
+    }
+
+    @Test fun fixtureSplitAndSwap() {
+        Fixture.seed(ctx)
+        val tomorrow = LocalDate.now().plusDays(1)
+        try {
+            // tomorrow: rain all day except 07:00 and 18:00 (low UV there)
+            WxFixture.tweak = { day, hour, p ->
+                if (day != 1) p
+                else if (hour in listOf(7, 18)) WxFixture.P(p.temp, p.cloud, 0.5, 0.0, p.dew, p.wind)
+                else if (hour in 5..21) WxFixture.P(p.temp, p.cloud, 0.5, 2.0, p.dew, p.wind)
+                else p
+            }
+            WxFixture.seed(ctx)
+            val snap = Prefs.snapshot(ctx)!!
+            val run = Workout("Easy + strides", "Run", 4200, 55, 12000.0, WorkoutStatus.PLANNED, tomorrow.toString(), eventId = 777L, startLocal = "${tomorrow}T07:00:00")
+            Prefs.saveSnapshot(ctx, snap.copy(
+                week = snap.week.filter { it.date != tomorrow.toString() },
+                ahead = snap.ahead.filter { it.date != tomorrow.toString() } + run), 400)
+            val plan = RunWindows.plan(ctx, tomorrow)!!
+            assertTrue("a planned 70 min run", plan.run.planned && plan.run.minutes == 70)
+            assertNotNull("tomorrow is split: ${plan.summary.suggestion}", plan.split)
+            assertTrue(plan.window!!.wet)
+            val swap = RunWindows.swapFor(ctx, tomorrow)
+            assertNotNull("tomorrow is wet and a later day is clearly better", swap)
+            assertEquals(777L, swap!!.a.eventId)
+            assertTrue(swap.aTo.isAfter(LocalDate.now().minusDays(1)) && swap.aTo != tomorrow)
+        } finally { WxFixture.tweak = null }
+    }
 }

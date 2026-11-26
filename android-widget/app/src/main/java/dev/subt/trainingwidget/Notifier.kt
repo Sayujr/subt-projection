@@ -75,7 +75,7 @@ object Notifier {
         if (p.noData) return
         val zone = java.time.ZoneId.systemDefault()
         val w = p.window
-        val title = if (w == null) "Tomorrow: no run window fits" else "Tomorrow's run window: ${Weather.range(w, zone)}" + (if (w.icons.isNotEmpty()) " " + w.icons.joinToString("") else "")
+        val title = if (p.split != null) "Tomorrow's run: " + Weather.splitLabel(p.split, zone) else if (w == null) "Tomorrow: no run window fits" else "Tomorrow's run window: ${Weather.range(w, zone)}" + (if (w.icons.isNotEmpty()) " " + w.icons.joinToString("") else "")
         val body = listOfNotNull(p.run.name.takeIf { p.run.planned }?.let { "${it} · ${p.run.type.label}" }, p.summary.short, p.summary.suggestion).joinToString("\n")
         once(ctx, "rw_tomorrow", LocalDate.now().toString()) { post(ctx, DAILY, 20, title, body, "RW:$tomorrow") }
     }

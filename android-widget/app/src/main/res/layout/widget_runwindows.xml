@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:padding="10dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.06"
+            android:singleLine="true"
+            android:text="RUN WINDOWS"
+            android:textColor="@color/text"
+            android:textSize="12sp" />
+        <TextView
+            android:id="@+id/updated"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:text=""
+            android:textColor="@color/text_faint"
+            android:textSize="10sp" />
+        <ImageView
+            android:id="@+id/refresh"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_marginStart="2dp"
+            android:contentDescription="Refresh"
+            android:padding="4dp"
+            android:src="@drawable/ic_refresh" />
+    </LinearLayout>
+    <TextView
+        android:id="@+id/rw_msg"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text=""
+        android:textColor="@color/text_dim"
+        android:textSize="13sp"
+        android:visibility="gone" />
+    <LinearLayout
+        android:id="@+id/row0"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="2dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <TextView
+                android:id="@+id/rw_label0"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:text=""
+                android:textColor="@color/text_dim"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/rw_win0"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:fontFamily="sans-serif-medium"
+                android:singleLine="true"
+                android:text=""
+                android:textColor="@color/text"
+                android:textSize="12sp" />
+        </LinearLayout>
+        <ImageView
+            android:id="@+id/rw_strip0"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:contentDescription="Today's run window"
+            android:scaleType="fitXY" />
+    </LinearLayout>
+    <LinearLayout
+        android:id="@+id/row1"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="2dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <TextView
+                android:id="@+id/rw_label1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:text=""
+                android:textColor="@color/text_dim"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/rw_win1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:fontFamily="sans-serif-medium"
+                android:singleLine="true"
+                android:text=""
+                android:textColor="@color/text"
+                android:textSize="12sp" />
+        </LinearLayout>
+        <ImageView
+            android:id="@+id/rw_strip1"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:contentDescription="Tomorrow's run window"
+            android:scaleType="fitXY" />
+    </LinearLayout>
+</LinearLayout>

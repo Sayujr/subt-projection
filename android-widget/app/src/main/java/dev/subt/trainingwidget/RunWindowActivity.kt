@@ -2,7 +2,9 @@ package dev.subt.trainingwidget
 
 import android.app.Activity
 import android.content.Context
+import android.app.AlertDialog
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.util.TypedValue
@@ -13,6 +15,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -55,9 +58,20 @@ class RunWindowActivity : Activity() {
         render()
     }
 
+    /** A new intervals.icu snapshot (after a swap, say) redraws the plan. */
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "snapshot") runOnUiThread { if (!isFinishing) render() }
+    }
+
     override fun onResume() {
         super.onResume()
+        getSharedPreferences("training_widget", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsListener)
         RunWindows.autoRefresh(this) { if (!isFinishing) render() }
+    }
+
+    override fun onPause() {
+        getSharedPreferences("training_widget", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(prefsListener)
+        super.onPause()
     }
 
     // ---------------------------------------------------------------- building blocks
@@ -151,6 +165,13 @@ class RunWindowActivity : Activity() {
         val nowSec = if (date == LocalDate.now()) System.currentTimeMillis() / 1000 else null
         val wPx = resources.displayMetrics.widthPixels - dp(24 + 28)
 
+        // 0. Outside now (today only): one tap tells the app what it's like, to check the forecasts
+        if (date == LocalDate.now()) run {
+            val c = card()
+            label(c, "Outside now?")
+            c.addView(RwUi.outsideRow(this))
+            text(c, "One tap records what you can see, so the app can check which forecast to trust.", 12f, FAINT, top = 6)
+        }
         // 1. Summary box
         run {
             val c = card()
@@ -160,7 +181,30 @@ class RunWindowActivity : Activity() {
             text(c, "${plan.run.name} · ${plan.run.type.label} · ${plan.run.minutes} min" + if (plan.run.planned) "" else " (nothing planned: using 60 min)", 13.5f, DIM)
             val lines = plan.summary.lines()
             for ((i, l) in lines.withIndex()) text(c, l, 14f, if (l.startsWith("⛔") || l.startsWith("⚠")) WARN else TEXT, top = if (i == 0) 10 else 8)
+            if (date == LocalDate.now()) Watch.reason(this)?.let { text(c, "Watching closely: $it", 13.5f, GOOD, top = 8) }
+            Scoring.accuracyLine(this)?.let { text(c, it, 12.5f, DIM, top = 8) }
             RunWindows.asOf(this)?.let { text(c, "Forecast $it", 12f, WARN, top = 8) }
+        }
+        // 1b. Actions: swap in intervals.icu (only on tap + confirm) and watch closely
+        run {
+            val swap = if (date == LocalDate.now() || date == LocalDate.now().plusDays(1)) RunWindows.swapFor(this, date) else null
+            val today = date == LocalDate.now()
+            if (swap != null || today) {
+                val c = card()
+                if (swap != null) {
+                    text(c, Weather.swapText(swap).removeSuffix("?").replaceFirst("Move", "A better day is available. Move") + ".", 13.5f, TEXT)
+                    button(c, "Swap in intervals.icu") { confirmSwap(swap) }
+                }
+                if (today) {
+                    val on = Watch.isOn(this)
+                    button(c, if (on) "Stop watching closely" else "Watch today closely") {
+                        val nowOn = Watch.toggle(this)
+                        Toast.makeText(this, if (nowOn) "Checking every 30 minutes until the window starts" else "No longer watching closely", Toast.LENGTH_SHORT).show()
+                        render()
+                    }
+                    text(c, "Watching checks the forecast every 30 minutes until the window starts (or 22:00, never 22:00–05:00) and tells you about any change. It switches on by itself for a narrow ⚠ window or when sources disagree.", 12f, FAINT, top = 6)
+                }
+            }
         }
         // 2. Strips
         run {
@@ -178,8 +222,8 @@ class RunWindowActivity : Activity() {
         if (w != null) {
             val c = card()
             label(c, "The window, hour by hour")
-            val wt = listOf(1.1f, 1.2f, 0.8f, 0.7f, 0.8f, 1.2f, 1.2f)
-            cells(c, listOf("Hour", "°C feels", "Cloud", "UV", "Dew", "Rain", "Wind"), wt, header = true)
+            val wt = listOf(1.0f, 1.2f, 0.8f, 0.6f, 0.7f, 1.4f, 1.3f)
+            cells(c, listOf("Hour", "°C feels", "Cloud", "UV", "Dew", "Rain mm·%", "Wind"), wt, header = true)
             val hf = DateTimeFormatter.ofPattern("HH:mm")
             for (h in plan.hours.filter { it.t < w.end && it.t + 3600 > w.start }) {
                 val wet = h.rainMm > 0.5
@@ -189,11 +233,11 @@ class RunWindowActivity : Activity() {
                     "${h.cloud?.roundToInt() ?: "–"}%",
                     String.format(Locale.US, "%.1f", h.uv),
                     "${h.dew?.roundToInt() ?: "–"}",
-                    String.format(Locale.US, "%.1f mm · %d%%", h.rainMm, h.rainPct.roundToInt()),
+                    String.format(Locale.US, "%.1f·%d%%", h.rainMm, h.rainPct.roundToInt()),
                     "${h.wind?.roundToInt() ?: "–"} (${h.gust?.roundToInt() ?: "–"})",
                 ), wt, color = if (wet || h.uv > s.uvLimit) WARN else TEXT)
             }
-            text(c, "Rain is mm per hour and chance. Wind and gusts in km/h. Yellow rows: rain over 0.5 mm/h or UV over your limit of ${s.uvLimit.roundToInt()}.", 12f, FAINT, top = 6)
+            text(c, "Rain is mm per hour · chance. Wind and gusts in km/h. Yellow rows: rain over 0.5 mm/h or UV over your limit of ${s.uvLimit.roundToInt()}.", 12f, FAINT, top = 6)
             plan.sun?.let { text(c, "🌅 sunrise ${Weather.hhmm(it.rise, zone)}   🌇 sunset ${Weather.hhmm(it.set, zone)}", 13f, DIM, top = 8) }
         }
         // 4. Sources
@@ -203,8 +247,9 @@ class RunWindowActivity : Activity() {
             val data = RunWindows.data(this)
             if (w == null || data == null) text(c, "No window to compare.", 13f, DIM, top = 4)
             else {
-                val wt = listOf(1.3f, 1f, 0.9f, 0.8f, 1.5f)
-                cells(c, listOf("Source", "°C", "Cloud", "UV", "Rain (peak)"), wt, header = true)
+                val wt = listOf(1.2f, 0.7f, 0.9f, 0.7f, 1.4f, 0.9f)
+                cells(c, listOf("Source", "°C", "Cloud", "UV", "Rain peak", "Right"), wt, header = true)
+                val acc = Scoring.cloudAccBySource(this)
                 for (id in Weather.ORDER) {
                     val hs = data.src[id]?.filter { it.t < w.end && it.t + 3600 > w.start } ?: continue
                     if (hs.isEmpty()) continue
@@ -217,10 +262,11 @@ class RunWindowActivity : Activity() {
                         avg { it.temp }?.let { "${it.roundToInt()}" } ?: "–",
                         avg { it.cloud }?.let { "${it.roundToInt()}%" } ?: "–",
                         hs.mapNotNull { it.uv }.maxOrNull()?.let { String.format(Locale.US, "%.1f", it) } ?: "–",
-                        if (rain == null) "–" else String.format(Locale.US, "%.1f mm", rain) + (pct?.let { " · ${it.roundToInt()}%" } ?: ""),
+                        if (rain == null) "–" else String.format(Locale.US, "%.1f", rain) + (pct?.let { "·${it.roundToInt()}%" } ?: ""),
+                        acc[id]?.takeIf { it.total >= 3 }?.pct?.let { "$it%" } ?: "–",
                     ), wt, color = if (dissent) WARN else TEXT)
                 }
-                text(c, "Yellow = disagrees with the median on cloud or rain somewhere in the window. NWS gives cloud only. UV shows each source's own value; the plan uses the highest.", 12f, FAINT, top = 6)
+                text(c, "Yellow = disagrees with the median on cloud or rain somewhere in the window. Rain is mm per hour · chance. Right = how often that source's cloudy-or-not call matched what happened (last 30 days; needs a few of your "outside now" taps or Rainbow checks). NWS gives cloud only. UV shows each source's own value; the plan uses the highest.", 12f, FAINT, top = 6)
                 val fetched = data.fetched.entries.joinToString("  ·  ") { "${it.key} ${Weather.hhmm(it.value / 1000, zone)}" }
                 text(c, "Fetched: $fetched", 12f, FAINT, top = 4)
             }
@@ -233,6 +279,46 @@ class RunWindowActivity : Activity() {
             button(c, "Open in Rainbow") { openRainbow() }
             text(c, "The forecast refreshes by itself every 3 hours (hourly on a run day until the window starts), and not between 22:00 and 05:00.", 12f, FAINT, top = 10)
         }
+    }
+
+    private fun confirmSwap(sp: Weather.SwapPlan) {
+        AlertDialog.Builder(this)
+            .setTitle("Swap in intervals.icu?")
+            .setMessage(Weather.swapText(sp) + "\n\nThis changes the dates in your intervals.icu calendar.")
+            .setPositiveButton("Swap") { _, _ -> doSwap(sp) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** Moves the session(s) in intervals.icu. Only reached from the confirm dialog. If the second move fails, the first is put back. */
+    private fun doSwap(sp: Weather.SwapPlan) {
+        val creds = Prefs.credentials(this)
+        val idA = sp.a.eventId
+        if (creds == null || idA == null) { Toast.makeText(this, "Connect intervals.icu first", Toast.LENGTH_LONG).show(); return }
+        status = "Swapping…"
+        render()
+        Thread {
+            var ok = true
+            val msg = try {
+                val api = IcuApi(creds)
+                api.moveEvent(idA, sp.aTo.toString(), sp.a.startLocal)
+                val b = sp.b; val bTo = sp.bTo
+                if (b != null && bTo != null && b.eventId != null) {
+                    try { api.moveEvent(b.eventId, bTo.toString(), b.startLocal) }
+                    catch (e: Exception) { runCatching { api.moveEvent(idA, sp.a.date, sp.a.startLocal) }; throw e }
+                }
+                "Swapped in intervals.icu"
+            } catch (e: Exception) {
+                ok = false
+                "Couldn't swap: ${e.message ?: e.javaClass.simpleName}"
+            }
+            runOnUiThread {
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                status = msg
+                if (ok) Refresh.now(applicationContext, replace = true)
+                if (!isFinishing) render()
+            }
+        }.start()
     }
 
     /** Launches the Rainbow app when one of its known package names is installed, otherwise its website. */

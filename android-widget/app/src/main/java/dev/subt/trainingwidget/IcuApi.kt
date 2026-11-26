@@ -123,6 +123,9 @@ class IcuApi(private val creds: Credentials) {
         val weekActivities = activities.filter { date(it) >= monday.toString() }
         val week = merge(weekEvents, weekActivities)
         val todays = week.filter { it.date == todayStr }
+        // Planned sessions after this week, up to a week from today: lets run windows suggest swapping with a day next week
+        val aheadEvents = events.filter { date(it) > sunday.toString() && date(it) <= today.plusDays(7).toString() }
+        val ahead = merge(aheadEvents, emptyList())
 
         // ---- Project Fitness / Fatigue forward from today using planned loads
         val doneEventIds = weekActivities.mapNotNull { it.optNum("paired_event_id")?.toLong() }.toSet()
@@ -152,7 +155,7 @@ class IcuApi(private val creds: Credentials) {
             .map { Day(it.key, it.value.first, it.value.second) }
         val weight = wellness.objects().sortedBy { it.optString("id") }.mapNotNull { it.optNum("weight")?.takeIf { w -> w > 25 } }.lastOrNull()
         val curveCp = runCatching { fetchCurveCp(ath) }.getOrNull()
-        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight ?: athleteWeight, runFtp, curveCp)
+        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight ?: athleteWeight, runFtp, curveCp, ahead)
     }
 
     /** Planned workouts, races and completed activities between [start] and [end] (inclusive), for the app's Week screen. */
@@ -499,6 +502,16 @@ class IcuApi(private val creds: Credentials) {
         return eventId
     }
 
+    /**
+     * Moves a planned session to [newDate], keeping its time of day from [startLocal]. Only ever called after you
+     * confirm a swap on the run-window day plan.
+     */
+    fun moveEvent(eventId: Long, newDate: String, startLocal: String?) {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val time = startLocal?.takeIf { it.length > 11 && it[10] == 'T' }?.substring(11) ?: "00:00:00"
+        sendJson("PUT", "/athlete/$ath/events/$eventId", JSONObject().put("start_date_local", "${newDate}T$time"))
+    }
+
     private fun sendJson(method: String, path: String, body: JSONObject): String {
         val conn = Net.open(URL("$BASE$path"))
         try {
@@ -677,6 +690,8 @@ class IcuApi(private val creds: Credentials) {
                 plannedLoad = (e.optNum("icu_training_load") ?: 0.0).toInt(),
                 steps = e.optJSONObject("workout_doc")?.let { stepsText(it) }?.takeIf { it.isNotBlank() },
                 activityId = done?.optString("id")?.takeIf { it.isNotBlank() },
+                eventId = e.optLong("id", 0L).takeIf { it > 0 },
+                startLocal = e.optString("start_date_local").takeIf { it.isNotBlank() },
             )
         }
         for (a in activities) {

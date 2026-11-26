@@ -18,6 +18,9 @@ object RwViews {
     private const val DIM = 0xFF9AA3B2.toInt()
     private const val RB_BLUE = 0xFF8FD3FF.toInt()
 
+    /** Height of the strip bitmap in dp at scale 1 (widgets scale it down to fit). */
+    fun heightDp(mini: Boolean): Float = if (mini) 3f + 14f + 3f else 22f + 34f + 20f
+
     /**
      * [mini] = cells and the box only (Week list). [hours] / [win] default to the plan's overall pick; pass the Rainbow
      * hours and window for the Rainbow strip, and [other] to outline a second window dashed.
@@ -25,9 +28,9 @@ object RwViews {
     fun strip(
         ctx: Context, plan: Weather.DayPlan, s: RwSettings, widthPx: Int, mini: Boolean, nowSec: Long?,
         hours: List<Weather.Combined> = plan.hours, win: Weather.Window? = plan.window, other: Weather.Window? = null,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: ZoneId = ZoneId.systemDefault(), dScale: Float = 1f,
     ): Bitmap {
-        val d = ctx.resources.displayMetrics.density
+        val d = ctx.resources.displayMetrics.density * dScale
         val w = widthPx.coerceAtLeast(160)
         val margin = if (mini) 2f * d else 8f * d
         val topH = if (mini) 3f * d else 22f * d

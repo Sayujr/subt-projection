@@ -52,7 +52,12 @@ object Fixture {
 
     fun snapshot(): Snapshot {
         val days = days()
-        val wk = week()
+        val sunday = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+        val wk = week().mapIndexed { i, w -> if (w.status == WorkoutStatus.PLANNED) w.copy(eventId = 100L + i, startLocal = "${w.date}T07:00:00") else w }
+        // Planned runs for the days after this week, up to a week from today
+        val ahead = (1..7).map { today.plusDays(it.toLong()) }.filter { it.isAfter(sunday) }.mapIndexed { i, d ->
+            Workout("Easy run", "Run", 3000, 40, 9000.0, WorkoutStatus.PLANNED, d.toString(), eventId = 200L + i, startLocal = "${d}T07:00:00")
+        }
         val proj = (1..21).map { i ->
             val last = days.last()
             Day(today.plusDays(i.toLong()).toString(), last.ctl + 0.15 * i, last.atl + 6 * sin(i / 2.0))
@@ -71,7 +76,7 @@ object Fixture {
                 Race(today.plusDays(10).toString(), "Parkrun 5K", "Run", "RACE_C", distanceM = 5000.0, eventId = 11L),
                 Race(today.plusDays(120).toString(), "Spring Marathon", "Run", "RACE_A", days.last().ctl + 12, days.last().ctl - 2, 42195.0, eventId = 12L),
             ),
-            proj = proj, runs = runs, weight = 81.2, runFtp = 351.0, curveCp = 345.0,
+            proj = proj, runs = runs, weight = 81.2, runFtp = 351.0, curveCp = 345.0, ahead = ahead,
         )
     }
 

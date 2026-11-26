@@ -16,4 +16,6 @@
     <string name="recovery_widget_description">HRV, resting heart rate and sleep trends</string>
     <string name="subt_widget_label">Training Today · SubT pace</string>
     <string name="subt_widget_description">Monthly SubT pace and trend from your projection page</string>
+    <string name="runwindows_widget_label">Training Today · Run windows</string>
+    <string name="runwindows_widget_description">Today and tomorrow: the best time to run, with the weather strip for each day</string>
 </resources>

@@ -170,14 +170,25 @@ class MainActivity : Activity() {
         if ((stale && Prefs.credentials(this) != null) || Prefs.subt(this) == null) Refresh.now(this, replace = false)
         // Update check (every few hours) and "What's new" once after an update
         Thread { runCatching { Updater.check(this) }; runOnUiThread { if (tab == Tab.HOME) content.post { drawContent() } } }.start()
+        var dialogShown = false
         if (Updater.takeWhatsNew(this)) {
             val notes = Updater.whatsNew(this)
-            if (notes.isNotEmpty()) android.app.AlertDialog.Builder(this)
-                .setTitle("What's new in ${Updater.currentName(this)}")
-                .setMessage(notes.joinToString("\n\n") { "• $it" })
-                .setPositiveButton("OK", null).show()
+            if (notes.isNotEmpty()) {
+                dialogShown = true
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("What's new in ${Updater.currentName(this)}")
+                    .setMessage(notes.joinToString("\n\n") { "• $it" })
+                    .setPositiveButton("OK", null).show()
+            }
         }
         show()
+        // Run windows: offer to check whether you've moved (not on top of the "What's new" dialog)
+        if (!dialogShown) runCatching { LocPrompt.onOpen(this) { content.post { if (tab == Tab.HOME) drawContent() } } }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == LocPrompt.REQ) LocPrompt.onPermissionResult(this, grantResults)
     }
 
     override fun onPause() {

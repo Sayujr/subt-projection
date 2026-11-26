@@ -25,6 +25,7 @@ class RunWindowWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(
                 runCatching { Notifier.runWindows(ctx) }
             }
             runCatching { RunWindowSchedule.chain(ctx) }
+            runCatching { RunWindowSchedule.chainWatch(ctx, first = false) }
         }
         Result.success()
     }
@@ -33,7 +34,9 @@ class RunWindowWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(
 object RunWindowSchedule {
     private const val PERIODIC = "run-window-3h"
     private const val HOURLY = "run-window-hourly"
+    private const val WATCH = "run-window-watch"
     private const val K_NEXT = "rw_chain_next"
+    private const val K_WATCH_NEXT = "rw_watch_next"
 
     private val net = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
 
@@ -47,6 +50,7 @@ object RunWindowSchedule {
 
     /** On a run day, queue the next hourly check (once: a check already waiting is left alone). */
     fun chain(ctx: Context) {
+        if (Watch.active(ctx)) return        // watching closely already checks every 30 minutes
         if (!RunWindows.needsHourly(ctx)) return
         val now = System.currentTimeMillis()
         if (RwStore.getLong(ctx, K_NEXT) > now + 60_000L) return
@@ -57,8 +61,24 @@ object RunWindowSchedule {
         )
     }
 
+    /**
+     * "Watch today closely": while it's on, before 22:00 and before the window starts, queue the next check in 30 minutes
+     * (one at a time). [first] = just switched on: a check already waiting is replaced so the first one comes in 30 minutes.
+     */
+    fun chainWatch(ctx: Context, first: Boolean) {
+        if (!Watch.active(ctx)) return
+        val now = System.currentTimeMillis()
+        if (!first && RwStore.getLong(ctx, K_WATCH_NEXT) > now + 60_000L) return
+        RwStore.putLong(ctx, K_WATCH_NEXT, now + 30 * 60_000L)
+        WorkManager.getInstance(ctx).enqueueUniqueWork(
+            WATCH, if (first) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE,
+            OneTimeWorkRequestBuilder<RunWindowWorker>().setConstraints(net).setInitialDelay(30, TimeUnit.MINUTES).build(),
+        )
+    }
+
     fun cancel(ctx: Context) {
         WorkManager.getInstance(ctx).cancelUniqueWork(PERIODIC)
         WorkManager.getInstance(ctx).cancelUniqueWork(HOURLY)
+        WorkManager.getInstance(ctx).cancelUniqueWork(WATCH)
     }
 }

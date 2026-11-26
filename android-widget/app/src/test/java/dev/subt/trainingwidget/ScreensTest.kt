@@ -189,6 +189,64 @@ class ScreensTest {
             Canvas(bmp).also { it.drawColor(0xFF0F1218.toInt()); col.draw(it) }
             save("runwindow_card_and_list", bmp)
         }
+        // Run windows part 2: tomorrow wet except two dry hours (split run + swap button), today with the accuracy line and "outside now" buttons
+        safely("runwindow_split_swap") {
+            val tomorrow = Fixture.today.plusDays(1)
+            val a = Scoring.Archive()
+            val h0 = Scoring.hourOf(System.currentTimeMillis() / 1000)
+            for (i in 1..40) {
+                val h = h0 - i
+                a.fc[h] = hashMapOf(
+                    "nws" to Scoring.Call(if (i % 6 == 0) 20 else 90, -1), "gfs" to Scoring.Call(if (i % 3 == 0) 20 else 90, -1),
+                    "rainbow" to Scoring.Call(90, 0), "ecmwf" to Scoring.Call(if (i % 4 == 0) 20 else 90, 0),
+                    Scoring.ALL to Scoring.Call(if (i % 6 == 0) 20 else 90, 0),
+                )
+                Scoring.addObs(a, Scoring.Obs(h, 1, if (i % 2 == 0) 0 else -1, "user", h * 3600))
+            }
+            Scoring.save(ctx, a)
+            try {
+                WxFixture.tweak = { day, hour, p ->
+                    if (day != 1) p
+                    else if (hour in listOf(7, 18)) WxFixture.P(p.temp, p.cloud, 0.5, 0.0, p.dew, p.wind)
+                    else if (hour in 5..21) WxFixture.P(p.temp, p.cloud, 0.5, 2.0, p.dew, p.wind)
+                    else p
+                }
+                WxFixture.seed(ctx)
+                val snap = Prefs.snapshot(ctx)!!
+                val run = Workout("Easy + strides", "Run", 4200, 55, 12000.0, WorkoutStatus.PLANNED, tomorrow.toString(), eventId = 777L, startLocal = "${tomorrow}T07:00:00")
+                Prefs.saveSnapshot(ctx, snap.copy(
+                    week = snap.week.filter { it.date != tomorrow.toString() },
+                    ahead = snap.ahead.filter { it.date != tomorrow.toString() } + run), 400)
+                for ((label, day) in listOf("split_swap" to tomorrow, "today_scored" to Fixture.today)) safely("runwindow_$label") {
+                    val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, day.toString())
+                    val ctl = Robolectric.buildActivity(RunWindowActivity::class.java, i).setup()
+                    settle()
+                    capture("runwindow_$label", ctl.get().window.decorView)
+                    ctl.pause().stop().destroy()
+                }
+                safely("runwindow_card_part2") {
+                    val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+                    val col = android.widget.LinearLayout(act).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(0xFF0F1218.toInt()) }
+                    AppScreens(act, 392).runWindowCard(col)
+                    val w = (392 * ctx.resources.displayMetrics.density).toInt()
+                    col.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                    val h = col.measuredHeight.coerceIn(1, 4000)
+                    col.layout(0, 0, w, h)
+                    save("runwindow_card_part2", Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawColor(0xFF0F1218.toInt()); col.draw(this) } })
+                }
+            } finally { WxFixture.tweak = null; WxFixture.seed(ctx) }
+        }
+        // The "Change in location?" dialog body (built as a plain view, no dialog, so it can be captured)
+        safely("location_dialog") {
+            val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java)).setup().get()
+            val opts = listOf(RwDialogs.Option("Use current location") {}, RwDialogs.Option("Keep Boulder, CO, US") {}) + RwDialogs.dismissOptions(act)
+            val v = RwDialogs.content(act, LocPrompt.movedBody("Denver, CO", 38.0, "Boulder, CO, US"), opts) {}
+            val w = (340 * ctx.resources.displayMetrics.density).toInt()
+            v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val h = v.measuredHeight.coerceIn(1, 4000)
+            v.layout(0, 0, w, h)
+            save("location_dialog", Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawColor(0xFF2A2F3A.toInt()); v.draw(this) } })
+        }
         // The Coach sheet for the made-up workout, built as a plain view (no dialog) so it can be captured
         safely("coach_sheet") {
             val act = Robolectric.buildActivity(WorkoutActivity::class.java, Intent(ctx, WorkoutActivity::class.java).putExtra(WorkoutActivity.EXTRA_ID, "i999")).setup().get()
@@ -224,6 +282,8 @@ class ScreensTest {
         widget("race_2x2", 170, 180) { ExtraWidgets.buildRace(ctx, 170, 180) }
         widget("recovery_4x2", 350, 180) { ExtraWidgets.buildRecovery(ctx, 6, 350, 180) }
         widget("subt_2x2", 170, 180) { ExtraWidgets.buildSubt(ctx, 170, 180) }
+        widget("runwindows_4x2", 350, 180) { RwWidgets.build(ctx, 350, 180) }
+        widget("runwindows_4x2_tall", 350, 220) { RwWidgets.build(ctx, 350, 220) }
 
         File(outDir, "errors.txt").writeText(errors.toString().ifEmpty { "No rendering errors.\n" })
     }

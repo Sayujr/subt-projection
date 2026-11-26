@@ -55,6 +55,7 @@ object WidgetRenderer {
         RaceWidgetProvider::class.java,
         RecoveryWidgetProvider::class.java,
         SubtWidgetProvider::class.java,
+        RunWindowsWidgetProvider::class.java,
     )
 
     fun allIds(ctx: Context): List<Int> {
@@ -73,6 +74,7 @@ object WidgetRenderer {
         val list = ids(ctx, mgr, WorkoutsWidgetProvider::class.java)
         list.forEach { renderWorkouts(ctx, mgr, it) }
         ExtraWidgets.renderAll(ctx, mgr)
+        ids(ctx, mgr, RunWindowsWidgetProvider::class.java).forEach { RwWidgets.render(ctx, mgr, it) }
         val withList = compact + list
         if (withList.isNotEmpty()) mgr.notifyAppWidgetViewDataChanged(withList, R.id.workout_list)
     }
@@ -114,8 +116,12 @@ object WidgetRenderer {
             views.setOnClickPendingIntent(R.id.graphs, if (inApp) null else appIntent(ctx, "HOME"))
         }
 
+        // Run windows: one line and a mini strip under the workouts, only when a plan exists (not on the app's own Today screen)
+        val rwPlan = if (inApp) null else RwWidgets.planFor(ctx, s.today)
+        val rwShown = RwWidgets.addToday(ctx, views, widthDp, rwPlan)
+
         // Height left after padding (24), header (28) and margins (14), shared by workout rows (22dp each) and graphs
-        val available = heightDp - 66
+        val available = heightDp - 66 - if (rwShown) RwWidgets.TODAY_EXTRA_DP else 0
         val minGraphs = if (style == GraphStyle.ONE) 110 else 92
         val rowsCap = if (large) (heightDp * 0.4 / 22).toInt() else 12
         val maxRows = minOf((available - minGraphs) / 22, rowsCap).coerceIn(1, 12)

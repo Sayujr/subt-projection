@@ -1350,6 +1350,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val head = if (w == null) "No window fits" else Weather.range(w, zone) + (if (w.icons.isEmpty()) "" else "  " + w.icons.joinToString(" "))
         text(c, head, 26f, TEXT, bold = true, top = 2).apply { letterSpacing = 0.02f }
         text(c, (if (p.passed) "Passed · " else "") + (if (p.run.planned) "${p.run.name} · " else "") + p.run.type.label + " · " + p.summary.short, 13.5f, DIM)
+        p.split?.let { text(c, Weather.splitLabel(it, zone), 14f, WARN, top = 2) }
+        Watch.reason(a)?.let { text(c, "Watching closely: $it", 12.5f, GOOD, top = 2) }
         val rb = p.rainbow
         if (!p.same && rb != null) text(c, "Rainbow alone: ${Weather.range(rb, zone)}", 12.5f, 0xFF8FD3FF.toInt(), top = 2)
         val bmp = RwViews.strip(a, p, s, chartW(), false, System.currentTimeMillis() / 1000)
@@ -1360,7 +1362,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             val tw = t.window
             text(c, "Tomorrow  " + (if (tw == null) "no window" else Weather.range(tw, zone) + (if (tw.icons.isEmpty()) "" else " " + tw.icons.joinToString(" "))) + " · " + t.summary.short, 13f, DIM, top = 8)
         }
-        text(c, "Tap for the day plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 6)
+        c.addView(RwUi.outsideRow(a))
+        text(c, "Tap for the day plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 8)
         c.setOnClickListener { RunWindowActivity.open(a, today) }
     }
 

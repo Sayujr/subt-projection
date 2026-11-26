@@ -45,8 +45,11 @@ object RwStore {
         )
     }
 
-    fun setLocation(ctx: Context, lat: Double, lon: Double, place: String) =
-        sp(ctx).edit().putString("rw_lat", lat.toString()).putString("rw_lon", lon.toString()).putString("rw_place", place).apply()
+    /** Coordinates are kept to 2 decimals (about 1 km): enough for a forecast, no more precise than needed. */
+    fun setLocation(ctx: Context, lat: Double, lon: Double, place: String) {
+        sp(ctx).edit().putString("rw_lat", LocRules.round2(lat).toString()).putString("rw_lon", LocRules.round2(lon).toString()).putString("rw_place", place).apply()
+        LocState.markZone(ctx)
+    }
 
     fun putFloat(ctx: Context, k: String, v: Double) = sp(ctx).edit().putFloat(k, v.toFloat()).apply()
     fun putInt(ctx: Context, k: String, v: Int) = sp(ctx).edit().putInt(k, v).apply()
@@ -98,6 +101,46 @@ object WeatherApi {
             return Resp(code, body)
         } finally { conn.disconnect() }
     }
+
+    private fun httpBytes(url: String, headers: Map<String, String>): Pair<Int, ByteArray> {
+        val conn = Net.open(URL(url))
+        try {
+            conn.connectTimeout = 12_000
+            conn.readTimeout = 20_000
+            conn.setRequestProperty("User-Agent", UA)
+            for ((k, v) in headers) conn.setRequestProperty(k, v)
+            val code = conn.responseCode
+            val body = if (code in 200..299) conn.inputStream.use { it.readBytes() } else ByteArray(0)
+            return code to body
+        } finally { conn.disconnect() }
+    }
+
+    /**
+     * Rainbow's clouds tile for "now" at the position: asks for the latest snapshot id, fetches the zoom-7 tile holding
+     * the position, decodes the WebP and reads the pixels around it (see [CloudTile] for the cloudy-or-not rule).
+     * Two Rainbow calls. Null when anything fails; never throws.
+     */
+    fun cloudTileCloudy(ctx: Context, key: String, lat: Double, lon: Double): Boolean? = try {
+        val hdr = mapOf("Ocp-Apim-Subscription-Key" to key)
+        RwStore.addCall(ctx)
+        val snap = http("https://$RAINBOW_HOST/tiles/v1/snapshot?layer=clouds", hdr)
+        val id = if (snap.code == 200) CloudTile.parseSnapshotId(snap.body) else null
+        if (id == null) null else {
+            val t = CloudTile.tileFor(lat, lon)
+            RwStore.addCall(ctx)
+            val (code, bytes) = httpBytes("https://$RAINBOW_HOST/tiles/v1/clouds/$id/${CloudTile.ZOOM}/${t.x}/${t.y}", hdr)
+            val bmp = if (code == 200 && bytes.isNotEmpty()) android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) else null
+            if (bmp == null) null else {
+                val cx = (t.fx * bmp.width).toInt().coerceIn(0, bmp.width - 1)
+                val cy = (t.fy * bmp.height).toInt().coerceIn(0, bmp.height - 1)
+                val x0 = (cx - 2).coerceAtLeast(0); val y0 = (cy - 2).coerceAtLeast(0)
+                val w = minOf(5, bmp.width - x0); val h = minOf(5, bmp.height - y0)
+                val px = IntArray(w * h)
+                bmp.getPixels(px, 0, w, x0, y0, w, h)
+                CloudTile.cloudy(px)
+            }
+        }
+    } catch (e: Exception) { null }
 
     private fun f4(v: Double) = String.format(Locale.US, "%.4f", v)
 

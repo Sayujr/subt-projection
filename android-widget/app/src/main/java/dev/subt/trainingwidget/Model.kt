@@ -34,6 +34,10 @@ data class Workout(
     val steps: String? = null,
     /** intervals.icu activity id once done (opens the workout detail screen). */
     val activityId: String? = null,
+    /** intervals.icu calendar event id of the planned session (to move it when you confirm a swap). */
+    val eventId: Long? = null,
+    /** The event's start_date_local as intervals.icu has it ("2026-11-26T07:00:00"), to keep its time of day. */
+    val startLocal: String? = null,
 )
 
 /** An upcoming race from the intervals.icu calendar, with projected race-day Fitness / Fatigue when known. */
@@ -102,6 +106,8 @@ data class Snapshot(
     val runFtp: Double? = null,
     /** CP from the 90-day power curve (3-min and 12-min bests), W. */
     val curveCp: Double? = null,
+    /** Planned sessions after this week, up to a week from today (for run-window swap suggestions). */
+    val ahead: List<Workout> = emptyList(),
 ) {
     fun toJson(): String = JSONObject().apply {
         put("fetchedAt", fetchedAt)
@@ -116,6 +122,7 @@ data class Snapshot(
         })
         put("workouts", workoutsJson(workouts))
         put("week", workoutsJson(week))
+        put("ahead", workoutsJson(ahead))
         put("lastWeekLoad", lastWeekLoad)
         putOpt("weight", weight)
         putOpt("runFtp", runFtp)
@@ -147,7 +154,7 @@ data class Snapshot(
                 put(
                     JSONObject()
                         .put("n", it.name).put("t", it.type).put("s", it.seconds)
-                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date).put("pl", it.plannedLoad).putOpt("sp", it.steps).putOpt("id", it.activityId)
+                        .put("l", it.load).put("m", it.distanceM).put("st", it.status.name).put("d", it.date).put("pl", it.plannedLoad).putOpt("sp", it.steps).putOpt("id", it.activityId).putOpt("ei", it.eventId).putOpt("sl", it.startLocal)
                 )
             }
         }
@@ -159,6 +166,8 @@ data class Snapshot(
                     x.getString("n"), x.getString("t"), x.getInt("s"), x.getInt("l"),
                     x.getDouble("m"), WorkoutStatus.valueOf(x.getString("st")), x.optString("d"), x.optInt("pl"), x.optString("sp").ifBlank { null },
                     x.optString("id").ifBlank { null },
+                    x.optLong("ei", 0L).takeIf { it > 0 },
+                    x.optString("sl").ifBlank { null },
                 )
             }
 
@@ -184,6 +193,7 @@ data class Snapshot(
                 },
                 workouts = parseWorkouts(o.getJSONArray("workouts")),
                 week = parseWorkouts(o.optJSONArray("week")),
+                ahead = parseWorkouts(o.optJSONArray("ahead")),
                 lastWeekLoad = o.optInt("lastWeekLoad"),
                 proj = if (pj == null) emptyList() else (0 until pj.length()).map {
                     val x = pj.getJSONObject(it)

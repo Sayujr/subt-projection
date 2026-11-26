@@ -154,6 +154,18 @@
         </receiver>
 
         <receiver
+            android:name=".RunWindowsWidgetProvider"
+            android:exported="true"
+            android:label="@string/runwindows_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/runwindows_widget_info" />
+        </receiver>
+
+        <receiver
             android:name=".DailyRefreshReceiver"
             android:exported="false">
             <intent-filter>

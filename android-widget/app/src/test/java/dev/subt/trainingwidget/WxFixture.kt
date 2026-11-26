@@ -19,8 +19,16 @@ object WxFixture {
 
     class P(val temp: Double, val cloud: Double, val uv: Double, val rain: Double, val dew: Double, val wind: Double)
 
-    /** Seven different days: cool and grey, hot and humid, a wet afternoon, steady drizzle, … */
+    /** Lets a test reshape the forecast (day offset, hour, the normal profile) before it is written out. */
+    @Volatile var tweak: ((Int, Int, P) -> P)? = null
+
     fun profile(day: Int, hour: Int): P {
+        val p = baseProfile(day, hour)
+        return tweak?.invoke(day, hour, p) ?: p
+    }
+
+    /** Seven different days: cool and grey, hot and humid, a wet afternoon, steady drizzle, … */
+    private fun baseProfile(day: Int, hour: Int): P {
         val k = day % 7
         val heat = max(0.0, sin(PI * (hour - 6) / 14.0))
         val base = listOf(9.0, 16.0, 11.0, 7.0, 13.0, 17.0, 10.0)[k]

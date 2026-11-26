@@ -17,8 +17,10 @@ object RunWindows {
         val aqi: Map<Long, Double>,
         val suns: List<Weather.Sun>,
         val fetched: Map<String, Long>,
+        /** Learned source weights from self-scoring (empty = equal). */
+        val weights: Map<String, Double> = emptyMap(),
     ) {
-        val all: List<Weather.Combined> by lazy { Weather.combine(src, now, aqi) }
+        val all: List<Weather.Combined> by lazy { Weather.combine(src, now, aqi, weights) }
         val rb: List<Weather.Combined> by lazy { if (rbHours.isEmpty()) emptyList() else Weather.combine(mapOf("rainbow" to rbHours), now, aqi) }
         val lastFetch: Long get() = fetched.values.maxOrNull() ?: 0L
     }
@@ -33,7 +35,8 @@ object RunWindows {
     /** The cached forecasts, parsed (and kept parsed until a source is refreshed); null when nothing is cached. */
     fun data(ctx: Context): WxData? {
         val caches = IDS.associateWith { RwStore.cache(ctx, it) }
-        val key = caches.entries.joinToString("|") { "${it.key}:${it.value?.second}" }
+        val weights = Scoring.weights(ctx)
+        val key = caches.entries.joinToString("|") { "${it.key}:${it.value?.second}" } + "|w" + weights.toSortedMap().toString()
         memo?.let { if (it.first == key) return it.second }
         val src = LinkedHashMap<String, List<Weather.Hour>>()
         var suns: List<Weather.Sun> = emptyList()
@@ -47,7 +50,7 @@ object RunWindows {
         val now = caches["nowcast"]?.let { (body, t) -> fetched["Rainbow nowcast"] = t; Weather.parseNowcast(body) }.orEmpty()
         val aqi = caches["aqi"]?.let { (body, t) -> fetched["Air quality"] = t; Weather.parseAqi(body) }.orEmpty()
         if (src.isEmpty()) return null
-        val d = WxData(src, rbHours, now, aqi, suns, fetched)
+        val d = WxData(src, rbHours, now, aqi, suns, fetched, weights)
         memo = key to d
         return d
     }
@@ -68,7 +71,7 @@ object RunWindows {
         val s = RwStore.load(ctx)
         if (s.lat == null || s.lon == null) return emptyList()
         val d = data(ctx) ?: return emptyList()
-        val week = Prefs.snapshot(ctx)?.week.orEmpty()
+        val week = weekRuns(ctx)
         val zone = ZoneId.systemDefault()
         val nowSec = System.currentTimeMillis() / 1000
         val today = LocalDate.now()
@@ -78,6 +81,24 @@ object RunWindows {
         }
         val hints = Weather.swapHints(list, zone)
         return list.map { it.withSwap(hints[it.date]) }
+    }
+
+    /** This week's sessions plus the planned ones over the next week (with their intervals.icu event ids). */
+    fun weekRuns(ctx: Context): List<Workout> {
+        val snap = Prefs.snapshot(ctx) ?: return emptyList()
+        return snap.week + snap.ahead.filter { a -> snap.week.none { it.date == a.date && it.name == a.name && it.eventId == a.eventId } }
+    }
+
+    /**
+     * The "Swap in intervals.icu" offer for [date] (today or tomorrow), or null. Judged over the 7 days from today
+     * so it sees the same plans as the Week list.
+     */
+    fun swapFor(ctx: Context, date: LocalDate): Weather.SwapPlan? {
+        if (Prefs.credentials(ctx) == null) return null
+        val today = LocalDate.now()
+        val plans = plans(ctx, today, 7)
+        if (plans.isEmpty()) return null
+        return Weather.swapSuggestions(plans, weekRuns(ctx), today)[date]
     }
 
     /** One day's plan (with swap hints computed over the 7 days from today when it falls in that range). */
@@ -94,6 +115,7 @@ object RunWindows {
         val w = p.window ?: return null
         if (p.noData || p.passed) return null
         val zone = ZoneId.systemDefault()
+        p.split?.let { return "Run window: " + Weather.splitLabel(it, zone) }
         return "Best run window ${Weather.range(w, zone)}" + (if (w.icons.isNotEmpty()) " " + w.icons.joinToString("") else "") + " · " + p.summary.short
     }
 
@@ -102,7 +124,13 @@ object RunWindows {
     /** Fetches every source; [notify] also checks whether today's or tomorrow's best window moved and says so. */
     fun refresh(ctx: Context, notify: Boolean): WeatherApi.Report {
         val rep = WeatherApi.fetchAll(ctx)
-        if (rep.anyOk) runCatching { checkShift(ctx, notify) }
+        if (rep.anyOk) {
+            runCatching { data(ctx)?.let { Scoring.recordForecasts(ctx, it) } }
+            runCatching { Scoring.observeTile(ctx, data(ctx)) }
+            runCatching { checkShift(ctx, notify) }
+            runCatching { Watch.evaluate(ctx) }
+            runCatching { RwWidgets.renderAll(ctx) }
+        }
         return rep
     }
 
@@ -118,7 +146,8 @@ object RunWindows {
             RwStore.putStr(ctx, key, new.encode())
             if (!notify || new.end <= nowSec) continue
             if (!NotifySettings.isOn(ctx, NotifySettings.cat("rw_shift"))) continue
-            val msg = Weather.shiftMessage(old, new, zone) ?: continue
+            val watching = p.date == LocalDate.now() && Watch.isOn(ctx)
+            val msg = Weather.shiftMessage(old, new, zone, any = watching) ?: continue
             Notifier.windowShifted(ctx, msg, p.date)
         }
     }
