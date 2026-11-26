@@ -724,7 +724,7 @@ class SetupActivity : Activity() {
         val keyField = field("Paste your Rainbow key", true)
         out += keyField
         out += smallButton("Save key") {
-            val v = keyField.text.toString().trim()
+            val v = SecureKey.clean(keyField.text.toString())
             if (v.isEmpty()) rwSay("Paste the key first.")
             else if (SecureKey.save(this, v)) {
                 keyField.setText("")
@@ -733,7 +733,7 @@ class SetupActivity : Activity() {
             } else rwSay("This phone couldn't store the key securely, so it was not saved.")
         }
         out += smallButton("Test key") {
-            val typed = keyField.text.toString().trim()
+            val typed = SecureKey.clean(keyField.text.toString())
             val k = typed.ifEmpty { SecureKey.load(this).orEmpty() }
             if (k.isEmpty()) rwSay("Paste or save a key first.")
             else {

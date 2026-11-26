@@ -42,7 +42,7 @@ object SecureKey {
     fun save(ctx: Context, plain: String): Boolean = runCatching {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, secret())
-        val enc = c.doFinal(plain.trim().toByteArray(Charsets.UTF_8))
+        val enc = c.doFinal(clean(plain).toByteArray(Charsets.UTF_8))
         sp(ctx).edit()
             .putString(K_ENC, Base64.encodeToString(enc, Base64.NO_WRAP))
             .putString(K_IV, Base64.encodeToString(c.iv, Base64.NO_WRAP))
@@ -53,13 +53,16 @@ object SecureKey {
     fun has(ctx: Context): Boolean = sp(ctx).contains(K_ENC)
 
     /** The decrypted key, or null when none is saved or it can't be read. */
+    /** API keys are letters and digits only: drop spaces, line breaks and invisible characters picked up when copying. */
+    fun clean(raw: String): String = raw.filter { it.isLetterOrDigit() && it.code < 128 }
+
     fun load(ctx: Context): String? = runCatching {
         val p = sp(ctx)
         val enc = Base64.decode(p.getString(K_ENC, null) ?: return@runCatching null, Base64.NO_WRAP)
         val iv = Base64.decode(p.getString(K_IV, null) ?: return@runCatching null, Base64.NO_WRAP)
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.DECRYPT_MODE, secret(), GCMParameterSpec(128, iv))
-        String(c.doFinal(enc), Charsets.UTF_8).takeIf { it.isNotBlank() }
+        clean(String(c.doFinal(enc), Charsets.UTF_8)).takeIf { it.isNotBlank() }
     }.getOrNull()
 
     /** "••••abcd": only the last 4 characters. */
