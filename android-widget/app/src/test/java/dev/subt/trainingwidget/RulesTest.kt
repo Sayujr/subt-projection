@@ -1591,7 +1591,7 @@ class RulesTest {
         assertTrue(w.values.all { it > 0 })
         assertFalse("the combined pseudo-source gets no weight", Scoring.ALL in w)
         // default: equal weights until at least two sources have 10 observations
-        assertTrue(Scoring.weights(Scoring.pooled(archiveWith(9), 0)).isEmpty())
+        assertTrue(Scoring.weights(Scoring.pooled(archiveWith(5), 0)).isEmpty())
         assertTrue(Scoring.weights(mapOf("nws" to Scoring.Acc(12, 12), "gfs" to Scoring.Acc(1, 3))).isEmpty())
         // a source with too few checks gets the average
         val m = Scoring.weights(mapOf("nws" to Scoring.Acc(12, 12), "gfs" to Scoring.Acc(6, 12), "hrrr" to Scoring.Acc(1, 2)))
