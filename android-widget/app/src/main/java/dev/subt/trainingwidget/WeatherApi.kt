@@ -120,7 +120,7 @@ object WeatherApi {
      * the position, decodes the WebP and reads the pixels around it (see [CloudTile] for the cloudy-or-not rule).
      * Two Rainbow calls. Null when anything fails; never throws.
      */
-    fun cloudTileCloudy(ctx: Context, key: String, lat: Double, lon: Double): Boolean? = try {
+    fun cloudTileCloudy(ctx: Context, key: String, lat: Double, lon: Double): Boolean? = if (rainbowPaused(ctx)) null else try {
         val hdr = mapOf("Ocp-Apim-Subscription-Key" to key)
         RwStore.addCall(ctx)
         val snap = http("https://$RAINBOW_HOST/tiles/v1/snapshot?layer=clouds", hdr)
@@ -155,8 +155,18 @@ object WeatherApi {
 
     private fun rainbowGet(ctx: Context, url: String, key: String): Resp {
         RwStore.addCall(ctx)
-        return http(url, mapOf("Ocp-Apim-Subscription-Key" to key))
+        val r = http(url, mapOf("Ocp-Apim-Subscription-Key" to key))
+        if (r.code == 429) rainbowPause(ctx)
+        return r
     }
+
+    /**
+     * When Rainbow's monthly allowance runs out (HTTP 429) the app stops calling it for a day, then tries once a day
+     * until the allowance resets. The other sources carry on meanwhile.
+     */
+    private const val K_RB_PAUSE = "rw_rb_pause_until"
+    fun rainbowPause(ctx: Context) = RwStore.putLong(ctx, K_RB_PAUSE, System.currentTimeMillis() + 24 * 3600_000L)
+    fun rainbowPaused(ctx: Context): Boolean = System.currentTimeMillis() < RwStore.getLong(ctx, K_RB_PAUSE)
 
     fun fetchAll(ctx: Context): Report {
         val s = RwStore.load(ctx)
@@ -212,10 +222,12 @@ object WeatherApi {
 
         // Rainbow: only with a key; both calls count towards the monthly total
         val key = SecureKey.load(ctx)
-        if (key != null) {
+        if (key != null && rainbowPaused(ctx)) bad += "Rainbow (monthly limit used up: paused, retrying daily until it resets)"
+        else if (key != null) {
             step("Rainbow") {
                 val r = rainbowGet(ctx, rainbowForecastUrl(lat, lon), key)
                 if (r.code == 401 || r.code == 403) throw IOException("key rejected, HTTP ${r.code}")
+                if (r.code == 429) throw IOException("monthly limit used up: paused, retrying daily until it resets")
                 if (r.code != 200) throw IOException("HTTP ${r.code}")
                 if (Weather.parseRainbow(r.body).isEmpty()) throw IOException("no data")
                 RwStore.putCache(ctx, "rainbow", r.body)
