@@ -1346,6 +1346,22 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             c.setOnClickListener { RunWindows.refreshAsync(a, manual = true) { onChange() } }
             return
         }
+        if (p.run.done) {
+            // Today's run is synced as done: nothing more to plan today, tomorrow comes first
+            text(c, "✓ Today's run is done", 22f, GOOD, bold = true, top = 2)
+            val t = plans.getOrNull(1)
+            if (t != null && !t.noData) {
+                val tw = t.window
+                text(c, "Tomorrow  " + (if (tw == null) "no window" else Weather.range(tw, zone) + (if (tw.icons.isEmpty()) "" else " " + tw.icons.joinToString(" "))), 18f, TEXT, bold = true, top = 6)
+                text(c, (if (t.run.planned) "${t.run.name} · " else "") + t.summary.short, 13.5f, DIM)
+                val tb = RwViews.strip(a, t, s, chartW(), false, null)
+                image(c, tb, (tb.height / d).roundToInt())
+            }
+            c.addView(RwUi.outsideRow(a))
+            text(c, "Tap for tomorrow's plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 8)
+            c.setOnClickListener { RunWindowActivity.open(a, today.plusDays(1)) }
+            return
+        }
         val w = p.window
         val head = if (w == null) "No window fits" else Weather.range(w, zone) + (if (w.icons.isEmpty()) "" else "  " + w.icons.joinToString(" "))
         text(c, head, 26f, TEXT, bold = true, top = 2).apply { letterSpacing = 0.02f }

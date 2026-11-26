@@ -81,8 +81,8 @@ object Notifier {
     }
 
     /** "Run window shifted: …" (always on by default; opens that day's plan). */
-    fun windowShifted(ctx: Context, text: String, date: LocalDate) {
-        post(ctx, ALERTS, 21, "Run window shifted", text, "RW:$date")
+    fun windowShifted(ctx: Context, text: String, date: LocalDate, title: String = "Run window shifted") {
+        post(ctx, ALERTS, 21, title, text, "RW:$date")
     }
 
     fun run(ctx: Context) {

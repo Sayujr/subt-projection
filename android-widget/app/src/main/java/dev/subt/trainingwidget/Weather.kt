@@ -555,7 +555,8 @@ object Weather {
             w.distanceM > 0 -> (w.distanceM / 1000.0 * 5.5).roundToInt().coerceAtLeast(10)
             else -> 60
         }
-        return PlannedRun(w.name, minutes, typeOf(w), planned = true, done = w.status == WorkoutStatus.DONE)
+        // Any run synced as done that day counts: the planned session is complete
+        return PlannedRun(w.name, minutes, typeOf(w), planned = true, done = runs.any { it.status == WorkoutStatus.DONE })
     }
 
     // ================================================================ scoring

@@ -138,17 +138,24 @@ object RunWindows {
     private fun checkShift(ctx: Context, notify: Boolean) {
         val zone = ZoneId.systemDefault()
         val nowSec = System.currentTimeMillis() / 1000
-        // Today only looks at windows still ahead: never "shift" to a time that has already gone
+        // Today only looks at windows still ahead: never "shift" to a time that has already gone.
+        // Until today's run is synced as done, a missed window rolls on to the next best one.
         for (p in plans(ctx, LocalDate.now(), 2, useNow = true)) {
-            if (p.noData || p.passed) continue
+            if (p.noData || p.passed || p.run.done) continue
             val new = Weather.sigOf(p) ?: continue
             if (new.start < nowSec) continue
             val key = "rw_sig_${p.date}"
             val old = Weather.Sig.decode(RwStore.getStr(ctx, key))
+            // The old window is under way (maybe you're running it): wait until it has ended + 15 min
+            if (old != null && old.start <= nowSec && nowSec < old.end + 900) continue
             RwStore.putStr(ctx, key, new.encode())
             if (!notify) continue
-            // The old window has started or gone: moving on from it isn't a shift
-            if (old != null && old.start <= nowSec) continue
+            if (old != null && old.end + 900 <= nowSec && old.start != new.start) {
+                if (!NotifySettings.isOn(ctx, NotifySettings.cat("rw_shift"))) continue
+                Notifier.windowShifted(ctx, "Missed your window (${Weather.hhmm(old.start, zone)}–${Weather.hhmm(old.end, zone)})? Next best today: ${Weather.hhmm(new.start, zone)}–${Weather.hhmm(new.end, zone)}" +
+                    (if (p.run.planned) " for ${p.run.name}" else ""), p.date, title = "Next best run window")
+                continue
+            }
             if (!NotifySettings.isOn(ctx, NotifySettings.cat("rw_shift"))) continue
             val watching = p.date == LocalDate.now() && Watch.isOn(ctx)
             val msg = Weather.shiftMessage(old, new, zone, any = watching) ?: continue
