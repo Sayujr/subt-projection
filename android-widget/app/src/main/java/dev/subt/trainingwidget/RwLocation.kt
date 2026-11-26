@@ -2,6 +2,7 @@ package dev.subt.trainingwidget
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.content.pm.PackageManager
@@ -165,6 +166,38 @@ object LocPrompt {
         RunWindowSchedule.ensure(ctx)
         Toast.makeText(a, "Run windows now use $place", Toast.LENGTH_LONG).show()
         RunWindows.refreshAsync(ctx, manual = true) { redraw?.invoke() }
+    }
+
+    data class Place(val lat: Double, val lon: Double, val label: String)
+
+    /**
+     * Forward search for anything typed: an address ("1600 Market St"), a neighbourhood ("downtown Denver"),
+     * a ZIP / PIN / post code, or a town. Uses the phone's own Geocoder (Google's address search on most phones),
+     * then Open-Meteo's place search as a fallback. Up to 5 distinct results. Blocking: call off the main thread.
+     */
+    @Suppress("DEPRECATION")
+    fun search(ctx: Context, q: String): List<Place> {
+        val out = ArrayList<Place>()
+        runCatching {
+            if (android.location.Geocoder.isPresent()) {
+                android.location.Geocoder(ctx, Locale.getDefault()).getFromLocationName(q, 5).orEmpty().forEach { ad ->
+                    if (!ad.hasLatitude() || !ad.hasLongitude()) return@forEach
+                    val first = listOfNotNull(
+                        ad.featureName?.takeIf { f -> f != ad.locality && f != ad.postalCode && f != ad.subThoroughfare },
+                        listOfNotNull(ad.subThoroughfare, ad.thoroughfare).joinToString(" ").takeIf { it.isNotBlank() },
+                        ad.subLocality,
+                    ).distinct().joinToString(", ")
+                    val label = listOf(first, ad.locality ?: ad.subAdminArea ?: "", listOfNotNull(ad.adminArea, ad.postalCode).joinToString(" "), ad.countryCode ?: "")
+                        .filter { it.isNotBlank() }.distinct().joinToString(", ")
+                    out += Place(ad.latitude, ad.longitude, label.ifBlank { q })
+                }
+            }
+        }
+        if (out.isEmpty()) runCatching { out += WeatherApi.geocodeAll(q) }
+        // Drop near-duplicates (same spot within ~200 m)
+        return out.fold(ArrayList<Place>()) { acc, p ->
+            if (acc.none { Math.abs(it.lat - p.lat) < 0.002 && Math.abs(it.lon - p.lon) < 0.002 }) acc += p; acc
+        }.take(5)
     }
 
     /** Reverse lookup through the phone's own Geocoder when it has one; null otherwise (the caller shows lat, lon). */

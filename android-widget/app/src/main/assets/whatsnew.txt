@@ -1,3 +1,4 @@
+- Run windows: search any address, neighbourhood or ZIP / PIN code for your location (e.g. "downtown Denver"), and pick from the matches
 - Run windows: the Rainbow key is cleaned of spaces and invisible characters picked up when copying
 - Run windows: the location box now accepts coordinates as Google Maps shows them (39.9532° N, 75.1972° W), with N/S/E/W or degrees-minutes-seconds
 - Run windows part 2: home-screen widgets, the app checks forecasts against what actually happened (and your 'outside now' taps), watch-closely mode, split-run and swap-day suggestions, and a location-change check when you open the app

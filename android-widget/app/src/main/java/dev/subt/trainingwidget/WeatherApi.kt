@@ -245,6 +245,18 @@ object WeatherApi {
     }
 
     /** A place name → (lat, lon, label) through Open-Meteo's free geocoder; null when nothing matches. */
+    /** Open-Meteo place search (towns and some post codes), up to 5 results. */
+    fun geocodeAll(name: String): List<LocPrompt.Place> {
+        val r = http("https://geocoding-api.open-meteo.com/v1/search?name=${URLEncoder.encode(name.trim(), "UTF-8")}&count=5&language=en&format=json")
+        if (r.code != 200) throw IOException("HTTP ${r.code}")
+        val a = JSONObject(r.body).optJSONArray("results") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { i ->
+            val o = a.optJSONObject(i) ?: return@mapNotNull null
+            val label = listOf(o.optString("name"), o.optString("admin1"), o.optString("country_code")).filter { it.isNotBlank() }.joinToString(", ")
+            LocPrompt.Place(o.getDouble("latitude"), o.getDouble("longitude"), label)
+        }
+    }
+
     fun geocode(name: String): Triple<Double, Double, String>? {
         val r = http("https://geocoding-api.open-meteo.com/v1/search?name=${URLEncoder.encode(name.trim(), "UTF-8")}&count=1&language=en&format=json")
         if (r.code != 200) throw IOException("HTTP ${r.code}")

@@ -584,7 +584,7 @@ class SetupActivity : Activity() {
         out += head("Location")
         rwLocLabel = TextView(this).apply { setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f; setPadding(0, (6 * d).toInt(), 0, (6 * d).toInt()) }
         out += rwLocLabel!!
-        val place = field("Place name, or lat, lon (e.g. 40.01, -105.27)", false)
+        val place = field("Address, place, ZIP / PIN code, or lat, lon", false)
         out += place
         out += smallButton("Set location") {
             val raw = place.text.toString().trim()
@@ -593,13 +593,19 @@ class SetupActivity : Activity() {
             else if (c != null) applyLocation(c.first, c.second, "")
             else if (Regex("\\d").containsMatchIn(raw) && Regex("[°NSEWnsew]").containsMatchIn(raw)) rwSay("Couldn't read those coordinates. Try e.g. 39.95, -75.20")
             else {
-                rwSay("Looking up “$raw”…")
+                rwSay("Searching for “$raw”…")
                 Thread {
-                    val r = runCatching { WeatherApi.geocode(raw) }
+                    val found = runCatching { LocPrompt.search(this, raw) }.getOrDefault(emptyList())
                     runOnUiThread {
-                        val g = r.getOrNull()
-                        if (g != null) applyLocation(g.first, g.second, g.third)
-                        else rwSay(if (r.isFailure) "Couldn't reach the place lookup. Type lat, lon instead." else "No place found for “$raw”.")
+                        when {
+                            found.isEmpty() -> rwSay("No place found for “$raw”. Try a fuller address, a ZIP / PIN code, or lat, lon.")
+                            found.size == 1 -> applyLocation(found[0].lat, found[0].lon, found[0].label)
+                            else -> android.app.AlertDialog.Builder(this)
+                                .setTitle("Which one?")
+                                .setItems(found.map { it.label }.toTypedArray()) { _, i -> applyLocation(found[i].lat, found[i].lon, found[i].label) }
+                                .setNegativeButton("Cancel", null)
+                                .show()
+                        }
                     }
                 }.start()
             }
