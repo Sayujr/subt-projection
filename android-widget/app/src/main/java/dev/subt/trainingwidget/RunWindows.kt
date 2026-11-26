@@ -138,13 +138,17 @@ object RunWindows {
     private fun checkShift(ctx: Context, notify: Boolean) {
         val zone = ZoneId.systemDefault()
         val nowSec = System.currentTimeMillis() / 1000
-        for (p in plans(ctx, LocalDate.now(), 2, useNow = false)) {
-            if (p.noData) continue
+        // Today only looks at windows still ahead: never "shift" to a time that has already gone
+        for (p in plans(ctx, LocalDate.now(), 2, useNow = true)) {
+            if (p.noData || p.passed) continue
             val new = Weather.sigOf(p) ?: continue
+            if (new.start < nowSec) continue
             val key = "rw_sig_${p.date}"
             val old = Weather.Sig.decode(RwStore.getStr(ctx, key))
             RwStore.putStr(ctx, key, new.encode())
-            if (!notify || new.end <= nowSec) continue
+            if (!notify) continue
+            // The old window has started or gone: moving on from it isn't a shift
+            if (old != null && old.start <= nowSec) continue
             if (!NotifySettings.isOn(ctx, NotifySettings.cat("rw_shift"))) continue
             val watching = p.date == LocalDate.now() && Watch.isOn(ctx)
             val msg = Weather.shiftMessage(old, new, zone, any = watching) ?: continue

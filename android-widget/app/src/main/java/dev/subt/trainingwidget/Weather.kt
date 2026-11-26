@@ -684,7 +684,7 @@ object Weather {
             val out = ArrayList<Window>()
             var st = ceilTo(a, 1800L)
             while (st + lenSec <= b) {
-                if (nowSec == null || st >= nowSec - 900) build(st, st + lenSec, byT, pens, night)?.let { out += it }
+                if (nowSec == null || st >= nowSec) build(st, st + lenSec, byT, pens, night)?.let { out += it }
                 st += 1800
             }
             return out
@@ -946,7 +946,7 @@ object Weather {
             val out = ArrayList<Window>()
             var st = ceilTo(lo, 1800L)
             while (st + lenSec <= hi) {
-                if (nowSec == null || st >= nowSec - 900) build(st, st + lenSec, byT, pens, false)?.let { out += it }
+                if (nowSec == null || st >= nowSec) build(st, st + lenSec, byT, pens, false)?.let { out += it }
                 st += 1800
             }
             return out
