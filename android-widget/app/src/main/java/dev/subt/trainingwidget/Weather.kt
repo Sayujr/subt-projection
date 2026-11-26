@@ -726,6 +726,8 @@ object Weather {
         val (lo, hi) = allowedRange(date, sun, s, zone, lenSec)
         var cands = gen(lo, hi, false)
         if (cands.isEmpty()) cands = gen(atMinutes(date, 5 * 60, zone), nightEnd(date, zone), true)
+        // 20:00 is a preference, not a hard stop: if nothing else fits, a later night window is still offered
+        if (cands.isEmpty()) cands = gen(atMinutes(date, 5 * 60, zone), atMinutes(date, 23 * 60, zone), true)
         val best = cands.minByOrNull { it.score } ?: return Pick(null, false, emptyList())
         val risky = cands.all { it.dangerous }
         val tol = 1.5
