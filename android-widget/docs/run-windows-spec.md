@@ -166,4 +166,5 @@ Rules for every run type:
 ## Queued: winter evening hours (not built)
 - In winter, runs that **start** up to 18:30 count as normal daytime windows, even though it's dark. They are not night fallbacks.
 - After an 18:30 start, hours count as night: used only as a fallback, with 🌙 and a lights reminder. The latest finish is still 20:00.
-- To confirm when building: does "early" (morning) need the same, i.e. starts from about 06:30 before sunrise counting as daytime?
+- **Mornings:** keep the current rule (from sunrise minus 30 min) in winter, spring and autumn.
+- **Summer exception:** in summer, also allow early pre-sunrise starts as normal windows, to avoid UV. Earliest start follows the summer custom/auto hours (e.g. from 05:00).
