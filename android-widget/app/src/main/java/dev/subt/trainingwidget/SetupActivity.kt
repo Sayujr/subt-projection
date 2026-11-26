@@ -588,12 +588,11 @@ class SetupActivity : Activity() {
         out += place
         out += smallButton("Set location") {
             val raw = place.text.toString().trim()
-            val m = Regex("^(-?\\d+(?:\\.\\d+)?)\\s*[, ]\\s*(-?\\d+(?:\\.\\d+)?)$").matchEntire(raw)
+            val c = Weather.parseCoords(raw)
             if (raw.isEmpty()) rwSay("Type a place or lat, lon first.")
-            else if (m != null) {
-                val lat = m.groupValues[1].toDouble(); val lon = m.groupValues[2].toDouble()
-                if (lat in -90.0..90.0 && lon in -180.0..180.0) applyLocation(lat, lon, "") else rwSay("Those numbers aren't a valid position.")
-            } else {
+            else if (c != null) applyLocation(c.first, c.second, "")
+            else if (Regex("\\d").containsMatchIn(raw) && Regex("[°NSEWnsew]").containsMatchIn(raw)) rwSay("Couldn't read those coordinates. Try e.g. 39.95, -75.20")
+            else {
                 rwSay("Looking up “$raw”…")
                 Thread {
                     val r = runCatching { WeatherApi.geocode(raw) }

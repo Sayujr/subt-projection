@@ -1,3 +1,4 @@
+- Run windows: the location box now accepts coordinates as Google Maps shows them (39.9532° N, 75.1972° W), with N/S/E/W or degrees-minutes-seconds
 - Run windows part 2: home-screen widgets, the app checks forecasts against what actually happened (and your 'outside now' taps), watch-closely mode, split-run and swap-day suggestions, and a location-change check when you open the app
 - Run windows: best time to run today and tomorrow from Rainbow, NWS and 4 forecast models, scored for each run type (TT, SubT, long, easy) with your UV, heat, cold and rain rules; day plan with a summary; 7-day list on Week; alerts when the window shifts. Set your location and Rainbow key in Settings → Run windows
 - Week: the training-mix update no longer blanks the Week screen; existing numbers show at once while the mix fills in the background

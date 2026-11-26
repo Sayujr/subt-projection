@@ -75,6 +75,34 @@ object Weather {
     fun hourFloor(t: Long): Long = t - Math.floorMod(t, 3600L)
 
     /** ISO instants (UTC "Z", offsets, or no zone = UTC) or epoch seconds / milliseconds → epoch seconds. */
+    /**
+     * Coordinates typed or pasted in any common form: "39.95, -75.20", "39.9532° N, 75.1972° W",
+     * "39.9532N 75.1972W", "N 39.95 W 75.20", or degrees-minutes-seconds like 39°57'11"N 75°11'50"W.
+     * Returns (lat, lon) or null when it isn't a valid position.
+     */
+    fun parseCoords(raw: String): Pair<Double, Double>? {
+        val s = raw.trim().replace('′', '\'').replace('″', '"').replace("''", "\"")
+        val part = Regex("""([NSEWnsew])?\s*(-?\d+(?:\\.\d+)?)\s*°?\s*(?:(\d+(?:\\.\d+)?)\s*'\s*)?(?:(\d+(?:\\.\d+)?)\s*"\s*)?([NSEWnsew])?""")
+        val found = part.findAll(s).filter { it.groupValues[2].isNotEmpty() }.toList()
+        if (found.size != 2) return null
+        // Anything left besides separators means it isn't just coordinates (e.g. a place name with numbers)
+        val rest = part.replace(s, "").replace(Regex("[\\s,;/]"), "")
+        if (rest.isNotEmpty()) return null
+        fun value(m: MatchResult): Pair<Double, Char?> {
+            fun n(i: Int) = m.groupValues[i].replace(',', '.').toDoubleOrNull() ?: 0.0
+            val deg = n(2)
+            val abs = Math.abs(deg) + n(3) / 60 + n(4) / 3600
+            val hemi = (m.groupValues[1] + m.groupValues[5]).uppercase().firstOrNull()
+            val neg = deg < 0 || hemi == 'S' || hemi == 'W'
+            return (if (neg) -abs else abs) to hemi
+        }
+        var (a, ha) = value(found[0]); var (b, hb) = value(found[1])
+        // Longitude written first (E/W before N/S): swap
+        if ((ha == 'E' || ha == 'W') || (hb == 'N' || hb == 'S')) { val t = a; a = b; b = t }
+        if (a !in -90.0..90.0 || b !in -180.0..180.0) return null
+        return a to b
+    }
+
     fun parseInstant(v: Any?): Long? {
         if (v == null || v == JSONObject.NULL) return null
         if (v is Number) { val x = v.toLong(); return if (x > 100_000_000_000L) x / 1000 else x }

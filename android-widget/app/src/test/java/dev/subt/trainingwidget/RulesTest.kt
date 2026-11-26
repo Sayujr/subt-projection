@@ -981,6 +981,23 @@ class RulesTest {
         assertFalse(Weather.isFrozen(h[0].precipType))   // "no_precipitation"
     }
 
+    @Test fun rwParseCoords() {
+        fun ok(s: String, lat: Double, lon: Double) {
+            val c = Weather.parseCoords(s); assertNotNull(s, c)
+            assertEquals(s, lat, c!!.first, 1e-3); assertEquals(s, lon, c.second, 1e-3)
+        }
+        ok("39.95, -75.20", 39.95, -75.20)
+        ok("39.9532° N, 75.1972° W", 39.9532, -75.1972)
+        ok("39.9532N 75.1972W", 39.9532, -75.1972)
+        ok("N 39.95 W 75.20", 39.95, -75.20)
+        ok("75.1972° W, 39.9532° N", 39.9532, -75.1972)
+        ok("39°57'11\"N 75°11'50\"W", 39.9531, -75.1972)
+        ok("-33.87 151.21", -33.87, 151.21)
+        assertNull(Weather.parseCoords("Philadelphia"))
+        assertNull(Weather.parseCoords("New York 10001"))
+        assertNull(Weather.parseCoords("95, 200"))
+    }
+
     @Test fun rwParseRainbow() {
         val json = """{"hourly":[
             {"time":"2026-06-15T14:00:00Z","temperature":18.5,"feelsLikeTemperature":18.0,"temperatureDewPoint":9.0,"uvIndex":5.2,
