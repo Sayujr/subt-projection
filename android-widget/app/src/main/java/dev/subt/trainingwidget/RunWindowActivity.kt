@@ -185,9 +185,8 @@ class RunWindowActivity : Activity() {
         // 0. Outside now (today only): one tap tells the app what it's like, to check the forecasts
         if (date == LocalDate.now()) run {
             val c = card()
-            label(c, "Outside now?")
+            BandViews.heading(this, c, "OUTSIDE NOW?", "One tap records what you can see, so the app can check which forecast to trust.")
             c.addView(RwUi.outsideRow(this))
-            text(c, "One tap records what you can see, so the app can check which forecast to trust.", 12f, FAINT, top = 6)
         }
         // 1. Summary box
         run {
@@ -229,31 +228,30 @@ class RunWindowActivity : Activity() {
                 }
                 if (today) {
                     val on = Watch.isOn(this)
+                    BandViews.heading(this, c, "WATCH TODAY CLOSELY", "Watching checks the forecast every 30 minutes until the window starts (or 22:00, never 22:00–05:00) and tells you about any change. It switches on by itself for a narrow ⚠ window or when sources disagree.", topDp = 4)
                     button(c, if (on) "Stop watching closely" else "Watch today closely") {
                         val nowOn = Watch.toggle(this)
                         Toast.makeText(this, if (nowOn) "Checking every 30 minutes until the window starts" else "No longer watching closely", Toast.LENGTH_SHORT).show()
                         render()
                     }
-                    text(c, "Watching checks the forecast every 30 minutes until the window starts (or 22:00, never 22:00–05:00) and tells you about any change. It switches on by itself for a narrow ⚠ window or when sources disagree.", 12f, FAINT, top = 6)
                 }
             }
         }
         // 2. Strips
         run {
             val c = card()
-            label(c, "Overall pick")
+            BandViews.heading(this, c, "OVERALL PICK", "White box = the window, blue line = now. Cell colour is the weather: green cool, orange to red hotter, dark red hot and sunny, grey-blue cold; night cells are darker with a 🌙, hatched cells have no data. Icons: 💧 rain, ☁ cloud, ☀ UV over your limit, 🔥 hot, 🧤 cold, 🧊 ice, 😷 air quality. The line above the cells shows daylight (solid), 'dark OK' (dashed) and night (dotted).")
             scrollImage(c, RwViews.strip(this, plan, s, wPx, false, nowSec, other = if (plan.same) null else plan.rainbow, minCellDp = 22f), plan, wPx)
             if (plan.rainbowPresent && plan.rbHours.isNotEmpty()) {
                 label(c, if (plan.same) "Rainbow alone (same window)" else "Rainbow pick (dashed on the strip above)").setPadding(0, dp(12), 0, 0)
                 scrollImage(c, RwViews.strip(this, plan, s, wPx, false, nowSec, hours = plan.rbHours, win = plan.rainbow, minCellDp = 22f), plan, wPx)
             }
-            text(c, "White box = the window, blue line = now. Cell colour is the weather: green cool, orange to red hotter, dark red hot and sunny, grey-blue cold; night cells are darker with a 🌙, hatched cells have no data. Icons: 💧 rain, ☁ cloud, ☀ UV over your limit, 🔥 hot, 🧤 cold, 🧊 ice, 😷 air quality. The line above the cells shows daylight (solid), 'dark OK' (dashed) and night (dotted).", 12f, FAINT, top = 8)
         }
         // 3. Hour table for the window
         val w = plan.window
         if (w != null) {
             val c = card()
-            label(c, "The window, hour by hour")
+            BandViews.heading(this, c, "THE WINDOW, HOUR BY HOUR", "Rain is mm per hour · chance. Wind and gusts in km/h. Yellow rows: rain over 0.5 mm/h or UV over your limit of ${s.uvLimit.roundToInt()}.")
             val wt = listOf(1.0f, 1.2f, 0.8f, 0.6f, 0.7f, 1.4f, 1.3f)
             cells(c, listOf("Hour", "°C feels", "Cloud", "UV", "Dew", "Rain mm·%", "Wind"), wt, header = true)
             val hf = DateTimeFormatter.ofPattern("HH:mm")
@@ -269,14 +267,14 @@ class RunWindowActivity : Activity() {
                     "${h.wind?.roundToInt() ?: "–"} (${h.gust?.roundToInt() ?: "–"})",
                 ), wt, color = if (wet || h.uv > s.uvLimit) WARN else TEXT)
             }
-            text(c, "Rain is mm per hour · chance. Wind and gusts in km/h. Yellow rows: rain over 0.5 mm/h or UV over your limit of ${s.uvLimit.roundToInt()}.", 12f, FAINT, top = 6)
             plan.sun?.let { text(c, "🌅 sunrise ${Weather.hhmm(it.rise, zone)}   🌇 sunset ${Weather.hhmm(it.set, zone)}", 13f, DIM, top = 8) }
         }
         // 4. Sources
         run {
             val c = card()
-            label(c, "What each source thinks")
             val data = RunWindows.data(this)
+            val fetched = data?.fetched?.entries?.joinToString("  ·  ") { "${it.key} ${Weather.hhmm(it.value / 1000, zone)}" }
+            BandViews.heading(this, c, "WHAT EACH SOURCE THINKS", "Yellow = disagrees with the median on cloud or rain somewhere in the window. Rain is mm per hour · chance. Right = how often that source's cloudy-or-not call matched what happened (last 30 days; needs a few of your outside-now taps or Rainbow checks). NWS gives cloud only. UV shows each source's own value; the plan uses the highest." + (if (fetched.isNullOrEmpty()) "" else "\nFetched: $fetched"))
             if (w == null || data == null) text(c, "No window to compare.", 13f, DIM, top = 4)
             else {
                 val wt = listOf(1.2f, 0.7f, 0.9f, 0.7f, 1.4f, 0.9f)
@@ -298,18 +296,15 @@ class RunWindowActivity : Activity() {
                         acc[id]?.takeIf { it.total >= 3 }?.pct?.let { "$it%" } ?: "–",
                     ), wt, color = if (dissent) WARN else TEXT)
                 }
-                text(c, "Yellow = disagrees with the median on cloud or rain somewhere in the window. Rain is mm per hour · chance. Right = how often that source's cloudy-or-not call matched what happened (last 30 days; needs a few of your outside-now taps or Rainbow checks). NWS gives cloud only. UV shows each source's own value; the plan uses the highest.", 12f, FAINT, top = 6)
-                val fetched = data.fetched.entries.joinToString("  ·  ") { "${it.key} ${Weather.hhmm(it.value / 1000, zone)}" }
-                text(c, "Fetched: $fetched", 12f, FAINT, top = 4)
             }
         }
         // 5. Buttons
         run {
             val c = card()
             status?.let { text(c, it, 13f, if (it.startsWith("Couldn't")) WARN else GOOD) }
+            BandViews.heading(this, c, "FORECAST UPDATES", "The forecast refreshes by itself every 3 hours (hourly on a run day until the window starts), and not between 22:00 and 05:00.")
             button(c, "Refresh now") { refreshNow() }
             button(c, "Open in Rainbow") { openRainbow() }
-            text(c, "The forecast refreshes by itself every 3 hours (hourly on a run day until the window starts), and not between 22:00 and 05:00.", 12f, FAINT, top = 10)
         }
         // 6. Quiet manual option: only for a planned run still to do (today or later)
         run {

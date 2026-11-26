@@ -634,7 +634,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4); bottomMargin = dp(4) }
         }
         val title = runCatching { LocalDate.parse(day).format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())) }.getOrDefault(day)
-        card.addView(TextView(this).apply { text = title; setTextColor(0xFFF2F4F8.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f) })
+        BandViews.heading(this, card, title, "Load split is an estimate; time and distance are measured.", 0xFFF2F4F8.toInt(), 15f, spacing = 0f)
         if (total <= 0) {
             card.addView(TextView(this).apply { text = "No running time with numbers for this day."; setTextColor(0xFF9AA3B2.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, dp(4), 0, 0) })
         } else {
@@ -643,10 +643,6 @@ class MainActivity : Activity() {
                 card.addView(BandViews.statRow(this, name, sec[k], sec[k] / total * 100, m[k]))
             }
         }
-        card.addView(TextView(this).apply {
-            text = "Load split is an estimate; time and distance are measured."
-            setTextColor(0xFF6B7386.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f); setPadding(0, dp(6), 0, 0)
-        })
         return card
     }
 

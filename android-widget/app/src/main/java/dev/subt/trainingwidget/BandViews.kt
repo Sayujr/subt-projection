@@ -80,10 +80,10 @@ object BandViews {
     }
 
     /** Small heading with a tappable "ⓘ" that shows or hides a short note underneath. */
-    fun heading(ctx: Context, parent: LinearLayout, title: String, note: String?, color: Int = DIM, size: Float = 11f, topDp: Int = 0) {
+    fun heading(ctx: Context, parent: LinearLayout, title: String, note: String?, color: Int = DIM, size: Float = 11f, topDp: Int = 0, spacing: Float = 0.08f) {
         val d = ctx.resources.displayMetrics.density
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, (topDp * d).roundToInt(), 0, 0) }
-        row.addView(TextView(ctx).apply { text = title; setTextSize(TypedValue.COMPLEX_UNIT_SP, size); setTextColor(color); letterSpacing = 0.08f })
+        row.addView(TextView(ctx).apply { text = title; setTextSize(TypedValue.COMPLEX_UNIT_SP, size); setTextColor(color); letterSpacing = spacing })
         parent.addView(row)
         if (note == null) return
         val tv = TextView(ctx).apply {

@@ -262,7 +262,7 @@ class SwapActivity : Activity() {
             c.setOnClickListener { selected = i; render() }
         }
         if (opts.isNotEmpty()) {
-            text(col, "Green boxes are added doubles (with the time of the better window). White outline = moved, green outline = added. Nothing changes in intervals.icu until you tap Apply and confirm. Workouts are never deleted: they are moved, or a missed one stays and shows as not done.", 12f, FAINT).setPadding(dp(4), 0, 0, dp(6))
+            BandViews.heading(this, col, "READING THESE OPTIONS", "Green boxes are added doubles (with the time of the better window). White outline = moved, green outline = added. Nothing changes in intervals.icu until you tap Apply and confirm. Workouts are never deleted: they are moved, or a missed one stays and shows as not done.")
         }
         val c = card()
         status?.let { text(c, it, 13.5f, if (it.startsWith("Couldn't")) WARN else GOOD) }

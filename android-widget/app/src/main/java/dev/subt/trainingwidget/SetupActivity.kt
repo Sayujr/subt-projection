@@ -116,6 +116,7 @@ class SetupActivity : Activity() {
         }
 
         organiseSections(hasGraphs)
+        for (id in listOf(R.id.info_account, R.id.info_numbers, R.id.info_send, R.id.widget_hint)) findViewById<TextView>(id)?.let { collapseNote(it) }
 
         save.setOnClickListener {
             saveNumbers()
@@ -291,7 +292,25 @@ class SetupActivity : Activity() {
             .apply { topMargin = (8 * resources.displayMetrics.density).toInt() }
     }
 
-    private fun note(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7386.toInt()); textSize = 12f; setPadding(0, (6 * resources.displayMetrics.density).toInt(), 0, 0) }
+    /** One short line stays as it is; anything longer folds behind a small "ⓘ" that opens the full note when tapped. */
+    private fun note(t: String): TextView {
+        val tv = TextView(this).apply { text = t; setTextColor(0xFF6B7386.toInt()); textSize = 12f; setPadding(0, (6 * resources.displayMetrics.density).toInt(), 0, 0) }
+        if (t.length > 60) collapseNote(tv)
+        return tv
+    }
+
+    /** Turns an existing note into a collapsed "ⓘ" (same look as the ⓘ toggles on the main screens). */
+    private fun collapseNote(tv: TextView) {
+        val full = tv.text.toString()
+        val d = resources.displayMetrics.density
+        var open = false
+        fun draw() { tv.text = if (open) "ⓘ  $full" else "ⓘ"; tv.textSize = if (open) 12.5f else 14f }
+        tv.setTextColor(0xFF6B7386.toInt())
+        tv.setPadding(0, (6 * d).toInt(), (10 * d).toInt(), (4 * d).toInt())
+        tv.contentDescription = "Explain"
+        tv.setOnClickListener { open = !open; draw() }
+        draw()
+    }
 
     /** One row per notification category: switch, what it is, and its time (tap to change). */
     private fun buildNotifyRows() {
@@ -316,7 +335,7 @@ class SetupActivity : Activity() {
             val sw = android.widget.CheckBox(this).apply { isChecked = checked; setOnCheckedChangeListener { _, on -> onToggle(on); DailyRefresh.ensure(this@SetupActivity) } }
             val txt = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
             txt.addView(TextView(this).apply { text = title; setTextColor(0xFFF2F4F8.toInt()); textSize = 15f })
-            txt.addView(TextView(this).apply { text = help; setTextColor(0xFF6B7386.toInt()); textSize = 12f })
+            txt.addView(note(help))
             r.addView(sw); r.addView(txt, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (time != null && onTime != null) r.addView(timeChip(time, onTime))
             box.addView(r)
@@ -505,7 +524,7 @@ class SetupActivity : Activity() {
             row.addView(btn("+", step), android.widget.LinearLayout.LayoutParams((40 * d).toInt(), (36 * d).toInt()))
             refresh()
             box.addView(row)
-            box.addView(TextView(this).apply { text = help; setTextColor(0xFF6B7386.toInt()); textSize = 12f })
+            box.addView(note(help))
             return box
         }
         val c = this
@@ -736,7 +755,7 @@ class SetupActivity : Activity() {
             row.addView(btn("+", step), android.widget.LinearLayout.LayoutParams((40 * d).toInt(), (36 * d).toInt()))
             refresh()
             box.addView(row)
-            box.addView(TextView(this).apply { text = help; setTextColor(0xFF6B7386.toInt()); textSize = 12f })
+            box.addView(note(help))
             return box
         }
         val c = this

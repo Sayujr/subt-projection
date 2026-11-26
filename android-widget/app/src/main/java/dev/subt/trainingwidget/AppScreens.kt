@@ -340,14 +340,12 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             }
             // Show the working
             val f = DateTimeFormatter.ofPattern("d MMM", loc)
-            text(tg, spans(
-                "How it's worked out\n" to DIM,
-                "Reference peak = 50% × 2-month peak ${tt.p60?.roundToInt() ?: "–"} + 30% × 3-month ${tt.p90?.roundToInt() ?: "–"} + 20% × 4-month ${tt.p120?.roundToInt() ?: "–"} = ${tt.ref.roundToInt()}\n" to FAINT,
-                "Fatigue range = ${Taper.pct(tt.f - 0.04)}–${Taper.pct(tt.f + 0.03)} of reference, target at the low end (${Taper.pct(tt.f - 0.03)}). Centre ${Taper.pct(tt.f)}: ${race.category.removePrefix("RACE_")} race, ${dist.label.lowercase(loc)}, ${listOf("strict", "standard", "relaxed")[preset]} preset → ${Taper.pct(tt.baseF)}" to FAINT,
-                (if (tt.personalF != null) ", blended 50/50 with your ${tt.personalN} improved race${if (tt.personalN > 1) "s" else ""} (${Taper.pct(tt.personalF)})" else ", not yet calibrated (load Past races)") to FAINT,
-                "\nFitness floor = ${Taper.pct(tt.g)} of reference (by distance and priority)" to FAINT,
-            ), 12f, top = 10)
-            info(tg, "Form is Fitness minus Fatigue, so it follows from these two. Change the strictness with the chips above.")
+            info(tg, "How it's worked out\n" +
+                "Reference peak = 50% × 2-month peak ${tt.p60?.roundToInt() ?: "–"} + 30% × 3-month ${tt.p90?.roundToInt() ?: "–"} + 20% × 4-month ${tt.p120?.roundToInt() ?: "–"} = ${tt.ref.roundToInt()}\n" +
+                "Fatigue range = ${Taper.pct(tt.f - 0.04)}–${Taper.pct(tt.f + 0.03)} of reference, target at the low end (${Taper.pct(tt.f - 0.03)}). Centre ${Taper.pct(tt.f)}: ${race.category.removePrefix("RACE_")} race, ${dist.label.lowercase(loc)}, ${listOf("strict", "standard", "relaxed")[preset]} preset → ${Taper.pct(tt.baseF)}" +
+                (if (tt.personalF != null) ", blended 50/50 with your ${tt.personalN} improved race${if (tt.personalN > 1) "s" else ""} (${Taper.pct(tt.personalF)})" else ", not yet calibrated (load Past races)") +
+                "\nFitness floor = ${Taper.pct(tt.g)} of reference (by distance and priority)\n\n" +
+                "Form is Fitness minus Fatigue, so it follows from these two. Change the strictness with the chips above.")
         }
 
         // Coach notes
@@ -532,7 +530,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 }
             } else if (dd != RaceDistance.OTHER) text(c, "Your first ${dd.label} in this period.", 12f, FAINT, top = 6)
         }
-        text(card(col), "Races where you beat your previous time at that distance calibrate your Fatigue target on upcoming races.", 12f, FAINT)
+        info(col, "Races where you beat your previous time at that distance calibrate your Fatigue target on upcoming races.")
     }
 
     // ---------------------------------------------------------------- Recovery
@@ -558,7 +556,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             label(c, title, color)
             if (values.isEmpty()) {
                 text(c, "No $title data in intervals.icu for this period.", 14f, DIM, top = 4)
-                text(c, whatItMeans, 12f, FAINT, top = 4)
+                info(c, whatItMeans)
                 return
             }
             val v = values.map { it.second }
@@ -939,8 +937,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 (eta?.let { monthLabel(it) } ?: ">6 yr") to (if (sel) GOOD else DIM),
             ), weights = listOf(1.5f, 1f, 1f, 1.1f, 1.1f))
         }
-        text(c, "Assumes fat-only change: about 0.7% faster per 1% of body weight lost (roughly 2–3 s/km per kg), the usual rule of thumb. " +
-            "Losing more than about 0.5 kg/week while training hard risks low energy availability (RED-S), injury and lost fitness, so fuel your key sessions.", 12f, FAINT, top = 8)
+        info(c, "Assumes fat-only change: about 0.7% faster per 1% of body weight lost (roughly 2–3 s/km per kg), the usual rule of thumb. " +
+            "Losing more than about 0.5 kg/week while training hard risks low energy availability (RED-S), injury and lost fitness, so fuel your key sessions.")
     }
 
     private data class SubtNow(val months: List<SubtMonth>, val cur: Double)
@@ -1115,8 +1113,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 (wm?.let { "${fmt1(it)}" } ?: "–") to DIM,
             ), weights = listOf(1f, 0.9f, 1f, 1.2f, 1f))
         }
-        text(tb, "SubT = the median pace your SubT reps should average that month (HR kept under your 172 ceiling). " +
-            "5K and HM are the race times that SubT supports. Run a 5K or a hard parkrun every 4–6 weeks: matching the 5K column means you're on schedule.", 12f, FAINT, top = 8)
+        info(tb, "SubT = the median pace your SubT reps should average that month (HR kept under your 172 ceiling). " +
+            "5K and HM are the race times that SubT supports. Run a 5K or a hard parkrun every 4–6 weeks: matching the 5K column means you're on schedule.")
 
         val g = card(col)
         label(g, "How to train for it")
@@ -1537,7 +1535,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val c = card(col)
         label(c, "Check intervals.icu", WARN)
         dev.forEach { bullet(c, WARN, it) }
-        text(c, "The app is using your numbers. Update intervals.icu yourself if it should match. The app never changes it.", 11.5f, FAINT, top = 6)
+        info(c, "The app is using your numbers. Update intervals.icu yourself if it should match. The app never changes it.")
     }
 
     /** Today's planned sessions with their power steps (app only). */
@@ -1930,7 +1928,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             2 -> powerZones(col, s)
             else -> powerRace(col, p)
         }
-        text(card(col), "Power comes from intervals.icu's primary power source (CP source: ${p.cpSource}). Stryd and Garmin read about 20% apart, so keep one source, ideally Stryd, as primary.", 12f, FAINT)
+        info(col, "Power comes from intervals.icu's primary power source (CP source: ${p.cpSource}). Stryd and Garmin read about 20% apart, so keep one source, ideally Stryd, as primary.")
     }
 
     private fun fmtW(v: Double?) = v?.let { "${it.roundToInt()} W" } ?: "–"

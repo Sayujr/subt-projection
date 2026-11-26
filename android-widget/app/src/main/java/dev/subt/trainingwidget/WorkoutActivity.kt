@@ -515,11 +515,10 @@ class WorkoutActivity : Activity() {
         // Power / pace / HR over time
         if (det.watts.any { it != null } || det.heart.any { it != null }) {
             val c = card()
-            label(c, "Power · ${if (ride) "speed" else "pace"} · heart rate")
+            BandViews.heading(this, c, "POWER · ${if (ride) "SPEED" else "PACE"} · HEART RATE", "Shaded = work steps · green band = power target · dashed = HR 165 and 172. Touch and drag to read values.")
             val bmp = WorkoutChart.draw(det, contentW(), dp(260), d, TILE)
             val iv = image(c, bmp, 260)
             ChartHits.get(bmp)?.let { Scrub.attach(iv, bmp, it) }
-            text(c, "Shaded = work steps · green band = power target · dashed = HR 165 and 172. Touch and drag to read values.", 11.5f, FAINT, top = 4)
         }
 
         // Steps against target

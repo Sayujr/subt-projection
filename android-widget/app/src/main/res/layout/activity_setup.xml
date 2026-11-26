@@ -19,6 +19,7 @@
             android:textSize="22sp" />
 
         <TextView
+            android:id="@+id/info_account"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -186,6 +187,7 @@
             android:textSize="18sp" />
 
         <TextView
+            android:id="@+id/info_numbers"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
@@ -390,6 +392,7 @@
             android:textSize="18sp" />
 
         <TextView
+            android:id="@+id/info_send"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
