@@ -199,5 +199,6 @@ object Fixture {
         note = CoachNotes.withQuestion(note, note.about, "$date 19:42", det.name, "Was the first rep too slow?", r.lines.joinToString("; ") { it.text })
         note = note.copy(questions = note.questions.map { if (it.n == 1) it.copy(answer = "Not yet. Hold these targets for one more week, then add about 5 W.") else it })
         Prefs.saveCoachNotes(ctx, mapOf(date to CoachNotes.render(note)))
+        WxFixture.seed(ctx)
     }
 }

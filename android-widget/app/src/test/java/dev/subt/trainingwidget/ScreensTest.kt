@@ -166,6 +166,29 @@ class ScreensTest {
             File(outDir, "example_note.txt").writeText(Prefs.coachNotes(ctx).values.first())
             ctl.pause().stop().destroy()
         }
+        // Run windows: the day plan for today and tomorrow (the Today card and the Week list show up in app_home / app_week)
+        for ((label, offset) in listOf("today" to 0L, "tomorrow" to 1L, "wet_day" to 2L)) safely("runwindow_$label") {
+            val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, Fixture.today.plusDays(offset).toString())
+            val ctl = Robolectric.buildActivity(RunWindowActivity::class.java, i).setup()
+            settle()
+            capture("runwindow_$label", ctl.get().window.decorView)
+            ctl.pause().stop().destroy()
+        }
+        // The Today card and the Week list on their own, as plain views
+        safely("runwindow_card_and_list") {
+            val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+            val col = android.widget.LinearLayout(act).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(0xFF0F1218.toInt()) }
+            val screens = AppScreens(act, 392)
+            screens.runWindowCard(col)
+            screens.runWindowsWeek(col)
+            val w = (392 * ctx.resources.displayMetrics.density).toInt()
+            col.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val h = col.measuredHeight.coerceIn(1, 8000)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            col.layout(0, 0, w, h)
+            Canvas(bmp).also { it.drawColor(0xFF0F1218.toInt()); col.draw(it) }
+            save("runwindow_card_and_list", bmp)
+        }
         // The Coach sheet for the made-up workout, built as a plain view (no dialog) so it can be captured
         safely("coach_sheet") {
             val act = Robolectric.buildActivity(WorkoutActivity::class.java, Intent(ctx, WorkoutActivity::class.java).putExtra(WorkoutActivity.EXTRA_ID, "i999")).setup().get()

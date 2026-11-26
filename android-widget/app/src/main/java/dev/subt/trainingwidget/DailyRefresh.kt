@@ -40,6 +40,7 @@ object DailyRefresh {
     /** Called from the app, widgets and receiver: hourly job + daily alarms are in place. */
     fun ensure(ctx: Context) {
         Refresh.schedulePeriodic(ctx)
+        runCatching { RunWindowSchedule.ensure(ctx) }
         arm(ctx)
     }
 

@@ -28,8 +28,11 @@ object Notifier {
     private fun post(ctx: Context, channel: String, id: Int, title: String, text: String, tab: String) {
         if (!allowed(ctx)) return
         channels(ctx)
-        val target = if (tab == "SETTINGS") Intent(ctx, SetupActivity::class.java).putExtra(SetupActivity.EXTRA_OPEN, "update")
-            else Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, tab)
+        val target = when {
+            tab == "SETTINGS" -> Intent(ctx, SetupActivity::class.java).putExtra(SetupActivity.EXTRA_OPEN, "update")
+            tab.startsWith("RW:") -> Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, tab.removePrefix("RW:"))
+            else -> Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, tab)
+        }
         val pi = PendingIntent.getActivity(
             ctx, id, target
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
@@ -62,6 +65,26 @@ object Notifier {
         Prefs.setLastNotified(ctx, key, value)
     }
 
+    /** Tomorrow's best run window, in the evening (default 20:00); once per day. Needs a location, not intervals.icu. */
+    fun runWindows(ctx: Context) {
+        val N = NotifySettings
+        val c = N.cat("rw_tomorrow")
+        if (!N.isOn(ctx, c) || !N.inWindow(LocalTime.now(), N.time(ctx, c), 3)) return
+        val tomorrow = LocalDate.now().plusDays(1)
+        val p = RunWindows.plan(ctx, tomorrow) ?: return
+        if (p.noData) return
+        val zone = java.time.ZoneId.systemDefault()
+        val w = p.window
+        val title = if (w == null) "Tomorrow: no run window fits" else "Tomorrow's run window: ${Weather.range(w, zone)}" + (if (w.icons.isNotEmpty()) " " + w.icons.joinToString("") else "")
+        val body = listOfNotNull(p.run.name.takeIf { p.run.planned }?.let { "${it} · ${p.run.type.label}" }, p.summary.short, p.summary.suggestion).joinToString("\n")
+        once(ctx, "rw_tomorrow", LocalDate.now().toString()) { post(ctx, DAILY, 20, title, body, "RW:$tomorrow") }
+    }
+
+    /** "Run window shifted: …" (always on by default; opens that day's plan). */
+    fun windowShifted(ctx: Context, text: String, date: LocalDate) {
+        post(ctx, ALERTS, 21, "Run window shifted", text, "RW:$date")
+    }
+
     fun run(ctx: Context) {
         val s = Prefs.snapshot(ctx) ?: return
         val today = LocalDate.now().toString()
@@ -81,7 +104,8 @@ object Notifier {
             if (todo.isNotEmpty()) once(ctx, "workout_am", today) {
                 val k = todo.maxByOrNull { it.load }!!
                 val more = if (todo.size > 1) " (+${todo.size - 1} more)" else ""
-                post(ctx, DAILY, 8, "Today: ${k.name}$more", listOfNotNull(k.steps, WidgetRenderer.meta(k).takeIf { it.isNotBlank() }).joinToString("\n").ifEmpty { "Planned for today" }, "HOME")
+                val window = if (on("rw_today")) runCatching { RunWindows.todayLine(ctx) }.getOrNull() else null
+                post(ctx, DAILY, 8, "Today: ${k.name}$more", listOfNotNull(k.steps, WidgetRenderer.meta(k).takeIf { it.isNotBlank() }, window).joinToString("\n").ifEmpty { "Planned for today" }, "HOME")
             }
         }
         // Workout not done yet (off by default)

@@ -23,6 +23,9 @@ object NotifySettings {
         Cat("taper", "Taper off target", "Race-morning Fatigue projected above your range (last 7 days)", true, null),
         Cat("streak", "Weekly streak result", "Mondays", true, null),
         Cat("update", "App update ready", "A new version is ready in Settings → App updates", true, null),
+        Cat("rw_tomorrow", "Tomorrow's run window", "The best time to run tomorrow, the evening before", true, 20 * 60),
+        Cat("rw_today", "Today's run window", "Added to the morning workout notification", true, null),
+        Cat("rw_shift", "Run window shifted", "When a refresh moves today's or tomorrow's best window by 30 min or more, or rain / risk changes", true, null),
     )
     const val ALERTS_FROM_DEFAULT = 9 * 60
 
@@ -34,8 +37,7 @@ object NotifySettings {
         // Earlier versions had three switches: carry them over
         return when (c.key) {
             "recovery" -> p.getBoolean("notify_morning", c.defaultOn)
-            "workout" -> c.defaultOn
-            "reminder" -> c.defaultOn
+            "workout", "reminder", "rw_tomorrow", "rw_today", "rw_shift" -> c.defaultOn
             else -> p.getBoolean("notify_alerts", c.defaultOn)
         }
     }

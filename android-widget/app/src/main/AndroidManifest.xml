@@ -8,9 +8,14 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Run windows: only asked for when you tap "Use where I am now"; coarse, foreground only -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <queries>
         <package android:name="com.anthropic.claude" />
+        <package android:name="ai.rainbow.android" />
+        <package android:name="ai.rainbow.weather" />
+        <package android:name="app.rainbow.weather" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
@@ -37,6 +42,10 @@
 
         <activity
             android:name=".WorkoutActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".RunWindowActivity"
             android:exported="false" />
 
         <activity

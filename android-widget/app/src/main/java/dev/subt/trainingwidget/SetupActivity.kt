@@ -179,6 +179,7 @@ class SetupActivity : Activity() {
         const val EXTRA_OPEN = "open_section"
         private const val REQ_EXPORT = 41
         private const val REQ_IMPORT = 42
+        private const val REQ_LOC = 43
         private val sentToday = mutableMapOf<String, String>()
         private val sectionOpen = mutableMapOf<String, Boolean>()
     }
@@ -240,6 +241,7 @@ class SetupActivity : Activity() {
         section("num", "Your numbers", if (dev > 0) "$dev differ from intervals.icu" else "Weight, CP, RHR, HRV, SubT, PBs", !widgetMode, groups["num"]!!)
         section("send", "Send to intervals.icu", "Optional, asks before each change", false, groups["send"]!!)
         section("rules", "Rules", "Plan tolerance, streak bands, marathon power", false, rulesViews())
+        section("rw", "Run windows", rwSub(), intent?.getStringExtra(EXTRA_OPEN) == "rw", runWindowViews())
         section("wid", "Widgets", if (widgetMode) "This widget's graphs and period" else "Long-press a widget to change it", widgetMode, groups["wid"]!!)
         section("coach", "Coach", "Tone of the read-out you take to the Claude app", false, coachViews())
         section("backup", "Backup", "Save or restore your settings and numbers", false, backupViews())
@@ -302,6 +304,11 @@ class SetupActivity : Activity() {
         row("Alerts not before", "Alerts that come up earlier wait until this time", true, {}, N.alertsFrom(this)) { N.setAlertsFrom(this, it) }
         (box.getChildAt(box.childCount - 1) as android.widget.LinearLayout).getChildAt(0).visibility = View.INVISIBLE
         for (k in listOf("deviations", "eftp", "taper", "streak", "update")) { val c = N.cat(k); row(c.label, c.help, N.isOn(this, c), { N.setOn(this, c, it) }, null, null) }
+        header("Run windows")
+        for (k in listOf("rw_tomorrow", "rw_today", "rw_shift")) {
+            val c = N.cat(k)
+            row(c.label, c.help, N.isOn(this, c), { N.setOn(this, c, it) }, if (c.defaultTime != null) N.time(this, c) else null, if (c.defaultTime != null) ({ v: Int -> N.setTime(this, c, v) }) else null)
+        }
         if (android.os.Build.VERSION.SDK_INT >= 31 && getSystemService(android.app.AlarmManager::class.java)?.canScheduleExactAlarms() == false) {
             box.addView(TextView(this).apply {
                 text = "⚠ Android may deliver these a few minutes late. Tap to allow exact times."
@@ -484,6 +491,248 @@ class SetupActivity : Activity() {
             stepper("LT1 heart rate", "Top of the long-run aerobic band. Default 153 = 89% of threshold HR 172 (a rule of thumb, not a lab value).",
                 { Prefs.lt1(c) }, { if (it != Prefs.lt1(c)) { Prefs.setLt1(c, it); Prefs.saveZones(c, emptyList()) } }, 135, 170, 1, " bpm"),
         )
+    }
+
+
+    // ---------------------------------------------------------------- Run windows
+
+    private var rwLocLabel: TextView? = null
+    private var rwKeyLabel: TextView? = null
+    private var rwCalls: TextView? = null
+    private var rwStatus: TextView? = null
+
+    private fun rwSub(): String {
+        val s = RwStore.load(this)
+        return if (s.lat == null || s.lon == null) "⚠ Set your location" else (s.place.ifBlank { "Location set" }) + if (SecureKey.has(this)) " · Rainbow key saved" else " · no Rainbow key"
+    }
+
+    private fun rwLocText(): String {
+        val s = RwStore.load(this)
+        val lat = s.lat; val lon = s.lon
+        if (lat == null || lon == null) return "No location set yet."
+        return (s.place.ifBlank { "Location" }) + String.format(java.util.Locale.US, " (%.3f, %.3f)", lat, lon)
+    }
+
+    private fun rwSay(t: String) { rwStatus?.text = t }
+
+    private fun rwRefreshLabels() {
+        rwLocLabel?.text = rwLocText()
+        rwKeyLabel?.text = SecureKey.masked(this)?.let { "Rainbow key: $it" } ?: "No Rainbow key saved (optional: the other sources still work)."
+        rwCalls?.text = "Rainbow calls this month: ${RwStore.callsThisMonth(this)} of 10,000 (free plan)"
+    }
+
+    private fun applyLocation(lat: Double, lon: Double, place: String) {
+        RwStore.setLocation(this, lat, lon, place)
+        RunWindowSchedule.ensure(this)
+        rwRefreshLabels()
+        rwSay("Location saved. Fetching the forecast…")
+        RunWindows.refreshAsync(this, manual = true) { rep ->
+            rwSay(if (rep.anyOk) "✓ Forecast loaded (" + rep.ok.joinToString(", ") + ")" + (if (rep.failed.isEmpty()) "" else "; skipped: " + rep.failed.joinToString(", ")) else "Couldn't load the forecast: " + rep.failed.joinToString(", "))
+            rwRefreshLabels()
+        }
+    }
+
+    /** Last known coarse position, else one network fix. Foreground only: nothing runs in the background. */
+    @Suppress("MissingPermission", "DEPRECATION")
+    private fun useMyLocation() {
+        val lm = getSystemService(android.location.LocationManager::class.java)
+        if (lm == null) { rwSay("This phone has no location service."); return }
+        var best: android.location.Location? = null
+        for (p in listOf(android.location.LocationManager.NETWORK_PROVIDER, android.location.LocationManager.PASSIVE_PROVIDER, android.location.LocationManager.GPS_PROVIDER)) {
+            val l = runCatching { lm.getLastKnownLocation(p) }.getOrNull() ?: continue
+            val b = best
+            if (b == null || l.time > b.time) best = l
+        }
+        val known = best
+        if (known != null) { applyLocation(known.latitude, known.longitude, "Current location"); return }
+        val provider = android.location.LocationManager.NETWORK_PROVIDER
+        if (!runCatching { lm.isProviderEnabled(provider) }.getOrDefault(false)) { rwSay("Turn location on in Android's settings, then tap again."); return }
+        rwSay("Getting your location…")
+        val listener = object : android.location.LocationListener {
+            override fun onLocationChanged(location: android.location.Location) { runOnUiThread { applyLocation(location.latitude, location.longitude, "Current location") } }
+            override fun onProviderEnabled(provider: String) {}
+            override fun onProviderDisabled(provider: String) {}
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+        }
+        runCatching { lm.requestSingleUpdate(provider, listener, android.os.Looper.getMainLooper()) }
+            .onFailure { rwSay("Couldn't get your location. Type a place instead.") }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_LOC) {
+            if (grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) useMyLocation()
+            else rwSay("No location permission. Type a place or lat, lon instead.")
+        }
+    }
+
+    private fun runWindowViews(): List<View> {
+        val d = resources.displayMetrics.density
+        fun head(t: String) = TextView(this).apply {
+            text = t.uppercase(); setTextColor(0xFF9AA3B2.toInt()); textSize = 11f; letterSpacing = 0.08f; setPadding(0, (16 * d).toInt(), 0, 0)
+        }
+        fun field(hint: String, password: Boolean) = EditText(this).apply {
+            this.hint = hint; setTextColor(0xFFF2F4F8.toInt()); setHintTextColor(0xFF6B7386.toInt()); textSize = 15f
+            setBackgroundResource(R.drawable.input_bg); isSingleLine = true
+            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+            inputType = if (password) android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD else android.text.InputType.TYPE_CLASS_TEXT
+        }
+        val out = ArrayList<View>()
+        rwStatus = TextView(this).apply { setTextColor(0xFF3DD68C.toInt()); textSize = 13f; setPadding(0, (8 * d).toInt(), 0, 0) }
+
+        // ---- location
+        out += head("Location")
+        rwLocLabel = TextView(this).apply { setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f; setPadding(0, (6 * d).toInt(), 0, (6 * d).toInt()) }
+        out += rwLocLabel!!
+        val place = field("Place name, or lat, lon (e.g. 40.01, -105.27)", false)
+        out += place
+        out += smallButton("Set location") {
+            val raw = place.text.toString().trim()
+            val m = Regex("^(-?\\d+(?:\\.\\d+)?)\\s*[, ]\\s*(-?\\d+(?:\\.\\d+)?)$").matchEntire(raw)
+            if (raw.isEmpty()) rwSay("Type a place or lat, lon first.")
+            else if (m != null) {
+                val lat = m.groupValues[1].toDouble(); val lon = m.groupValues[2].toDouble()
+                if (lat in -90.0..90.0 && lon in -180.0..180.0) applyLocation(lat, lon, "") else rwSay("Those numbers aren't a valid position.")
+            } else {
+                rwSay("Looking up “$raw”…")
+                Thread {
+                    val r = runCatching { WeatherApi.geocode(raw) }
+                    runOnUiThread {
+                        val g = r.getOrNull()
+                        if (g != null) applyLocation(g.first, g.second, g.third)
+                        else rwSay(if (r.isFailure) "Couldn't reach the place lookup. Type lat, lon instead." else "No place found for “$raw”.")
+                    }
+                }.start()
+            }
+        }
+        out += smallButton("Use where I am now") {
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) useMyLocation()
+            else requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), REQ_LOC)
+        }
+        out += note("Android asks first, and offers \"Only this time\". The app never reads your location in the background; the position is stored on this phone and sent only to the weather services as coordinates.")
+
+        // ---- running hours
+        out += head("Running hours")
+        val modeRow = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; setPadding(0, (8 * d).toInt(), 0, 0) }
+        val customBox = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        val modeChips = listOf("Auto (daylight)", "Custom").map { TextView(this) }
+        fun timeChip(key: String, def: Int): TextView = TextView(this).apply {
+            textSize = 14f; setTextColor(0xFF4EA1FF.toInt()); setBackgroundResource(R.drawable.chip_off); gravity = android.view.Gravity.CENTER
+            setPadding((12 * d).toInt(), (6 * d).toInt(), (12 * d).toInt(), (6 * d).toInt())
+            fun paint() { text = NotifySettings.fmt(getSharedPreferences("training_widget", MODE_PRIVATE).getInt(key, def)) }
+            paint()
+            setOnClickListener {
+                val cur = getSharedPreferences("training_widget", MODE_PRIVATE).getInt(key, def)
+                android.app.TimePickerDialog(this@SetupActivity, { _, h, m -> RwStore.putInt(this@SetupActivity, key, h * 60 + m); paint() }, cur / 60, cur % 60, true).show()
+            }
+        }
+        fun hoursRow(title: String, kf: String, df: Int, kt: String, dt: Int) = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(0, (8 * d).toInt(), 0, 0)
+            addView(TextView(this@SetupActivity).apply { text = title; setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f }, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(timeChip(kf, df))
+            addView(TextView(this@SetupActivity).apply { text = "  –  "; setTextColor(0xFF9AA3B2.toInt()) })
+            addView(timeChip(kt, dt))
+        }
+        val dflt = RwSettings()
+        customBox.addView(hoursRow("Summer (Apr–Oct)", RwStore.K_S_FROM, dflt.summerFrom, RwStore.K_S_TO, dflt.summerTo))
+        customBox.addView(hoursRow("Winter (Nov–Mar)", RwStore.K_W_FROM, dflt.winterFrom, RwStore.K_W_TO, dflt.winterTo))
+        fun paintMode() {
+            val auto = RwStore.load(this).auto
+            modeChips.forEachIndexed { i, tv ->
+                val sel = (i == 0) == auto
+                tv.setBackgroundResource(if (sel) R.drawable.chip_on else R.drawable.chip_off)
+                tv.setTextColor(if (sel) 0xFFF2F4F8.toInt() else 0xFF9AA3B2.toInt())
+            }
+            customBox.visibility = if (auto) View.GONE else View.VISIBLE
+        }
+        modeChips.forEachIndexed { i, tv ->
+            tv.apply {
+                text = if (i == 0) "Auto (daylight)" else "Custom"; textSize = 14f; gravity = android.view.Gravity.CENTER
+                setPadding((8 * d).toInt(), (9 * d).toInt(), (8 * d).toInt(), (9 * d).toInt())
+                setOnClickListener { RwStore.putBool(this@SetupActivity, RwStore.K_AUTO, i == 0); paintMode() }
+            }
+            modeRow.addView(tv, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = (8 * d).toInt() })
+        }
+        paintMode()
+        out += modeRow
+        out += customBox
+        out += note("Auto runs from 30 minutes before sunrise to 30 minutes after sunset. Night windows are only used when nothing fits in daylight.")
+
+        // ---- rules
+        out += head("Your rules")
+        fun stepper(label: String, help: String, get: () -> Double, set: (Double) -> Unit, min: Double, max: Double, step: Double, unit: String): View {
+            val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(0, (10 * d).toInt(), 0, 0) }
+            val row = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            val value = TextView(this).apply { setTextColor(0xFFF2F4F8.toInt()); textSize = 16f; gravity = android.view.Gravity.CENTER; minWidth = (72 * d).toInt() }
+            fun refresh() { value.text = String.format(java.util.Locale.US, "%.0f", get()) + unit }
+            fun btn(t: String, delta: Double) = TextView(this).apply {
+                text = t; textSize = 18f; setTextColor(0xFF4EA1FF.toInt()); gravity = android.view.Gravity.CENTER
+                setBackgroundResource(R.drawable.chip_off)
+                setOnClickListener { set((get() + delta).coerceIn(min, max)); refresh() }
+            }
+            row.addView(TextView(this).apply { text = label; setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f },
+                android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(btn("−", -step), android.widget.LinearLayout.LayoutParams((40 * d).toInt(), (36 * d).toInt()))
+            row.addView(value)
+            row.addView(btn("+", step), android.widget.LinearLayout.LayoutParams((40 * d).toInt(), (36 * d).toInt()))
+            refresh()
+            box.addView(row)
+            box.addView(TextView(this).apply { text = help; setTextColor(0xFF6B7386.toInt()); textSize = 12f })
+            return box
+        }
+        val c = this
+        out += stepper("UV limit", "Windows above this UV are penalised (Long runs use this minus 1; TT may break it, then a cap).",
+            { RwStore.load(c).uvLimit }, { RwStore.putFloat(c, RwStore.K_UV, it) }, 1.0, 11.0, 1.0, "")
+        out += stepper("Hot (Nov–Mar)", "From this temperature a winter hour counts as hot.",
+            { RwStore.load(c).hotWinter }, { RwStore.putFloat(c, RwStore.K_HOT_W, it) }, 8.0, 30.0, 1.0, " °C")
+        out += stepper("Hot (Apr–Oct)", "From this temperature a summer hour counts as hot.",
+            { RwStore.load(c).hotSummer }, { RwStore.putFloat(c, RwStore.K_HOT_S, it) }, 10.0, 35.0, 1.0, " °C")
+        out += stepper("Cold", "Below this an hour counts as cold (feels-like is used below 5 °C and above 25 °C).",
+            { RwStore.load(c).cold }, { RwStore.putFloat(c, RwStore.K_COLD, it) }, -10.0, 12.0, 1.0, " °C")
+        out += stepper("Humid (dew point)", "At or above this dew point the air counts as humid.",
+            { RwStore.load(c).humid }, { RwStore.putFloat(c, RwStore.K_HUMID, it) }, 8.0, 24.0, 1.0, " °C")
+        out += stepper("Buffer", "Added to the run's planned length: warm-up, getting ready, shoes on.",
+            { RwStore.load(c).bufferMin.toDouble() }, { RwStore.putInt(c, RwStore.K_BUFFER, it.toInt()) }, 0.0, 90.0, 5.0, " min")
+
+        // ---- Rainbow key
+        out += head("Rainbow API key")
+        rwKeyLabel = TextView(this).apply { setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f; setPadding(0, (6 * d).toInt(), 0, (6 * d).toInt()) }
+        out += rwKeyLabel!!
+        val keyField = field("Paste your Rainbow key", true)
+        out += keyField
+        out += smallButton("Save key") {
+            val v = keyField.text.toString().trim()
+            if (v.isEmpty()) rwSay("Paste the key first.")
+            else if (SecureKey.save(this, v)) {
+                keyField.setText("")
+                rwRefreshLabels(); rwSay("✓ Key saved (encrypted on this phone). Fetching…")
+                RunWindows.refreshAsync(this, manual = true) { rep -> rwSay(if (rep.anyOk) "✓ Updated" + (if (rep.failed.isEmpty()) "" else "; skipped: " + rep.failed.joinToString(", ")) else "Couldn't load: " + rep.failed.joinToString(", ")); rwRefreshLabels() }
+            } else rwSay("This phone couldn't store the key securely, so it was not saved.")
+        }
+        out += smallButton("Test key") {
+            val typed = keyField.text.toString().trim()
+            val k = typed.ifEmpty { SecureKey.load(this).orEmpty() }
+            if (k.isEmpty()) rwSay("Paste or save a key first.")
+            else {
+                rwSay("Testing…")
+                Thread {
+                    val msg = WeatherApi.testKey(this, k)
+                    runOnUiThread { rwSay(msg); rwRefreshLabels() }
+                }.start()
+            }
+        }
+        out += smallButton("Remove key") {
+            SecureKey.remove(this)
+            RwStore.drop(this, "rainbow"); RwStore.drop(this, "nowcast")
+            keyField.setText("")
+            rwRefreshLabels(); rwSay("Key removed.")
+        }
+        rwCalls = TextView(this).apply { setTextColor(0xFF9AA3B2.toInt()); textSize = 13f; setPadding(0, (8 * d).toInt(), 0, 0) }
+        out += rwCalls!!
+        out += note("The key is stored encrypted with an Android Keystore key, left out of backups and logs, and sent only to api.rainbow.ai. Rainbow's free plan allows 10,000 calls a month; the app uses about 2 per refresh.")
+        out += rwStatus!!
+        rwRefreshLabels()
+        return out
     }
 
     override fun onResume() {

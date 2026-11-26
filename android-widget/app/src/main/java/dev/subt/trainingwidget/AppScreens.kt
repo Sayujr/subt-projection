@@ -1324,6 +1324,99 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         CoachSheet.attach(a, c) { Coach.today(a) }
     }
 
+    // ================================================================ Run windows
+
+    /** "Best run window" under today's call: the window, its strip, tomorrow in one line; tap for the day plan. */
+    fun runWindowCard(col: LinearLayout) {
+        val zone = java.time.ZoneId.systemDefault()
+        val s = RwStore.load(a)
+        val c = card(col)
+        label(c, "Best run window")
+        if (s.lat == null || s.lon == null) {
+            text(c, "Set your location in Settings → Run windows", 14.5f, DIM, top = 4)
+            c.setOnClickListener { a.startActivity(android.content.Intent(a, SetupActivity::class.java).putExtra(SetupActivity.EXTRA_OPEN, "rw")) }
+            return
+        }
+        val today = LocalDate.now()
+        val plans = RunWindows.plans(a, today, 2)
+        RunWindows.autoRefresh(a) { onChange() }
+        val p = plans.getOrNull(0)
+        if (p == null || p.noData) {
+            text(c, "Forecast not loaded yet. Tap to fetch it.", 14.5f, DIM, top = 4)
+            c.setOnClickListener { RunWindows.refreshAsync(a, manual = true) { onChange() } }
+            return
+        }
+        val w = p.window
+        val head = if (w == null) "No window fits" else Weather.range(w, zone) + (if (w.icons.isEmpty()) "" else "  " + w.icons.joinToString(" "))
+        text(c, head, 26f, TEXT, bold = true, top = 2).apply { letterSpacing = 0.02f }
+        text(c, (if (p.passed) "Passed · " else "") + (if (p.run.planned) "${p.run.name} · " else "") + p.run.type.label + " · " + p.summary.short, 13.5f, DIM)
+        val rb = p.rainbow
+        if (!p.same && rb != null) text(c, "Rainbow alone: ${Weather.range(rb, zone)}", 12.5f, 0xFF8FD3FF.toInt(), top = 2)
+        val bmp = RwViews.strip(a, p, s, chartW(), false, System.currentTimeMillis() / 1000)
+        image(c, bmp, (bmp.height / d).roundToInt())
+        RunWindows.asOf(a)?.let { text(c, "Forecast $it", 12f, WARN, top = 4) }
+        val t = plans.getOrNull(1)
+        if (t != null && !t.noData) {
+            val tw = t.window
+            text(c, "Tomorrow  " + (if (tw == null) "no window" else Weather.range(tw, zone) + (if (tw.icons.isEmpty()) "" else " " + tw.icons.joinToString(" "))) + " · " + t.summary.short, 13f, DIM, top = 8)
+        }
+        text(c, "Tap for the day plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 6)
+        c.setOnClickListener { RunWindowActivity.open(a, today) }
+    }
+
+    /** "Run windows · 7 days" on the Week screen: one row per day with a mini strip; rows fade further out. */
+    fun runWindowsWeek(col: LinearLayout, insetDp: Int = 0) {
+        val zone = java.time.ZoneId.systemDefault()
+        val s = RwStore.load(a)
+        val c = card(col)
+        label(c, "Run windows · 7 days")
+        if (s.lat == null || s.lon == null) {
+            text(c, "Set your location in Settings → Run windows", 14.5f, DIM, top = 4)
+            c.setOnClickListener { a.startActivity(android.content.Intent(a, SetupActivity::class.java).putExtra(SetupActivity.EXTRA_OPEN, "rw")) }
+            return
+        }
+        RunWindows.autoRefresh(a) { onChange() }
+        val plans = RunWindows.plans(a, LocalDate.now(), 7)
+        if (plans.isEmpty()) text(c, "Forecast not loaded yet. Tap Refresh now.", 14f, DIM, top = 4)
+        val wPx = chartW() - dp(insetDp)
+        val nowSec = System.currentTimeMillis() / 1000
+        plans.forEachIndexed { i, p ->
+            val row = LinearLayout(a).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, dp(4))
+                alpha = (1f - i * 0.08f).coerceAtLeast(0.45f)
+            }
+            val top = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            top.addView(TextView(a).apply {
+                text = p.date.format(DateTimeFormatter.ofPattern("EEE d", loc)); setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            }, LinearLayout.LayoutParams(dp(62), ViewGroup.LayoutParams.WRAP_CONTENT))
+            val w = p.window
+            top.addView(TextView(a).apply {
+                text = when {
+                    p.noData -> "no forecast"
+                    w == null -> "no window"
+                    else -> Weather.range(w, zone) + (if (w.icons.isEmpty()) "" else "  " + w.icons.joinToString(" "))
+                }
+                setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            top.addView(TextView(a).apply { text = if (p.run.planned) p.run.type.label else "no run"; setTextColor(FAINT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f) })
+            row.addView(top)
+            if (!p.noData) {
+                text(row, (if (p.run.planned) p.run.name + " · " else "") + p.summary.short, 12.5f, DIM)
+                val bmp = RwViews.strip(a, p, s, wPx, true, if (i == 0) nowSec else null)
+                image(row, bmp, (bmp.height / d).roundToInt())
+            }
+            row.setOnClickListener { RunWindowActivity.open(a, p.date) }
+            c.addView(row)
+        }
+        val foot = TextView(a).apply {
+            text = "Refresh now" + (RunWindows.asOf(a)?.let { "   ·   forecast $it" } ?: "")
+            setTextColor(0xFF4EA1FF.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f); setPadding(0, dp(12), 0, 0)
+            setOnClickListener { text = "Refreshing…"; RunWindows.refreshAsync(a, manual = true) { onChange() } }
+        }
+        c.addView(foot)
+    }
+
     /** "Coach replied": answers and recaps from today's and yesterday's coach notes that haven't been shown yet. */
     fun coachRepliedCard(col: LinearLayout) {
         val notes = Prefs.coachNotes(a)

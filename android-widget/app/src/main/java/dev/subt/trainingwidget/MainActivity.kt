@@ -579,6 +579,7 @@ class MainActivity : Activity() {
         list.addView(legend)
         val picked = selectedDay
         if (split != null && picked != null && picked in start.toString()..end.toString()) list.addView(dayPanel(picked, zr))
+        if (isThisWeek) runCatching { AppScreens(this, wDp) { drawContent() }.runWindowsWeek(list, insetDp = 8) }
         list.addView(zonesCard(wDp, start, end, "zones:$start..${minOf(end, today0)}:${Prefs.lt1(this)}"))
         when {
             creds == null -> list.addView(note("Connect intervals.icu in ⚙ settings"))
@@ -973,6 +974,7 @@ class MainActivity : Activity() {
                     // Verdict, the full view (chart scrubbable), today's power targets, the week checklist, streak
                     val screens = AppScreens(this, wDp) { drawContent() }
                     screens.verdictCard(col)
+                    runCatching { screens.runWindowCard(col) }
                     screens.coachRepliedCard(col)
                     val chartH = (hDp * 0.6).roundToInt().coerceAtLeast(300)   // leave room so the next card peeks in
                     applyInto(col, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, chartH, inApp = true), dp(chartH))

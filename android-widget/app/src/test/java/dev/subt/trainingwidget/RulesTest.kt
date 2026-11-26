@@ -12,7 +12,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 
 /** The training rules the app shows you. A change that breaks one fails the build before it reaches the phone. */
 @RunWith(RobolectricTestRunner::class)
@@ -933,5 +935,535 @@ class RulesTest {
         assertNotNull(note.workouts.single().recap)
         assertEquals(listOf(true, false), note.questions.map { it.answer != null })
         assertTrue(Prefs.coachSync(ctx))
+    }
+
+    // ================================================================ Run windows
+
+    private val UTC: ZoneId = ZoneId.of("UTC")
+    private val RW_DATE: LocalDate = LocalDate.of(2026, 6, 15)       // a Monday in summer: hot from 20 °C
+    private val RW_WINTER: LocalDate = LocalDate.of(2026, 1, 15)     // winter: hot from 15 °C
+    private val rwS = RwSettings()
+
+    private fun rwT(date: LocalDate, hour: Int, min: Int = 0): Long =
+        date.atStartOfDay(UTC).plusHours(hour.toLong()).plusMinutes(min.toLong()).toEpochSecond()
+
+    private fun rwHour(
+        date: LocalDate, hour: Int, temp: Double = 12.0, feels: Double? = null, dew: Double = 6.0, cloud: Double = 80.0,
+        uv: Double = 0.5, rain: Double = 0.0, pct: Double = 0.0, wind: Double = 8.0, gust: Double = 12.0,
+        frozen: Boolean = false, aqi: Double? = null,
+    ) = Weather.Combined(
+        t = rwT(date, hour), temp = temp, feels = feels ?: temp, dew = dew, cloud = cloud, uv = uv, rainMm = rain, rainPct = pct,
+        wind = wind, gust = gust, aqi = aqi, frozen = frozen, agree = 5, total = 5,
+    )
+
+    private fun rwDay(f: (Int) -> Weather.Combined): List<Weather.Combined> = (0..23).map(f)
+    private fun rwSun(date: LocalDate) = Weather.Sun(date, rwT(date, 6), rwT(date, 20))
+    private fun rwRun(type: Weather.RunType, min: Int = 40) = Weather.PlannedRun("run", min, type, planned = true)
+    private fun rwPick(date: LocalDate, hours: List<Weather.Combined>, run: Weather.PlannedRun, s: RwSettings = rwS) =
+        Weather.pick(hours, date, run, listOf(rwSun(date)), s, null, UTC)
+    private fun rwPlan(date: LocalDate, all: List<Weather.Combined>, rb: List<Weather.Combined> = emptyList(), run: Weather.PlannedRun = rwRun(Weather.RunType.EASY)) =
+        Weather.plan(date, all, rb, listOf(rwSun(date)), run, rwS, null, UTC)
+    private fun rwCls(
+        temp: Double, feels: Double? = null, dew: Double = 8.0, cloud: Double = 80.0, uv: Double = 0.5, rain: Double = 0.0,
+        night: Boolean = false, date: LocalDate = RW_DATE, s: RwSettings = rwS,
+    ) = Weather.classify(rwHour(date, 12, temp = temp, feels = feels, dew = dew, cloud = cloud, uv = uv, rain = rain), s, date.monthValue, night)
+
+    // ---- parsers (field shapes from the spec)
+
+    @Test fun rwParseRainbow() {
+        val json = """{"hourly":[
+            {"time":"2026-06-15T14:00:00Z","temperature":18.5,"feelsLikeTemperature":18.0,"temperatureDewPoint":9.0,"uvIndex":5.2,
+             "precipitationChance":40,"precipitationAmount":0.3,"precipitationRate":0.3,"precipitationType":"rain",
+             "windSpeed":5.0,"windGust":9.0,"visibility":10000,"humidity":55,"condition":"PartlyCloudy"},
+            {"time":"2026-06-15T15:00:00Z","temperature":19.0,"condition":"Breezy"}]}"""
+        val h = Weather.parseRainbow(json)
+        assertEquals(2, h.size)
+        assertEquals(Instant.parse("2026-06-15T14:00:00Z").epochSecond, h[0].t)
+        assertEquals(18.5, h[0].temp!!, 1e-9)
+        assertEquals(18.0, h[0].wind!!, 1e-9)        // 5 m/s → km/h
+        assertEquals(32.4, h[0].gust!!, 1e-9)
+        assertEquals(50.0, h[0].cloud!!, 1e-9)       // PartlyCloudy → 50 %
+        assertEquals(5.2, h[0].uv!!, 1e-9)
+        assertEquals(0.3, h[0].rainMm!!, 1e-9)
+        assertEquals(40.0, h[0].rainPct!!, 1e-9)
+        assertNull("Breezy says nothing about cloud", h[1].cloud)
+        assertEquals(95.0, Weather.condCloud("Drizzle")!!, 1e-9)
+        assertEquals(5.0, Weather.condCloud("Clear")!!, 1e-9)
+        assertEquals(25.0, Weather.condCloud("MostlyClear")!!, 1e-9)
+        assertEquals(75.0, Weather.condCloud("MostlyCloudy")!!, 1e-9)
+        assertTrue(Weather.parseRainbow("not json").isEmpty())
+    }
+
+    @Test fun rwParseOpenMeteoModelsAndLocalTimes() {
+        // Denver in summer: UTC−6, so 08:00 local is 14:00 UTC. HRRR has nothing here (all null).
+        val json = """{"utc_offset_seconds":-21600,"hourly":{"time":["2026-06-15T08:00","2026-06-15T09:00"],
+            "temperature_2m_ecmwf_ifs025":[10.0,12.0],"cloud_cover_ecmwf_ifs025":[20,30],"uv_index_ecmwf_ifs025":[1.0,3.0],
+            "temperature_2m_ncep_hrrr_conus":[null,null],"cloud_cover_ncep_hrrr_conus":[null,null],
+            "temperature_2m_gfs_seamless":[11.0,13.0],"cloud_cover_gfs_seamless":[60,70],"weather_code_gfs_seamless":[3,73]},
+            "daily":{"time":["2026-06-15"],"sunrise":["2026-06-15T05:30"],"sunset":["2026-06-15T20:30"]}}"""
+        val om = Weather.parseOpenMeteo(json)!!
+        assertEquals(setOf("ecmwf", "gfs"), om.models.keys)
+        assertEquals(Instant.parse("2026-06-15T14:00:00Z").epochSecond, om.models.getValue("ecmwf")[0].t)
+        assertEquals(3.0, om.models.getValue("ecmwf")[1].uv!!, 1e-9)
+        assertEquals("snow", om.models.getValue("gfs")[1].precipType)
+        assertEquals(Instant.parse("2026-06-15T11:30:00Z").epochSecond, om.sun[0].rise)
+        assertEquals(Instant.parse("2026-06-16T02:30:00Z").epochSecond, om.sun[0].set)
+        assertNull(Weather.parseOpenMeteo("{}"))
+    }
+
+    @Test fun rwParseNwsAndNowcastAndAqi() {
+        val grid = """{"properties":{"skyCover":{"values":[
+            {"validTime":"2026-06-15T14:00:00+00:00/PT3H","value":80},{"validTime":"2026-06-15T17:00:00+00:00/PT1H","value":20}]}}}"""
+        val h = Weather.parseNws(grid)
+        assertEquals(4, h.size)
+        assertEquals(listOf(80.0, 80.0, 80.0, 20.0), h.map { it.cloud })
+        assertEquals(Instant.parse("2026-06-15T17:00:00Z").epochSecond, h[3].t)
+        assertEquals("https://api.weather.gov/gridpoints/BOU/62,61",
+            Weather.parseNwsGridUrl("""{"properties":{"forecastGridData":"https://api.weather.gov/gridpoints/BOU/62,61"}}"""))
+        assertEquals(3, Weather.isoHours("PT3H")); assertEquals(26, Weather.isoHours("P1DT2H")); assertEquals(1, Weather.isoHours("PT30M"))
+
+        val now = Weather.parseNowcast("""{"forecast":[
+            {"precipRate":0.0,"precipType":"rain","timestampBegin":1781532000,"timestampEnd":1781532060},
+            {"precipRate":1.5,"precipType":"snow","timestampBegin":1781532060,"timestampEnd":1781532120}],"summary":{"intensity":"light"}}""")
+        assertEquals(2, now.size)
+        assertEquals(1.5, now[1].rate, 1e-9)
+        assertEquals(1781532120L, now[1].end)
+
+        val aqi = Weather.parseAqi("""{"utc_offset_seconds":0,"hourly":{"time":["2026-06-15T12:00","2026-06-15T13:00"],"us_aqi":[40,120]}}""")
+        assertEquals(120.0, aqi.getValue(Instant.parse("2026-06-15T13:00:00Z").epochSecond), 1e-9)
+    }
+
+    // ---- combining
+
+    @Test fun rwCombineMedianUvMaxAndAgreement() {
+        val t = rwT(RW_DATE, 12)
+        val src = mapOf(
+            "rainbow" to listOf(Weather.Hour(t, temp = 10.0, feels = 9.0, dew = 5.0, cloud = 50.0, uv = 1.0, rainMm = 0.0, wind = 10.0)),
+            "ecmwf" to listOf(Weather.Hour(t, temp = 12.0, feels = 12.0, dew = 7.0, cloud = 20.0, uv = 3.0, rainMm = 0.0, wind = 14.0)),
+            "gfs" to listOf(Weather.Hour(t, temp = 20.0, feels = 20.0, dew = 9.0, cloud = 10.0, uv = 2.0, rainMm = 0.0, wind = 18.0)),
+            "nws" to listOf(Weather.Hour(t, cloud = 90.0)),
+            "nbm" to listOf(Weather.Hour(t, cloud = 80.0)),
+            "hrrr" to listOf(Weather.Hour(t, cloud = 70.0)),
+        )
+        val c = Weather.combine(src).single()
+        assertEquals("median of 10, 12, 20", 12.0, c.temp!!, 1e-9)
+        assertEquals("median of 9, 12, 20", 12.0, c.feels!!, 1e-9)
+        assertEquals("median dew point", 7.0, c.dew!!, 1e-9)
+        assertEquals("median wind", 14.0, c.wind!!, 1e-9)
+        assertEquals("UV is the highest of the sources", 3.0, c.uv, 1e-9)
+        assertEquals("median of six cloud votes", 60.0, c.cloud!!, 1e-9)
+        assertEquals(6, c.total)
+        assertEquals("3 cloudy, 3 clear → 3 agree with a cloudy median", 3, c.agree)
+    }
+
+    @Test fun rwCombineDissentAndRainChance() {
+        val t = rwT(RW_DATE, 12)
+        val src = mapOf(
+            "rainbow" to listOf(Weather.Hour(t, temp = 10.0, cloud = 90.0, rainMm = 0.0, rainPct = 10.0)),
+            "ecmwf" to listOf(Weather.Hour(t, temp = 10.0, cloud = 10.0, rainMm = 0.0, rainPct = 55.0)),
+            "gfs" to listOf(Weather.Hour(t, temp = 10.0, cloud = 90.0, rainMm = 0.0, rainPct = 20.0)),
+            "nws" to listOf(Weather.Hour(t, cloud = 85.0)),
+            "nbm" to listOf(Weather.Hour(t, cloud = 90.0)),
+            "hrrr" to listOf(Weather.Hour(t, cloud = 90.0)),
+        )
+        val c = Weather.combine(src).single()
+        assertEquals(5, c.agree); assertEquals(6, c.total)
+        assertEquals(listOf("ecmwf" to "clear"), c.dissent)
+        assertEquals("rain chance is the maximum", 55.0, c.rainPct, 1e-9)
+        assertEquals("rain amount is the median", 0.0, c.rainMm, 1e-9)
+    }
+
+    @Test fun rwNowcastOverridesRain() {
+        val t = rwT(RW_DATE, 12)
+        val dry = mapOf("rainbow" to listOf(Weather.Hour(t, temp = 10.0, cloud = 90.0, rainMm = 0.0)), "gfs" to listOf(Weather.Hour(t, temp = 11.0, cloud = 90.0, rainMm = 0.0)))
+        // the whole hour at 2 mm/h
+        val wet = (0 until 60).map { Weather.NowStep(t + it * 60L, t + it * 60L + 60, 2.0, "rain") }
+        assertEquals(2.0, Weather.combine(dry, wet).single().rainMm, 1e-9)
+        // half the hour at 4 mm/h, half dry: mean of the 10-minute maxima
+        val half = (0 until 60).map { Weather.NowStep(t + it * 60L, t + it * 60L + 60, if (it < 30) 4.0 else 0.0, "rain") }
+        assertEquals(2.0, Weather.combine(dry, half).single().rainMm, 1e-9)
+        // only 20 minutes of nowcast covers the hour: ignored, the sources' median stays
+        val short = (0 until 20).map { Weather.NowStep(t + it * 60L, t + it * 60L + 60, 5.0, "rain") }
+        assertEquals(0.0, Weather.combine(dry, short).single().rainMm, 1e-9)
+        // the 10-minute step keeps its maximum
+        val spike = (0 until 60).map { Weather.NowStep(t + it * 60L, t + it * 60L + 60, if (it == 5) 6.0 else 0.0, "rain") }
+        assertEquals(1.0, Weather.combine(dry, spike).single().rainMm, 1e-9)
+    }
+
+    @Test fun rwIceAfterRainAndFrozenType() {
+        val t = rwT(RW_DATE, 12)
+        val src = mapOf("gfs" to listOf(
+            Weather.Hour(t - 3600, temp = 1.0, cloud = 90.0, rainMm = 1.0),
+            Weather.Hour(t, temp = -2.0, cloud = 90.0, rainMm = 0.0),
+            Weather.Hour(t + 3600, temp = 6.0, cloud = 90.0, rainMm = 0.0),
+        ))
+        val c = Weather.combine(src)
+        assertFalse(c[0].icy)
+        assertTrue("at or below 0 °C within 12 h of rain", c[1].icy)
+        assertFalse(c[2].icy)
+        assertTrue(Weather.dangerous(c[1]))
+        assertTrue(Weather.combine(mapOf("rainbow" to listOf(Weather.Hour(t, temp = 0.5, cloud = 90.0, rainMm = 1.0, precipType = "snow")))).single().frozen)
+    }
+
+    // ---- classification and colour
+
+    @Test fun rwEffectiveTemperature() {
+        assertEquals("feels-like below 5", 3.0, Weather.effTemp(8.0, 3.0)!!, 1e-9)
+        assertEquals("feels-like above 25", 27.0, Weather.effTemp(24.0, 27.0)!!, 1e-9)
+        assertEquals("air temperature in between", 15.0, Weather.effTemp(15.0, 12.0)!!, 1e-9)
+        assertEquals(15.0, Weather.effTemp(15.0, null)!!, 1e-9)
+        assertEquals(Weather.Band.COLD, rwCls(temp = 8.0, feels = 3.0).band)
+        assertEquals(Weather.Band.COOL, rwCls(temp = 8.0).band)
+        val hot26 = rwS.copy(hotSummer = 26.0)
+        assertEquals("feels-like 27 is hot", Weather.Band.HOT, rwCls(temp = 24.0, feels = 27.0, s = hot26).band)
+        assertEquals(Weather.Band.WARM, rwCls(temp = 24.0, feels = 24.0, s = hot26).band)
+    }
+
+    @Test fun rwHotThresholdDependsOnMonth() {
+        assertEquals(Weather.Band.HOT, rwCls(temp = 16.0, date = RW_WINTER).band)
+        assertEquals(Weather.Band.WARM, rwCls(temp = 16.0, date = RW_DATE).band)
+        assertEquals(Weather.Band.HOT, rwCls(temp = 20.0, date = RW_DATE).band)
+        assertEquals(Weather.Band.COLD, rwCls(temp = 4.9).band)
+        assertEquals(Weather.Band.COOL, rwCls(temp = 5.0).band)
+        assertEquals(Weather.Band.WARM, rwCls(temp = 14.0).band)
+    }
+
+    @Test fun rwColourTable() {
+        assertEquals("hot, sunny and humid", Weather.Tone.DEEP, rwCls(temp = 28.0, dew = 18.0, cloud = 20.0, uv = 7.0).tone)
+        assertEquals("hot and sunny", Weather.Tone.DRED, rwCls(temp = 28.0, dew = 10.0, cloud = 20.0, uv = 7.0).tone)
+        assertEquals("hot and humid with rain", Weather.Tone.RED, rwCls(temp = 26.0, dew = 18.0, cloud = 90.0, uv = 1.0, rain = 1.0).tone)
+        assertEquals("hot, humid, cloudy", Weather.Tone.ORR, rwCls(temp = 26.0, dew = 18.0, cloud = 90.0, uv = 1.0).tone)
+        assertEquals("warm and sunny", Weather.Tone.ORR, rwCls(temp = 17.0, cloud = 20.0, uv = 5.0).tone)
+        assertEquals("warm, humid, cloudy", Weather.Tone.OR, rwCls(temp = 17.0, dew = 17.0, cloud = 90.0, uv = 1.0).tone)
+        assertEquals("warm, cloudy, low UV", Weather.Tone.LO2, rwCls(temp = 17.0, dew = 8.0, cloud = 90.0, uv = 1.0).tone)
+        assertEquals("cool, sunny and humid", Weather.Tone.LO2, rwCls(temp = 10.0, dew = 17.0, cloud = 20.0, uv = 4.0).tone)
+        assertEquals("cool, cloudy, low UV", Weather.Tone.BEST, rwCls(temp = 10.0, cloud = 90.0, uv = 0.5).tone)
+        assertEquals("cold and cloudy", Weather.Tone.CHILL, rwCls(temp = 2.0, cloud = 90.0, uv = 0.3).tone)
+        assertEquals("below 0 °C with UV 0–1", Weather.Tone.CHILL, rwCls(temp = -4.0, cloud = 30.0, uv = 0.8).tone)
+        assertEquals("cold and sunny", Weather.Tone.LO1, rwCls(temp = 2.0, cloud = 20.0, uv = 3.0).tone)
+        assertEquals("night hours are drawn dark", Weather.Tone.NIGHT, rwCls(temp = 10.0, night = true).tone)
+        assertEquals(0xFF7FB59A.toInt(), Weather.Tone.BEST.argb); assertEquals(0xFFA3241C.toInt(), Weather.Tone.DEEP.argb); assertEquals(0xFF2A303D.toInt(), Weather.Tone.NIGHT.argb)
+    }
+
+    @Test fun rwHourFlagsAndIcons() {
+        val h = rwHour(RW_DATE, 12, uv = 4.0, cloud = 20.0, rain = 0.8, aqi = 120.0, gust = 40.0)
+        val c = Weather.classify(h, rwS, 6, false)
+        assertTrue(c.sunny); assertTrue(c.wet)
+        val easy = Weather.icons(h, c, Weather.RunType.EASY, rwS)
+        assertTrue("💧" in easy && "😷" in easy && "☀" in easy)
+        assertFalse("gust icon only on TT days", "💨" in easy)
+        assertTrue("💨" in Weather.icons(h, c, Weather.RunType.TT, rwS))
+        assertFalse("AQI 120 is a caution, not dangerous", Weather.dangerous(h))
+        assertTrue(Weather.dangerous(rwHour(RW_DATE, 12, aqi = 160.0)))
+        assertTrue(rwCls(temp = 10.0, cloud = 90.0).cloudy)
+        // light rain counts as dry
+        assertFalse(rwCls(temp = 10.0, rain = 0.3).wet)
+    }
+
+    // ---- window picks per run type
+
+    @Test fun rwTtPicksCoolestAbove5() {
+        val d = RW_DATE
+        val hours = rwDay { h -> when (h) {
+            in 0..8 -> rwHour(d, h, temp = 3.0, uv = 0.5, dew = 4.0)
+            in 9..11 -> rwHour(d, h, temp = 8.0, uv = 1.5, dew = 4.0)
+            else -> rwHour(d, h, temp = 16.0 + (h - 12), uv = 3.5, cloud = 40.0, dew = 8.0)
+        } }
+        val w = rwPick(d, hours, rwRun(Weather.RunType.TT, 40)).best!!
+        assertTrue("never below 5 °C: ${w.minTemp}", w.minTemp!! >= 5.0)
+        assertTrue("in the 8 °C stretch, starting ${(w.start - rwT(d, 0)) / 60} min in", w.start >= rwT(d, 9) && w.start <= rwT(d, 11))
+    }
+
+    @Test fun rwTtMayBreakUvLimitThenCap() {
+        val d = RW_DATE
+        // 5 °C all day but sunny: TT accepts the UV and asks for a cap
+        val hours = rwDay { h -> rwHour(d, h, temp = 8.0, cloud = 20.0, uv = 5.0, dew = 3.0) }
+        val w = rwPick(d, hours, rwRun(Weather.RunType.TT, 40)).best!!
+        assertTrue("🧢" in w.icons)
+        assertTrue(w.warnings.any { it.contains("cap") })
+    }
+
+    @Test fun rwLongAvoidsColdAndUvButAcceptsHeat() {
+        val d = RW_DATE
+        val hours = rwDay { h -> when (h) {
+            in 6..8 -> rwHour(d, h, temp = 6.0, feels = 3.0, uv = 0.3, cloud = 90.0)
+            in 9..12 -> rwHour(d, h, temp = 12.0, uv = 0.8, cloud = 70.0)
+            in 13..19 -> rwHour(d, h, temp = 29.0, uv = 6.0, cloud = 20.0, dew = 12.0)
+            else -> rwHour(d, h, temp = 12.0, uv = 0.5, cloud = 80.0)
+        } }
+        val w = rwPick(d, hours, rwRun(Weather.RunType.LONG, 90)).best!!
+        assertTrue("feels no colder than 5 °C: ${w.minFeels}", w.minFeels!! >= 5.0)
+        assertTrue("UV within limit − 1: ${w.maxUv}", w.maxUv <= 1.0)
+        assertTrue(w.start >= rwT(d, 9) && w.end <= rwT(d, 13))
+
+        val hot = rwDay { h -> rwHour(d, h, temp = 28.0, uv = 0.5, cloud = 95.0, dew = 10.0) }
+        val long = rwPick(d, hot, rwRun(Weather.RunType.LONG, 90)).best!!
+        val easy = rwPick(d, hot, rwRun(Weather.RunType.EASY, 90)).best!!
+        val subt = rwPick(d, hot, rwRun(Weather.RunType.SUBT, 90)).best!!
+        assertTrue("heat costs a long run nothing: ${long.score}", long.score < 3.0)
+        assertTrue("heat costs an easy run nothing: ${easy.score}", easy.score < 3.0)
+        assertTrue("but SubT feels it: ${subt.score}", subt.score > long.score + 10)
+        assertFalse(long.dangerous)
+    }
+
+    @Test fun rwEasyAcceptsHeatTtDoesNot() {
+        val d = RW_DATE
+        // hot, cloudy, low-UV morning vs a cooler but sunny midday
+        val hours = rwDay { h ->
+            if (h in 11..19) rwHour(d, h, temp = 15.0, uv = 3.0, cloud = 10.0, dew = 8.0)
+            else rwHour(d, h, temp = 24.0, uv = 0.8, cloud = 90.0, dew = 14.0)
+        }
+        val easy = rwPick(d, hours, rwRun(Weather.RunType.EASY, 40)).best!!
+        val tt = rwPick(d, hours, rwRun(Weather.RunType.TT, 40)).best!!
+        assertTrue("easy takes the hot, cloudy morning", easy.end <= rwT(d, 11, 30))
+        assertTrue("TT wants the cooler midday", tt.start >= rwT(d, 11))
+    }
+
+    @Test fun rwHeavyRainAllDayAndIce() {
+        val d = RW_DATE
+        val rain = rwDay { h -> rwHour(d, h, temp = 10.0, cloud = 100.0, uv = 0.0, rain = 3.0, pct = 90.0) }
+        val pk = rwPick(d, rain, rwRun(Weather.RunType.EASY))
+        val w = pk.best!!
+        assertTrue(w.wet); assertFalse(pk.risky)
+        assertTrue("💧" in w.icons)
+        assertTrue(w.warnings.any { it.contains("gym or outside") })
+        assertTrue(rwPlan(d, rain).summary.suggestion.startsWith("Gym or outside"))
+
+        val ice = rwDay { h -> rwHour(d, h, temp = -2.0, cloud = 100.0, uv = 0.0, rain = 1.0, frozen = true) }
+        val ik = rwPick(d, ice, rwRun(Weather.RunType.EASY))
+        assertTrue("every window has a dangerous hour", ik.risky)
+        assertTrue(ik.best!!.dangerous)
+        assertTrue("⛔" in ik.best!!.icons)
+        assertTrue(ik.best!!.warnings.any { it.startsWith("⛔") && it.contains("gym recommended") })
+        val plan = rwPlan(d, ice)
+        assertTrue(plan.risky)
+        assertTrue(plan.summary.suggestion.contains("Gym recommended"))
+        assertTrue("risky shows in the shift signature", "risky" in Weather.sigOf(plan)!!.warns)
+        assertTrue("rain shows in the shift signature", "rain" in Weather.sigOf(rwPlan(d, rain))!!.warns)
+    }
+
+    @Test fun rwNarrowWindowWarns() {
+        val d = RW_DATE
+        // only 07:00-08:00 is dry; a 30 min run + 30 min buffer needs exactly that hour
+        val hours = rwDay { h -> if (h == 7) rwHour(d, h, rain = 0.0) else rwHour(d, h, rain = 3.0, pct = 90.0) }
+        val w = rwPick(d, hours, rwRun(Weather.RunType.EASY, 30)).best!!
+        assertEquals(rwT(d, 7), w.start)
+        assertTrue(w.narrow)
+        assertTrue("⚠" in w.icons)
+        // a wide dry stretch is not narrow
+        val wide = rwDay { h -> rwHour(d, h, rain = 0.0) }
+        assertFalse(rwPick(d, wide, rwRun(Weather.RunType.EASY, 30)).best!!.narrow)
+    }
+
+    @Test fun rwNightWindowOnlyWhenNothingFitsInDaylight() {
+        val d = RW_DATE
+        val hours = rwDay { h -> rwHour(d, h) }
+        // 16 h of running (930 min + 30 min buffer): nothing fits between sunrise − 30 min and sunset + 30 min (15 h)
+        val w = rwPick(d, hours, rwRun(Weather.RunType.EASY, 930)).best
+        assertNotNull(w)
+        assertTrue(w!!.night); assertTrue("🌙" in w.icons)
+        assertFalse(rwPick(d, hours, rwRun(Weather.RunType.EASY, 40)).best!!.night)
+    }
+
+    @Test fun rwRainbowPickDiffersFromOverall() {
+        val d = RW_DATE
+        val all = rwDay { h -> if (h < 10) rwHour(d, h, rain = 0.0) else rwHour(d, h, rain = 3.0, pct = 90.0) }
+        val rb = rwDay { h -> if (h < 10) rwHour(d, h, rain = 3.0, pct = 90.0) else rwHour(d, h, rain = 0.0) }
+        val p = rwPlan(d, all, rb)
+        assertNotNull(p.window); assertNotNull(p.rainbow)
+        assertFalse("different windows", p.same)
+        assertTrue(p.window!!.end <= rwT(d, 10, 30))
+        assertTrue(p.rainbow!!.start >= rwT(d, 10))
+        assertNotNull(p.summary.rainbow)
+        assertTrue(p.summary.rainbow!!.contains("Rainbow alone would pick"))
+
+        val same = rwPlan(d, all, all)
+        assertTrue(same.same)
+        assertNull(same.summary.rainbow)
+        assertTrue(same.summary.agree!!.contains("✓"))
+
+        val noRainbow = rwPlan(d, all)
+        assertFalse(noRainbow.rainbowPresent)
+        assertTrue(noRainbow.summary.agree!!.contains("Rainbow isn't connected"))
+    }
+
+    @Test fun rwWindowOverlapRule() {
+        val d = RW_DATE
+        fun win(a: Long, b: Long) = rwPick(d, rwDay { rwHour(d, it) }, rwRun(Weather.RunType.EASY, 40)).best!!.copy(start = a, end = b)
+        val a = win(rwT(d, 7), rwT(d, 8, 30))
+        assertEquals(1.0, Weather.overlap(a, a), 1e-9)
+        assertTrue(Weather.overlap(a, win(rwT(d, 7, 30), rwT(d, 9))) < 0.8)
+        assertTrue(Weather.overlap(a, win(rwT(d, 7, 15), rwT(d, 8, 45))) >= 0.8)
+        assertEquals(0.0, Weather.overlap(a, win(rwT(d, 12), rwT(d, 13, 30))), 1e-9)
+    }
+
+    @Test fun rwSummaryHasTheDayShapeAndOneSuggestion() {
+        val d = RW_DATE
+        val hours = rwDay { h -> rwHour(d, h, temp = 9.0 + h / 3.0, cloud = 80.0, uv = if (h in 11..15) 4.0 else 0.5, rain = if (h in 16..18) 1.0 else 0.0) }
+        val p = rwPlan(d, hours)
+        val lines = p.summary.lines()
+        assertTrue(lines[0], lines[0].contains("°C") && lines[0].contains("rain 16:00–19:00") && lines[0].contains("UV up to 4"))
+        assertTrue(lines.any { it.startsWith("Best for your Easy run") })
+        assertTrue(p.summary.suggestion.startsWith("Go at") || p.summary.suggestion.startsWith("Gym"))
+        assertTrue(p.summary.short.isNotBlank())
+        assertFalse(rwPlan(d, emptyList()).let { !it.noData })
+    }
+
+    @Test fun rwSwapHintIsTextOnly() {
+        val d = RW_DATE
+        val bad = rwPlan(d, rwDay { h -> rwHour(d, h, rain = 3.0, pct = 90.0) }, run = rwRun(Weather.RunType.EASY))
+        val d2 = d.plusDays(1)
+        val good = rwPlan(d2, rwDay { h -> rwHour(d2, h, rain = 0.0) })
+        val hints = Weather.swapHints(listOf(bad, good), UTC)
+        assertEquals(setOf(d), hints.keys)
+        assertTrue(hints.getValue(d).contains("swap with Tuesday"))
+        assertTrue(bad.withSwap(hints[d]).summary.lines().any { it.contains("swap with Tuesday") })
+    }
+
+    // ---- shift detection
+
+    @Test fun rwShiftDetection() {
+        val d = RW_DATE
+        val a = Weather.Sig(rwT(d, 7), rwT(d, 8, 30), emptySet())
+        assertNull(Weather.shiftMessage(null, a, UTC))
+        assertNull("unchanged", Weather.shiftMessage(a, a, UTC))
+        assertNull("20 minutes is not a shift", Weather.shiftMessage(a, a.copy(start = a.start + 1200, end = a.end + 1200), UTC))
+        val moved = Weather.shiftMessage(a, Weather.Sig(rwT(d, 8), rwT(d, 9, 30), emptySet()), UTC)!!
+        assertEquals("Run window shifted: forecast changed → best is 08:00–09:30 (was 07:00–08:30)", moved)
+        assertNotNull("30 minutes is a shift", Weather.shiftMessage(a, a.copy(start = a.start + 1800, end = a.end + 1800), UTC))
+        assertTrue(Weather.shiftMessage(a, a.copy(warns = setOf("rain")), UTC)!!.contains("rain now expected"))
+        assertTrue(Weather.shiftMessage(a.copy(warns = setOf("rain")), a, UTC)!!.contains("rain has cleared"))
+        assertTrue(Weather.shiftMessage(a, a.copy(warns = setOf("risky")), UTC)!!.contains("conditions now risky"))
+        assertTrue(Weather.shiftMessage(a, a.copy(warns = setOf("narrow")), UTC)!!.contains("window has narrowed"))
+        assertTrue(Weather.shiftMessage(a, null, UTC)!!.contains("no window fits"))
+        assertEquals(a.copy(warns = setOf("narrow", "rain")), Weather.Sig.decode(a.copy(warns = setOf("rain", "narrow")).encode()))
+        assertNull(Weather.Sig.decode("garbage"))
+    }
+
+    @Test fun rwQuietHoursAndStripRange() {
+        assertTrue(Weather.quiet(22)); assertTrue(Weather.quiet(23)); assertTrue(Weather.quiet(0)); assertTrue(Weather.quiet(4))
+        assertFalse(Weather.quiet(5)); assertFalse(Weather.quiet(12)); assertFalse(Weather.quiet(21))
+        val d = RW_DATE
+        // no sun times: 05:00-21:00
+        val none = Weather.stripRange(d, null, rwS, UTC)
+        assertEquals(rwT(d, 5), none.first); assertEquals(rwT(d, 21), none.second)
+        // daylight 06:00-20:00 ± 30 min ± 2 h
+        val auto = Weather.stripRange(d, rwSun(d), rwS, UTC)
+        assertEquals(rwT(d, 3), auto.first); assertEquals(rwT(d, 23), auto.second)
+        // custom summer hours 07:00-19:00
+        val custom = Weather.stripRange(d, rwSun(d), rwS.copy(auto = false, summerFrom = 7 * 60, summerTo = 19 * 60), UTC)
+        assertEquals(rwT(d, 5), custom.first); assertEquals(rwT(d, 21), custom.second)
+    }
+
+    // ---- the planned run
+
+    @Test fun rwPlannedRunAndType() {
+        val ds = RW_DATE.toString()
+        fun wk(name: String, type: String = "Run", sec: Int = 0, dist: Double = 0.0, st: WorkoutStatus = WorkoutStatus.PLANNED) = Workout(name, type, sec, 0, dist, st, ds)
+        assertEquals(Weather.RunType.TT, Weather.runOf(listOf(wk("5K TT", sec = 2400)), ds).type)
+        assertEquals(40, Weather.runOf(listOf(wk("5K TT", sec = 2400)), ds).minutes)
+        assertEquals("a race is a TT day", Weather.RunType.TT, Weather.runOf(listOf(wk("Marathon", st = WorkoutStatus.RACE, sec = 12000)), ds).type)
+        assertEquals(Weather.RunType.SUBT, Weather.runOf(listOf(wk("3x10' SubT", sec = 4200)), ds).type)
+        assertEquals(Weather.RunType.LONG, Weather.runOf(listOf(wk("Long run", sec = 5400)), ds).type)
+        assertEquals(Weather.RunType.EASY, Weather.runOf(listOf(wk("60m Easy", sec = 3600)), ds).type)
+        assertEquals("no duration: distance at 5:30/km", 55, Weather.runOf(listOf(wk("Easy", dist = 10000.0)), ds).minutes)
+        val none = Weather.runOf(listOf(wk("Easy bike", type = "Ride", sec = 3600)), ds)
+        assertFalse(none.planned); assertEquals(60, none.minutes); assertEquals(Weather.RunType.EASY, none.type)
+        assertEquals(60, Weather.runOf(listOf(wk("Easy")), ds).minutes)
+        val done = Weather.runOf(listOf(wk("60m Easy", sec = 3600, st = WorkoutStatus.DONE)), ds)
+        assertTrue(done.done)
+        assertEquals("planned beats done", "Hill reps", Weather.runOf(listOf(wk("60m Easy", sec = 3600, st = WorkoutStatus.DONE), wk("Hill reps", sec = 1800)), ds).name)
+    }
+
+    // ---- storage, key security, notifications
+
+    @Test fun rwSettingsRoundTripAndBackupLeavesKeyOut() {
+        RwStore.setLocation(ctx, 40.0, -105.0, "Test place")
+        RwStore.putFloat(ctx, RwStore.K_UV, 3.0)
+        RwStore.putInt(ctx, RwStore.K_BUFFER, 45)
+        RwStore.putBool(ctx, RwStore.K_AUTO, false)
+        val s = RwStore.load(ctx)
+        assertEquals(40.0, s.lat!!, 1e-9); assertEquals("Test place", s.place)
+        assertEquals(3.0, s.uvLimit, 1e-9); assertEquals(45, s.bufferMin); assertFalse(s.auto)
+        assertEquals(15.0, s.hotWinter, 1e-9); assertEquals(20.0, s.hotSummer, 1e-9); assertEquals(5.0, s.cold, 1e-9); assertEquals(16.0, s.humid, 1e-9)
+
+        // the encrypted key, cached forecasts, call counts and last-seen windows never go into a backup
+        val sp = ctx.getSharedPreferences("training_widget", Context.MODE_PRIVATE)
+        sp.edit().putString("rw_key_enc", "ENCRYPTED-BLOB").putString("rw_key_iv", "IV-BLOB").putString("rw_cache_om", "{\"cached\":1}")
+            .putInt("rw_calls_2026-06", 12).putString("rw_sig_2026-06-15", "1|2|").apply()
+        val backup = Backup.export(ctx)
+        assertFalse(backup.contains("rw_key")); assertFalse(backup.contains("ENCRYPTED-BLOB"))
+        assertFalse(backup.contains("rw_cache_")); assertFalse(backup.contains("rw_calls_")); assertFalse(backup.contains("rw_sig_"))
+        assertTrue("settings are backed up", backup.contains("rw_uv") && backup.contains("rw_lat"))
+    }
+
+    @Test fun rwSecureKeyNeverCrashes() {
+        // Robolectric has no AndroidKeyStore: saving reports false instead of throwing; with a Keystore the key round-trips
+        val fake = "test-not-a-real-key"
+        val saved = SecureKey.save(ctx, fake)
+        if (saved) { assertEquals(fake, SecureKey.load(ctx)); assertEquals("••••-key", SecureKey.masked(ctx)) }
+        else { assertFalse(SecureKey.has(ctx)); assertNull(SecureKey.load(ctx)); assertNull(SecureKey.masked(ctx)) }
+        SecureKey.remove(ctx)
+        assertFalse(SecureKey.has(ctx))
+        assertNull(SecureKey.load(ctx))
+    }
+
+    @Test fun rwRainbowCallsAreCountedPerMonth() {
+        assertEquals(0, RwStore.callsThisMonth(ctx))
+        RwStore.addCall(ctx); RwStore.addCall(ctx)
+        assertEquals(2, RwStore.callsThisMonth(ctx))
+        assertTrue(WeatherApi.rainbowForecastUrl(40.015, -105.27).startsWith("https://api.rainbow.ai/weather/v1/forecast/-105.2700/40.0150?forecast_days=7&forecast_hours=168"))
+        assertTrue(WeatherApi.rainbowNowcastUrl(40.015, -105.27).endsWith("/nowcast/v1/precip/-105.2700/40.0150"))
+    }
+
+    @Test fun rwNoLocationMeansNoFetchAndNoPlans() {
+        assertFalse(RunWindows.hasLocation(ctx))
+        val rep = WeatherApi.fetchAll(ctx)
+        assertFalse(rep.anyOk)
+        assertTrue(RunWindows.plans(ctx, LocalDate.now(), 7).isEmpty())
+        assertNull(RunWindows.plan(ctx, LocalDate.now()))
+        assertFalse(RunWindows.needsHourly(ctx))
+    }
+
+    @Test fun rwOfflineFetchFailsEachSourceWithoutThrowing() {
+        RwStore.setLocation(ctx, 40.0, -105.0, "Test place")
+        val rep = WeatherApi.fetchAll(ctx)      // Net.offline: every source fails, nothing is thrown
+        assertFalse(rep.anyOk)
+        assertTrue(rep.failed.isNotEmpty())
+        assertEquals("no Rainbow key, so no Rainbow calls", 0, RwStore.callsThisMonth(ctx))
+    }
+
+    @Test fun rwNotificationCategories() {
+        val N = NotifySettings
+        for (k in listOf("rw_tomorrow", "rw_today", "rw_shift")) assertTrue("$k on by default", N.isOn(ctx, N.cat(k)))
+        assertEquals(20 * 60, N.time(ctx, N.cat("rw_tomorrow")))
+        assertTrue("tomorrow's window wakes the app at its time", N.wakeTimes(ctx).any { it.hour == 20 && it.minute == 0 })
+        N.setOn(ctx, N.cat("rw_shift"), false)
+        assertFalse(N.isOn(ctx, N.cat("rw_shift")))
+    }
+
+    // ---- the whole chain on the made-up forecast
+
+    @Test fun rwFixtureForecastMakesSevenPlans() {
+        WxFixture.seed(ctx)
+        val today = LocalDate.now()
+        val plans = RunWindows.plans(ctx, today, 7)
+        assertEquals(7, plans.size)
+        for (p in plans) {
+            assertFalse("${p.date} has a forecast", p.noData)
+            assertNotNull("${p.date} has a window", p.window)
+            assertTrue(p.rainbowPresent)
+            assertTrue(p.summary.lines().isNotEmpty())
+        }
+        val wet = plans[2]            // fixture day 2 has heavy rain 14:00-17:59
+        assertTrue("the wet afternoon is avoided: ${wet.window}", wet.window!!.maxRain <= 0.5)
+        assertNull("fresh data is not labelled stale", RunWindows.asOf(ctx))
+        RwStore.putCache(ctx, "om", WxFixture.omJson(), System.currentTimeMillis() - 5 * 3600_000L)
+        RwStore.putCache(ctx, "rainbow", WxFixture.rainbowJson(), System.currentTimeMillis() - 5 * 3600_000L)
+        RwStore.putCache(ctx, "nws", WxFixture.nwsGridJson(), System.currentTimeMillis() - 5 * 3600_000L)
+        RwStore.putCache(ctx, "nowcast", WxFixture.nowcastJson(), System.currentTimeMillis() - 5 * 3600_000L)
+        RwStore.putCache(ctx, "aqi", WxFixture.aqiJson(), System.currentTimeMillis() - 5 * 3600_000L)
+        assertTrue(RunWindows.asOf(ctx)!!.startsWith("as of "))
+        assertNotNull("old data still shows rather than blanking", RunWindows.plan(ctx, today))
     }
 }

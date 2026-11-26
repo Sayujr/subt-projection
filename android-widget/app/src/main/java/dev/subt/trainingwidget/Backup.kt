@@ -14,7 +14,10 @@ object Backup {
         "api_key", "snapshot", "long_history", "load_index", "subt", "subt_reps", "race_history", "pbs", "tt_dates",
         "error", "refreshing_since", "history_fetched", "update_info", "update_checked", "update_dl_id", "update_dl_code", "seen_version",
     )
-    private fun skip(k: String) = k in SKIP_EXACT || k.startsWith("notified_")
+    private fun skip(k: String) = k in SKIP_EXACT || k.startsWith("notified_") ||
+        // run windows: the encrypted Rainbow key, cached forecasts, call counts and last-seen windows stay on the phone
+        k.startsWith("rw_key") || k.startsWith("rw_cache_") || k.startsWith("rw_calls_") || k.startsWith("rw_sig_") ||
+        k.startsWith("rw_nws_") || k == "rw_chain_next"
 
     fun export(ctx: Context): String {
         val o = JSONObject().put("app", "training-today").put("version", Updater.currentName(ctx)).put("created", java.time.LocalDateTime.now().toString())

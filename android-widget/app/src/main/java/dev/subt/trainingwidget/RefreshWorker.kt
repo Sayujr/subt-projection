@@ -57,7 +57,10 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         runCatching { Updater.check(ctx, force = inputData.getBoolean(FORCE, false)) }
         Prefs.setRefreshing(ctx, false)
         WidgetRenderer.renderAll(ctx)
+        // Run windows: refresh the forecast when it's over an hour old (not 22:00-05:00), then the evening notice
+        runCatching { RunWindows.refreshIfDue(ctx, 60) }
         runCatching { Notifier.run(ctx) }
+        runCatching { Notifier.runWindows(ctx) }
         runCatching { Notifier.updateReady(ctx) }
         Result.success()
     }
