@@ -1,3 +1,4 @@
+- Run windows: the hour strip shows the weather for every hour (night darkened with 🌙, not blank), icons for rain, cloud, sun, heat, cold and ice, marks daylight / 'dark OK' / night zones, and always zooms to include your window
 - Run windows: in winter (Nov–Mar) runs may start as late as 18:30 although it's dark (later only as a fallback, finishing by 20:00); in summer (May–Sep) early starts from 05:00 to stay out of the UV; other mornings unchanged
 - Missed sessions: added easy runs and doubles are written as workout steps (e.g. "- 35m 61-65%", same power range as your week's easy run) so intervals.icu counts their load; a TT copy keeps the original workout text
 - Missed sessions: workouts are never deleted. A missed one stays in intervals.icu and shows as not done; only moves and added easy runs or doubles are written

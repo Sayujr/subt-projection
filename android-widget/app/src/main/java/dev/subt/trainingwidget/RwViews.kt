@@ -11,58 +11,124 @@ import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.roundToInt
 
-/** The day strip: one coloured cell per hour, a white box round the window, a "now" line, sunrise / sunset and a 3-hourly axis. */
+/**
+ * The day strip: one weather-coloured cell per hour (night darkened with a moon, hours without data hatched), one icon
+ * per hour, a zone band (daylight / dark OK / night), a white box round the window, a "now" line and a 3-hourly axis.
+ */
 object RwViews {
     const val NOW_BLUE = 0xFF4EA1FF.toInt()
     private const val BASE = 0xFF232834.toInt()
     private const val DIM = 0xFF9AA3B2.toInt()
+    private const val DAYLIGHT = 0xFFFFC53D.toInt()
+    private const val DARK_OK = 0xFF8FA9D6.toInt()
     private const val RB_BLUE = 0xFF8FD3FF.toInt()
 
+    private const val BAND_DP = 14f
+
     /** Height of the strip bitmap in dp at scale 1 (widgets scale it down to fit). */
-    fun heightDp(mini: Boolean): Float = if (mini) 3f + 14f + 3f else 22f + 34f + 20f
+    fun heightDp(mini: Boolean): Float = if (mini) 3f + 14f + 3f else 22f + BAND_DP + 34f + 20f
+
+    private fun darken(argb: Int, k: Float): Int {
+        val r = ((argb shr 16 and 0xFF) * k).roundToInt(); val g = ((argb shr 8 and 0xFF) * k).roundToInt(); val b = ((argb and 0xFF) * k).roundToInt()
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
+    /** The single most important icon for an hour: danger, rain, UV, heat, cold, cloud. Second = true for heavy rain (drawn bigger). */
+    fun primaryIcon(h: Weather.Combined, cls: Weather.HourClass, type: Weather.RunType, s: RwSettings): Pair<String, Boolean>? = when {
+        h.frozen || h.icy -> "🧊" to false
+        (h.aqi ?: 0.0) > 100.0 -> "😷" to false
+        h.rainMm > 0.25 -> "💧" to (h.rainMm > 0.5)
+        type == Weather.RunType.TT && (h.gust ?: 0.0) > 30.0 -> "💨" to false
+        h.uv > s.uvLimit -> "☀" to false
+        cls.band == Weather.Band.HOT -> "🔥" to false
+        cls.band == Weather.Band.COLD -> (if (cls.eff < 0.0) "❄" else "🧤") to false
+        cls.cloudy -> "☁" to false
+        else -> null
+    }
 
     /**
      * [mini] = cells and the box only (Week list). [hours] / [win] default to the plan's overall pick; pass the Rainbow
-     * hours and window for the Rainbow strip, and [other] to outline a second window dashed.
+     * hours and window for the Rainbow strip, and [other] to outline a second window dashed. [minCellDp] widens the
+     * bitmap beyond [widthPx] so cells stay readable (the caller then scrolls it).
      */
     fun strip(
         ctx: Context, plan: Weather.DayPlan, s: RwSettings, widthPx: Int, mini: Boolean, nowSec: Long?,
         hours: List<Weather.Combined> = plan.hours, win: Weather.Window? = plan.window, other: Weather.Window? = null,
-        zone: ZoneId = ZoneId.systemDefault(), dScale: Float = 1f,
+        zone: ZoneId = ZoneId.systemDefault(), dScale: Float = 1f, minCellDp: Float = 0f,
     ): Bitmap {
         val d = ctx.resources.displayMetrics.density * dScale
-        val w = widthPx.coerceAtLeast(160)
         val margin = if (mini) 2f * d else 8f * d
+        val t0 = plan.lo; val t1 = plan.hi
+        val nCells = Math.ceil((t1 - t0) / 3600.0).toInt().coerceAtLeast(1)
+        val w = maxOf(widthPx.coerceAtLeast(160), if (minCellDp > 0f) (nCells * minCellDp * d + 2 * margin).roundToInt() else 0)
         val topH = if (mini) 3f * d else 22f * d
+        val bandH = if (mini) 0f else BAND_DP * d
         val cellH = (if (mini) 14f else 34f) * d
         val axisH = if (mini) 3f * d else 20f * d
-        val h = (topH + cellH + axisH).roundToInt()
+        val h = (topH + bandH + cellH + axisH).roundToInt()
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
-        val t0 = plan.lo; val t1 = plan.hi
         val span = (t1 - t0).toFloat().coerceAtLeast(1f)
         fun x(t: Long): Float = margin + ((t - t0).toFloat() / span).coerceIn(0f, 1f) * (w - 2 * margin)
 
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        val cellTop = topH
-        val cellBottom = topH + cellH
+        val cellTop = topH + bandH
+        val cellBottom = cellTop + cellH
         // empty track
         p.color = BASE
         c.drawRoundRect(RectF(x(t0), cellTop, x(t1), cellBottom), 3f * d, 3f * d, p)
+        // zone band: daylight (solid), dark but OK (dashed), night fallback (dotted)
+        if (!mini) drawBand(c, plan, s, zone, { t -> x(t) }, cellTop, d, t0, t1)
         // hour cells
         val month = plan.date.monthValue
         val cellW = (x(t0 + 3600) - x(t0))
-        val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 12f * d; textAlign = Paint.Align.CENTER; color = 0xFF1B1F27.toInt() }
-        for (hr in hours) {
-            if (hr.t + 3600 <= t0 || hr.t >= t1) continue
-            val night = Weather.isNight(hr.t, plan.sun, zone)
-            val cls = Weather.classify(hr, s, month, night)
-            p.color = cls.tone.argb
-            c.drawRect(x(hr.t) + 0.5f, cellTop, x(hr.t + 3600) - 0.5f, cellBottom, p)
-            if (!mini && !night && cellW >= 14f * d) {
-                val icon = Weather.icons(hr, cls, plan.run.type, s).firstOrNull()
-                if (icon != null) c.drawText(icon, (x(hr.t) + x(hr.t + 3600)) / 2f, cellBottom - (cellH - 12f * d) / 2f - 2f * d, iconPaint)
+        val byT = HashMap<Long, Weather.Combined>()
+        for (hr in hours) byT[Weather.hourFloor(hr.t)] = hr
+        val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+        val moonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8f * d; textAlign = Paint.Align.LEFT }
+        val hatch = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1f * d; color = 0xFF465065.toInt() }
+        val tiny = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 7f * d; textAlign = Paint.Align.CENTER; color = DIM }
+        var slot = Weather.hourFloor(t0)
+        while (slot < t1) {
+            val l = x(slot) + 0.5f; val r = x(slot + 3600) - 0.5f
+            val hr = byT[slot]
+            if (hr == null) {
+                // no data: hatched, never a plain box
+                p.color = BASE
+                c.drawRect(l, cellTop, r, cellBottom, p)
+                c.save(); c.clipRect(l, cellTop, r, cellBottom)
+                var k = -cellH
+                val step = 5f * d
+                while (k < r - l) { c.drawLine(l + k, cellBottom, l + k + cellH, cellTop, hatch); k += step }
+                c.restore()
+                val past = nowSec != null && slot + 3600 <= nowSec
+                if (past) { p.color = 0x59000000; c.drawRect(l, cellTop, r, cellBottom, p) }
+                if (!mini) {
+                    val label = if (past) "past" else "no data"
+                    if (tiny.measureText(label) <= r - l - 2f * d) c.drawText(label, (l + r) / 2f, cellTop + cellH / 2f + 3f * d, tiny)
+                }
+            } else {
+                val night = Weather.isNight(hr.t, plan.sun, zone)
+                val cls = Weather.classify(hr, s, month, false)
+                p.color = if (night) darken(cls.tone.argb, 0.55f) else cls.tone.argb
+                c.drawRect(l, cellTop, r, cellBottom, p)
+                if (!mini) {
+                    if (night && cellW >= 14f * d) c.drawText("🌙", l + 2f * d, cellTop + 9f * d, moonPaint)
+                    if (cellW >= 12f * d) {
+                        val ic = primaryIcon(hr, cls, plan.run.type, s)
+                        if (ic != null) {
+                            iconPaint.textSize = (if (ic.second) 16f else 12f) * d
+                            c.drawText(ic.first, (l + r) / 2f, cellBottom - (cellH - 12f * d) / 2f - 2f * d + (if (ic.second) 2f * d else 0f), iconPaint)
+                        }
+                    }
+                }
             }
+            slot += 3600
+        }
+        // the window's cells get a subtle white wash so they pop
+        if (win != null) {
+            p.color = 0x1FFFFFFF
+            c.drawRect(x(win.start), cellTop, x(win.end), cellBottom, p)
         }
         // the other (Rainbow) window, dashed
         if (other != null) {
@@ -117,5 +183,32 @@ object RwViews {
             }
         }
         return bmp
+    }
+
+    /** Zones just above the cells: daylight ±30 min solid, "dark OK" dashed, the night fallback dotted. */
+    private fun drawBand(
+        c: Canvas, plan: Weather.DayPlan, s: RwSettings, zone: ZoneId, x: (Long) -> Float, cellTop: Float, d: Float, t0: Long, t1: Long,
+    ) {
+        val sun = plan.sun ?: return
+        val lenSec = (plan.run.minutes + s.bufferMin) * 60L
+        val dayLo = sun.rise - 1800; val dayHi = sun.set + 1800
+        val (aLo, aHi) = Weather.allowedRange(plan.date, sun, s, zone, lenSec)
+        val okLo = minOf(aLo, dayLo); val okHi = maxOf(aHi, dayHi)
+        val nfLo = Weather.atMinutes(plan.date, 5 * 60, zone); val nfHi = Weather.nightEnd(plan.date, zone)
+        val y = cellTop - 3f * d
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f * d; strokeCap = Paint.Cap.ROUND }
+        val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8f * d; textAlign = Paint.Align.CENTER }
+        fun seg(a: Long, b: Long, color: Int, dash: FloatArray?, label: String?) {
+            val lo = maxOf(a, t0); val hi = minOf(b, t1)
+            if (hi <= lo) return
+            line.color = color; line.pathEffect = dash?.let { DashPathEffect(it, 0f) }
+            c.drawLine(x(lo), y, x(hi), y, line)
+            if (label != null && x(hi) - x(lo) >= 44f * d) { txt.color = color; c.drawText(label, (x(lo) + x(hi)) / 2f, y - 3f * d, txt) }
+        }
+        seg(nfLo, okLo, DIM, floatArrayOf(1f * d, 4f * d), null)
+        seg(okHi, nfHi, DIM, floatArrayOf(1f * d, 4f * d), null)
+        seg(okLo, dayLo, DARK_OK, floatArrayOf(6f * d, 3f * d), "dark OK")
+        seg(dayHi, okHi, DARK_OK, floatArrayOf(6f * d, 3f * d), "dark OK")
+        seg(dayLo, dayHi, DAYLIGHT, null, "daylight")
     }
 }

@@ -1407,12 +1407,36 @@ class RulesTest {
         // no sun times: 05:00-21:00
         val none = Weather.stripRange(d, null, rwS, UTC)
         assertEquals(rwT(d, 5), none.first); assertEquals(rwT(d, 21), none.second)
-        // daylight 06:00-20:00 ± 30 min ± 2 h
+        // daylight 06:00-20:00 ± 30 min; summer mornings start at 05:00, minus 30 min margin
         val auto = Weather.stripRange(d, rwSun(d), rwS, UTC)
-        assertEquals(rwT(d, 3), auto.first); assertEquals(rwT(d, 23), auto.second)
+        assertEquals(rwT(d, 4), auto.first); assertEquals(rwT(d, 21), auto.second)
         // custom summer hours 07:00-19:00
         val custom = Weather.stripRange(d, rwSun(d), rwS.copy(auto = false, summerFrom = 7 * 60, summerTo = 19 * 60), UTC)
-        assertEquals(rwT(d, 5), custom.first); assertEquals(rwT(d, 21), custom.second)
+        assertEquals(rwT(d, 6), custom.first); assertEquals(rwT(d, 20), custom.second)
+    }
+
+    @Test fun rwStripRangeAlwaysHoldsThePickedWindows() {
+        // winter, sunset 16:37, window is a night fallback 19:30-21:12
+        val d = RW_WINTER
+        val sun = Weather.Sun(d, rwT(d, 8), rwT(d, 16, 37))
+        val hours = rwDay { h -> rwHour(d, h, rain = if (h in 6..18) 2.0 else 0.0, pct = if (h in 6..18) 80.0 else 0.0) }
+        val plan = Weather.plan(d, hours, emptyList(), listOf(sun), rwRun(Weather.RunType.EASY), rwS, null, UTC)
+        plan.window?.let { assertTrue(plan.lo <= it.start); assertTrue(plan.hi >= it.end) }
+        val night = (plan.window ?: error("no window")).copy(start = rwT(d, 19, 30), end = rwT(d, 21, 12))
+        val r = Weather.stripRange(d, sun, rwS, UTC, 2400L, listOf(night))
+        assertTrue(r.second >= rwT(d, 21, 12))
+        assertEquals(rwT(d, 22), r.second)
+        assertTrue(r.first <= night.start)
+        // a Rainbow window and a split part count too
+        val early = night.copy(start = rwT(d, 5), end = rwT(d, 6))
+        val r2 = Weather.stripRange(d, sun, rwS, UTC, 2400L, listOf(night, early))
+        assertTrue(r2.first <= rwT(d, 4, 30)); assertTrue(r2.second >= rwT(d, 21, 12))
+        // summer plans cover the 05:00 early start
+        val s = Weather.stripRange(RW_DATE, rwSun(RW_DATE), rwS, UTC, 2400L)
+        assertTrue(s.first <= rwT(RW_DATE, 5))
+        // now - 1 h is included when it is earlier than the allowed range
+        val n = Weather.stripRange(RW_DATE, rwSun(RW_DATE), rwS, UTC, 2400L, emptyList(), rwT(RW_DATE, 3, 30))
+        assertTrue(n.first <= rwT(RW_DATE, 2, 30))
     }
 
     // ---- the planned run

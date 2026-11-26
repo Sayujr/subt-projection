@@ -236,6 +236,22 @@ class ScreensTest {
                 }
             } finally { WxFixture.tweak = null; WxFixture.seed(ctx) }
         }
+        // Run windows: a winter-style evening where daylight is wet and only the dark evening hours are dry (night window)
+        safely("runwindow_night_window") {
+            try {
+                WxFixture.tweak = { day, hour, p ->
+                    if (day != 1) p
+                    else if (hour in 6..19) WxFixture.P(p.temp, 90.0, 0.3, 1.5, p.dew, p.wind)
+                    else p
+                }
+                WxFixture.seed(ctx)
+                val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, Fixture.today.plusDays(1).toString())
+                val ctl = Robolectric.buildActivity(RunWindowActivity::class.java, i).setup()
+                settle()
+                capture("runwindow_night_window", ctl.get().window.decorView)
+                ctl.pause().stop().destroy()
+            } finally { WxFixture.tweak = null; WxFixture.seed(ctx) }
+        }
         // Missed-session swaps: the "Fit in a missed session" page from a planned week (workout today marked as skipped, and an at-risk day)
         safely("swap_activity") {
             val t = Fixture.today

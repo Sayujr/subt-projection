@@ -535,15 +535,31 @@ object Weather {
         return atMinutes(date, from, zone) to atMinutes(date, to, zone)
     }
 
-    /** What the strip covers: allowed hours ± 2 h, or 05:00–21:00 when daylight isn't known. */
-    fun stripRange(date: LocalDate, sun: Sun?, s: RwSettings, zone: ZoneId): Pair<Long, Long> {
+    /**
+     * What the strip covers, in whole hours: the allowed hours (incl. the extended winter evening / summer morning for a
+     * run of [lenSec]) ± 30 min, or 05:00-21:00 when daylight isn't known; always widened to hold every picked window
+     * in [windows] (overall, Rainbow, split parts) plus 30 min, and to now − 1 h when [nowSec] falls on [date]. Clamped to the day.
+     */
+    fun stripRange(
+        date: LocalDate, sun: Sun?, s: RwSettings, zone: ZoneId, lenSec: Long = 0,
+        windows: List<Window> = emptyList(), nowSec: Long? = null,
+    ): Pair<Long, Long> {
         val day0 = atMinutes(date, 0, zone)
         val dayEnd = atMinutes(date, 24 * 60, zone)
-        if (s.auto && sun == null) return atMinutes(date, 5 * 60, zone) to atMinutes(date, 21 * 60, zone)
-        val (a, b) = allowedRange(date, sun, s, zone)
-        val lo = max(day0, hourFloor(a - 2 * 3600))
-        val hi = min(dayEnd, ceilTo(b + 2 * 3600, 3600L))
-        return if (hi - lo >= 6 * 3600) lo to hi else atMinutes(date, 5 * 60, zone) to atMinutes(date, 21 * 60, zone)
+        var lo: Long; var hi: Long
+        if (s.auto && sun == null) {
+            lo = atMinutes(date, 5 * 60, zone); hi = atMinutes(date, 21 * 60, zone)
+        } else {
+            val (a, b) = allowedRange(date, sun, s, zone, lenSec)
+            lo = hourFloor(a - 1800); hi = ceilTo(b + 1800, 3600L)
+            if (hi - lo < 6 * 3600) { lo = atMinutes(date, 5 * 60, zone); hi = atMinutes(date, 21 * 60, zone) }
+        }
+        for (w in windows) {
+            lo = min(lo, hourFloor(w.start - 1800))
+            hi = max(hi, ceilTo(w.end + 1800, 3600L))
+        }
+        if (nowSec != null && nowSec in day0 until dayEnd) lo = min(lo, hourFloor(nowSec - 3600))
+        return max(day0, lo) to min(dayEnd, hi)
     }
 
     // ================================================================ the planned run
@@ -789,8 +805,8 @@ object Weather {
         val dh = all.filter { dayOf(it.t, zone) == date }
         val rh = rb.filter { dayOf(it.t, zone) == date }
         val sun = sunFor(suns, date)
-        val (lo, hi) = stripRange(date, sun, s, zone)
         if (dh.isEmpty()) {
+            val (lo, hi) = stripRange(date, sun, s, zone, (run.minutes + s.bufferMin) * 60L, emptyList(), nowSec)
             val sm = Summary("No forecast for this day yet.", "", null, null, "Tap Refresh now, or check your location and connection.", null, emptyList(), "No forecast")
             return DayPlan(date, run, null, null, rh.isNotEmpty(), false, false, false, emptyList(), emptyList(), sun, lo, hi, sm, noData = true)
         }
@@ -806,6 +822,10 @@ object Weather {
         val same = best != null && rbBest != null && overlap(best, rbBest) >= 0.8
         var sm = summarize(date, dh, rh, run, best, rbBest, same, rh.isNotEmpty(), pk.risky, passed, sun, s, zone)
         val split = if (passed) null else findSplit(dh, date, run, suns, s, nowSec, zone)
+        val (lo, hi) = stripRange(
+            date, sun, s, zone, (run.minutes + s.bufferMin) * 60L,
+            listOfNotNull(best, rbBest, split?.first, split?.second), nowSec,
+        )
         if (split != null) {
             val label = splitLabel(split, zone)
             sm = sm.copy(suggestion = "$label: no single ${run.minutes + s.bufferMin}-minute window is good, but two shorter ones are.", short = label)

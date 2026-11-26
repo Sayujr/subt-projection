@@ -11,6 +11,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -120,6 +121,21 @@ class RunWindowActivity : Activity() {
         parent.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, bmp.height).apply { topMargin = dp(6) })
     }
 
+    /** A strip that may be wider than the screen: scrolls sideways, opened with the best window in the middle. */
+    private fun scrollImage(parent: LinearLayout, bmp: android.graphics.Bitmap, plan: Weather.DayPlan, viewW: Int) {
+        if (bmp.width <= viewW) { image(parent, bmp); return }
+        val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.FIT_XY }
+        val hsv = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        hsv.addView(iv, ViewGroup.LayoutParams(bmp.width, bmp.height))
+        parent.addView(hsv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, bmp.height).apply { topMargin = dp(6) })
+        val focus = plan.window ?: plan.rainbow ?: plan.split?.first
+        if (focus != null) {
+            val mid = (focus.start + focus.end) / 2
+            val frac = (mid - plan.lo).toFloat() / (plan.hi - plan.lo).coerceAtLeast(1)
+            hsv.post { hsv.scrollTo((frac * bmp.width - viewW / 2f).roundToInt().coerceAtLeast(0), 0) }
+        }
+    }
+
     private fun cells(parent: LinearLayout, vals: List<String>, weights: List<Float>, header: Boolean = false, color: Int = TEXT) {
         val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(if (header) 8 else 5), 0, dp(4)) }
         vals.forEachIndexed { i, v ->
@@ -226,12 +242,12 @@ class RunWindowActivity : Activity() {
         run {
             val c = card()
             label(c, "Overall pick")
-            image(c, RwViews.strip(this, plan, s, wPx, false, nowSec, other = if (plan.same) null else plan.rainbow))
+            scrollImage(c, RwViews.strip(this, plan, s, wPx, false, nowSec, other = if (plan.same) null else plan.rainbow, minCellDp = 22f), plan, wPx)
             if (plan.rainbowPresent && plan.rbHours.isNotEmpty()) {
                 label(c, if (plan.same) "Rainbow alone (same window)" else "Rainbow pick (dashed on the strip above)").setPadding(0, dp(12), 0, 0)
-                image(c, RwViews.strip(this, plan, s, wPx, false, nowSec, hours = plan.rbHours, win = plan.rainbow))
+                scrollImage(c, RwViews.strip(this, plan, s, wPx, false, nowSec, hours = plan.rbHours, win = plan.rainbow, minCellDp = 22f), plan, wPx)
             }
-            text(c, "White box = the window. Blue line = now. Colours show the weather: green cool and cloudy, orange to red hotter, dark red hot and sunny, grey-blue cold.", 12f, FAINT, top = 8)
+            text(c, "White box = the window, blue line = now. Cell colour is the weather: green cool, orange to red hotter, dark red hot and sunny, grey-blue cold; night cells are darker with a 🌙, hatched cells have no data. Icons: 💧 rain, ☁ cloud, ☀ UV over your limit, 🔥 hot, 🧤 cold, 🧊 ice, 😷 air quality. The line above the cells shows daylight (solid), 'dark OK' (dashed) and night (dotted).", 12f, FAINT, top = 8)
         }
         // 3. Hour table for the window
         val w = plan.window
