@@ -984,29 +984,34 @@ class MainActivity : Activity() {
                 Tab.HOME -> content.addView(scrollPage("home") { col ->
                     // Verdict, the full view (chart scrubbable), today's power targets, the week checklist, streak
                     val screens = AppScreens(this, wDp) { drawContent() }
-                    screens.verdictCard(col)
-                    runCatching { screens.runWindowCard(col) }
-                    screens.coachRepliedCard(col)
-                    val chartH = (hDp * 0.6).roundToInt().coerceAtLeast(300)   // leave room so the next card peeks in
-                    applyInto(col, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, chartH, inApp = true), dp(chartH))
-                    col.getChildAt(col.childCount - 1)?.let { card ->
-                        enableScrub(card)
-                        // Today's done workouts open their detail screen
-                        val rows = card.findViewById<ViewGroup>(R.id.workouts)
-                        val todays = Prefs.snapshot(this)?.workouts.orEmpty()
-                        if (rows != null) for (i in 0 until minOf(rows.childCount, todays.size)) {
-                            val w = todays[i]
-                            w.activityId?.let { aid -> rows.getChildAt(i).setOnClickListener { WorkoutActivity.open(this, aid, w.name) } }
+                    // Cards in the order set in Settings → Home screen
+                    for (key in HomeOrder.load(this)) when (key) {
+                        "verdict" -> screens.verdictCard(col)
+                        "window" -> runCatching { screens.runWindowCard(col) }
+                        "coach" -> screens.coachRepliedCard(col)
+                        "today" -> {
+                            val chartH = (hDp * 0.6).roundToInt().coerceAtLeast(300)   // leave room so the next card peeks in
+                            applyInto(col, WidgetRenderer.buildFull(this, WidgetRenderer.APP_ID, wDp, chartH, inApp = true), dp(chartH))
+                            col.getChildAt(col.childCount - 1)?.let { card ->
+                                enableScrub(card)
+                                // Today's done workouts open their detail screen
+                                val rows = card.findViewById<ViewGroup>(R.id.workouts)
+                                val todays = Prefs.snapshot(this)?.workouts.orEmpty()
+                                if (rows != null) for (i in 0 until minOf(rows.childCount, todays.size)) {
+                                    val w = todays[i]
+                                    w.activityId?.let { aid -> rows.getChildAt(i).setOnClickListener { WorkoutActivity.open(this, aid, w.name) } }
+                                }
+                                // Long-press the chart card, or tap Coach › under it
+                                CoachSheet.attachBelow(this, col, card) { Coach.load(this) }
+                            }
+                            col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
                         }
-                        // Long-press the chart card, or tap Coach › under it
-                        CoachSheet.attachBelow(this, col, card) { Coach.load(this) }
+                        "deviations" -> screens.deviationsCard(col)
+                        "power" -> screens.todayPowerCard(col)
+                        "recent" -> screens.recentWorkoutsCard(col)
+                        "checklist" -> screens.weekChecklist(col)
+                        "streak" -> screens.streakLine(col)
                     }
-                    col.addView(View(this), LinearLayout.LayoutParams(1, dp(10)))
-                    screens.deviationsCard(col)
-                    screens.todayPowerCard(col)
-                    screens.recentWorkoutsCard(col)
-                    screens.weekChecklist(col)
-                    screens.streakLine(col)
                 }, full)
                 Tab.STREAKS -> if (calendarOpen || run { loadLongHistory(force = false); false }) {
                     loadLongHistory(force = false)

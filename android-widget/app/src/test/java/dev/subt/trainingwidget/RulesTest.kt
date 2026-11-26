@@ -981,6 +981,17 @@ class RulesTest {
         assertFalse(Weather.isFrozen(h[0].precipType))   // "no_precipitation"
     }
 
+    @Test fun homeOrder() {
+        assertEquals(HomeOrder.DEFAULT, HomeOrder.merge(emptyList()))
+        val o = HomeOrder.move(HomeOrder.DEFAULT, "window", -2)
+        assertEquals(listOf("verdict", "window", "today", "power"), o.take(4))
+        assertEquals(o, HomeOrder.move(o, "verdict", -1))            // can't move above the top
+        // A saved order from before a card existed gets that card back in its default place
+        val merged = HomeOrder.merge(listOf("window", "verdict"))
+        assertEquals(HomeOrder.DEFAULT.size, merged.size)
+        assertEquals("window", merged[0])
+    }
+
     @Test fun rwParseCoords() {
         fun ok(s: String, lat: Double, lon: Double) {
             val c = Weather.parseCoords(s); assertNotNull(s, c)

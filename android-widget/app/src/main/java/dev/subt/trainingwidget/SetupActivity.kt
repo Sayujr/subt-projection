@@ -242,6 +242,7 @@ class SetupActivity : Activity() {
         section("send", "Send to intervals.icu", "Optional, asks before each change", false, groups["send"]!!)
         section("rules", "Rules", "Plan tolerance, streak bands, marathon power", false, rulesViews())
         section("rw", "Run windows", rwSub(), intent?.getStringExtra(EXTRA_OPEN) == "rw", runWindowViews())
+        section("home", "Home screen", "Order of the cards on Today", false, homeOrderViews())
         section("wid", "Widgets", if (widgetMode) "This widget's graphs and period" else "Long-press a widget to change it", widgetMode, groups["wid"]!!)
         section("coach", "Coach", "Tone of the read-out you take to the Claude app", false, coachViews())
         section("backup", "Backup", "Save or restore your settings and numbers", false, backupViews())
@@ -252,6 +253,35 @@ class SetupActivity : Activity() {
         section("update", "App updates", if (upd != null) "⚠ ${upd.name} ready to install (you have ${Updater.currentName(this)})" else "Version ${Updater.currentName(this)}",
             upd != null || intent?.getStringExtra(EXTRA_OPEN) == "update", updateViews())
         tail.forEach { root.addView(it) }
+    }
+
+    /** Settings → Home screen: the Today cards with ↑ / ↓ to reorder, saved at once. */
+    private fun homeOrderViews(): List<View> {
+        val d = resources.displayMetrics.density
+        val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        fun draw() {
+            box.removeAllViews()
+            val order = HomeOrder.load(this)
+            order.forEachIndexed { i, key ->
+                val row = android.widget.LinearLayout(this).apply {
+                    orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, (4 * d).toInt(), 0, (4 * d).toInt())
+                }
+                row.addView(TextView(this).apply { text = "${i + 1}. ${HomeOrder.CARDS[key]}"; setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f },
+                    android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                fun arrow(t: String, by: Int, enabled: Boolean) = TextView(this).apply {
+                    text = t; textSize = 20f; gravity = android.view.Gravity.CENTER
+                    setTextColor(if (enabled) 0xFF4EA1FF.toInt() else 0xFF3A4150.toInt())
+                    setPadding((14 * d).toInt(), (4 * d).toInt(), (14 * d).toInt(), (4 * d).toInt())
+                    if (enabled) setOnClickListener { HomeOrder.save(this@SetupActivity, HomeOrder.move(HomeOrder.load(this@SetupActivity), key, by)); draw() }
+                }
+                row.addView(arrow("↑", -1, i > 0)); row.addView(arrow("↓", 1, i < order.size - 1))
+                box.addView(row)
+            }
+        }
+        draw()
+        return listOf(box, smallButton("Reset to default order") { HomeOrder.save(this, HomeOrder.DEFAULT); draw() },
+            note("Changes show next time you open the Today tab."))
     }
 
     private fun smallButton(t: String, onClick: () -> Unit) = Button(this).apply {
