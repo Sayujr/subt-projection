@@ -1,3 +1,4 @@
+- Missed a session? A new page suggests 1–3 ways to fit it in (your rules: alternate workouts and easy days, 60% doubles where the weather has two good windows, weekend misses can carry into next week) and applies your pick in intervals.icu with Undo
 - Run windows: once your window starts and today's run isn't done, you get the next best window today straight away; once the run syncs as done the card shows ✓ and moves on to tomorrow
 - Run windows: "window shifted" alerts only point to windows still ahead today (never to a time already gone), and stop once your window has started
 - Today: cards can be reordered in Settings → Home screen. New default: Today's call, Today (workouts and chart), Today's power targets, then Best run window

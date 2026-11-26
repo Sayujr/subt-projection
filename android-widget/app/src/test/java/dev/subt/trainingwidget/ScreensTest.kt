@@ -236,6 +236,37 @@ class ScreensTest {
                 }
             } finally { WxFixture.tweak = null; WxFixture.seed(ctx) }
         }
+        // Missed-session swaps: the "Fit in a missed session" page from a planned week (workout today marked as skipped, and an at-risk day)
+        safely("swap_activity") {
+            val t = Fixture.today
+            fun w(name: String, d: Int, secs: Int, id: Long) =
+                Workout(name, "Run", secs, 50, 10000.0, WorkoutStatus.PLANNED, t.plusDays(d.toLong()).toString(), eventId = id, startLocal = "${t.plusDays(d.toLong())}T07:00:00")
+            val week = listOf(
+                w("3x10' SubT", 0, 4200, 901), w("Easy run", 1, 3000, 902), w("3x10' SubT", 2, 4200, 903), w("Easy run", 3, 3000, 904),
+                w("3x10' SubT", 4, 4200, 905), w("Easy run", 5, 3000, 906), w("Long run 26 km", 6, 7800, 907),
+                w("Easy run", 7, 3000, 908), w("3x10' SubT", 8, 4200, 909), w("Easy run", 9, 3000, 910),
+            )
+            val snap = Prefs.snapshot(ctx)!!
+            Prefs.saveSnapshot(ctx, snap.copy(week = week, ahead = emptyList(), workouts = emptyList()), 400)
+            for ((label, trig) in listOf("swap_activity" to Swaps.Trigger.MANUAL, "swap_activity_risk" to Swaps.Trigger.AT_RISK, "swap_activity_missed" to Swaps.Trigger.MISSED_PASSED)) safely(label) {
+                val i = SwapActivity.intent(ctx, t, 901L, trig, "heavy rain all day")
+                val ctl = Robolectric.buildActivity(SwapActivity::class.java, i).setup()
+                settle()
+                capture(label, ctl.get().window.decorView)
+                ctl.pause().stop().destroy()
+            }
+            safely("swap_card_and_banner") {
+                val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+                val col = android.widget.LinearLayout(act).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(0xFF0F1218.toInt()) }
+                AppScreens(act, 392).runWindowCard(col)
+                val wpx = (392 * ctx.resources.displayMetrics.density).toInt()
+                col.measure(View.MeasureSpec.makeMeasureSpec(wpx, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                val h = col.measuredHeight.coerceIn(1, 4000)
+                col.layout(0, 0, wpx, h)
+                save("swap_card_and_banner", Bitmap.createBitmap(wpx, h, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawColor(0xFF0F1218.toInt()); col.draw(this) } })
+            }
+            Fixture.seed(ctx)
+        }
         // The "Change in location?" dialog body (built as a plain view, no dialog, so it can be captured)
         safely("location_dialog") {
             val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java)).setup().get()

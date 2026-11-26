@@ -1883,4 +1883,197 @@ class RulesTest {
             assertTrue(swap.aTo.isAfter(LocalDate.now().minusDays(1)) && swap.aTo != tomorrow)
         } finally { WxFixture.tweak = null }
     }
+
+    // ================================================================ missed-session swaps
+
+    private val swMon: LocalDate = LocalDate.of(2026, 11, 23)   // a Monday
+    private fun swS(id: Long, name: String, kind: Swaps.Kind, min: Int) = Swaps.Session(id, name, kind, min)
+    private fun swWeek(mon: LocalDate, base: Long, kinds: List<Swaps.Kind>): List<Swaps.Slot> = kinds.mapIndexed { i, k ->
+        Swaps.Slot(mon.plusDays(i.toLong()), listOf(swS(base + i, "${k.name} $i", k, when (k) { Swaps.Kind.LONG -> 120; Swaps.Kind.EASY -> 50; else -> 70 })))
+    }
+    private val swPattern = listOf(Swaps.Kind.EASY, Swaps.Kind.WORKOUT, Swaps.Kind.EASY, Swaps.Kind.WORKOUT, Swaps.Kind.EASY, Swaps.Kind.WORKOUT, Swaps.Kind.LONG)
+    private fun swSlots(): List<Swaps.Slot> = swWeek(swMon, 0, swPattern) + swWeek(swMon.plusDays(7), 10, swPattern)
+    private val swTwo: (LocalDate) -> Swaps.DayWin = { Swaps.DayWin(2, listOf(7 * 60, 16 * 60)) }
+    private val swOne: (LocalDate) -> Swaps.DayWin = { Swaps.DayWin(1) }
+    private fun swMoves(o: Swaps.Option) = o.changes.filterIsInstance<Swaps.Change.Move>().associate { it.eventId to it.to }
+    private fun swDoubles(o: Swaps.Option) = o.changes.filterIsInstance<Swaps.Change.AddDouble>().map { it.date }
+
+    @Test fun swapsTuesdayWorkoutMissed() {
+        assertEquals(java.time.DayOfWeek.MONDAY, swMon.dayOfWeek)
+        val slots = swSlots()
+        val tue = swMon.plusDays(1)
+        val missed = slots[1].sessions[0]
+        val opts = Swaps.options(missed, tue, slots, swTwo, swMon)
+        assertTrue(opts.size in 1..3)
+        val o = opts.first { it.id == "shift" }
+        val m = swMoves(o)
+        assertEquals("A to Wed", swMon.plusDays(2), m[1L])
+        assertEquals("easy pushed to Thu", swMon.plusDays(3), m[2L])
+        assertEquals("B to Fri", swMon.plusDays(4), m[3L])
+        assertEquals("easy pushed to Sat", swMon.plusDays(5), m[4L])
+        assertNull("long stays on Sunday", m[6L])
+        val leave = o.changes.filterIsInstance<Swaps.Change.LeaveInPlace>()
+        assertEquals("C is left in place", listOf(5L), leave.map { it.eventId })
+        assertEquals(swMon.plusDays(5), leave[0].date)
+        assertEquals("doubles on Wed and Thu", setOf(swMon.plusDays(2), swMon.plusDays(3)), swDoubles(o).toSet())
+        assertTrue(o.changes.filterIsInstance<Swaps.Change.AddDouble>().all { it.minutes == 30 })
+        assertTrue("nothing past this Sunday", o.changes.all { !it.date.isAfter(swMon.plusDays(6)) })
+        val sat = o.rows.first { it.date == swMon.plusDays(5) }
+        assertTrue(sat.after.any { it.kind == Swaps.Kind.EASY && it.tag != Swaps.Tag.DOUBLE })
+        assertTrue(sat.after.any { it.tag == Swaps.Tag.SKIP })
+        val wed = o.rows.first { it.date == swMon.plusDays(2) }
+        assertTrue(wed.after.any { it.tag == Swaps.Tag.DOUBLE && it.startMin == 16 * 60 })
+        for (op in opts) assertEquals(op.id, emptyList<Pair<LocalDate, LocalDate>>(), Swaps.adjacencyViolations(op, missed, tue, slots))
+    }
+
+    @Test fun swapsSaturdaySpillsIntoNextWeek() {
+        val slots = swSlots()
+        val sat = swMon.plusDays(5)
+        val missed = slots[5].sessions[0]
+        // only next Tuesday has two good windows
+        val win: (LocalDate) -> Swaps.DayWin = { if (it == swMon.plusDays(8)) Swaps.DayWin(2, listOf(7 * 60, 17 * 60)) else Swaps.DayWin(1) }
+        val opts = Swaps.options(missed, sat, slots, win, sat)
+        val o = opts.first { it.id == "shift" }
+        val m = swMoves(o)
+        assertEquals("workout to Sun", swMon.plusDays(6), m[5L])
+        assertEquals("long to Mon", swMon.plusDays(7), m[6L])
+        assertEquals("easy to Tue", swMon.plusDays(8), m[10L])
+        assertEquals("workout to Wed", swMon.plusDays(9), m[11L])
+        assertNull("next Sunday's long run stays", m[16L])
+        assertTrue("double on Tue", swMon.plusDays(8) in swDoubles(o))
+        val sunNext = swMon.plusDays(13)
+        assertTrue("nothing past next Sunday", o.changes.all { !it.date.isAfter(sunNext) })
+        assertEquals(sunNext, Swaps.horizon(sat))
+        for (op in opts) assertEquals(op.id, emptyList<Pair<LocalDate, LocalDate>>(), Swaps.adjacencyViolations(op, missed, sat, slots))
+    }
+
+    @Test fun swapsThursdayWorkoutNoReshuffle() {
+        val slots = swSlots()
+        val thu = swMon.plusDays(3)
+        val tue = swMon.plusDays(1)
+        // marked on Tuesday as a planned miss for Thursday
+        val opts = Swaps.options(slots[3].sessions[0], thu, slots, swTwo, tue)
+        assertEquals(1, opts.size)
+        val o = opts[0]
+        assertTrue("nothing moves", o.changes.none { it is Swaps.Change.Move })
+        assertEquals(listOf(swMon.plusDays(4)), swDoubles(o))
+        assertEquals(listOf(3L), o.changes.filterIsInstance<Swaps.Change.LeaveInPlace>().map { it.eventId })
+    }
+
+    @Test fun swapsLongRunMissed() {
+        val slots = swSlots()
+        val sun = swMon.plusDays(6)
+        val missed = slots[6].sessions[0]
+        val opts = Swaps.options(missed, sun, slots, swTwo, sun)
+        val o = opts.first { it.id == "shift" }
+        val m = swMoves(o)
+        assertEquals("long to Monday", swMon.plusDays(7), m[6L])
+        assertEquals("the day after is easy", swMon.plusDays(8), m[10L])
+        assertEquals("workout moves on", swMon.plusDays(9), m[11L])
+        assertTrue(o.changes.all { !it.date.isAfter(Swaps.horizon(sun)) })
+        for (op in opts) assertEquals(op.id, emptyList<Pair<LocalDate, LocalDate>>(), Swaps.adjacencyViolations(op, missed, sun, slots))
+    }
+
+    @Test fun swapsTtIsAddedToNextSaturdayAndRaceNeverMoves() {
+        val tt = swS(50, "5K TT", Swaps.Kind.TT, 40)
+        val base = swWeek(swMon, 0, swPattern)
+        val slots = base.map { if (it.date == swMon.plusDays(1)) Swaps.Slot(it.date, listOf(tt)) else it }
+        val o = Swaps.options(tt, swMon.plusDays(1), slots, swTwo, swMon).single()
+        val copy = o.changes.filterIsInstance<Swaps.Change.AddCopy>().single()
+        assertEquals(swMon.plusDays(5), copy.date)
+        assertTrue("that Saturday's workout stays", o.changes.none { it is Swaps.Change.Move || it is Swaps.Change.LeaveInPlace })
+        assertTrue(o.rows.first { it.date == copy.date }.after.size == 2)
+        // a Saturday that already has a TT or race is skipped
+        val busy = slots.map { if (it.date == swMon.plusDays(5)) Swaps.Slot(it.date, listOf(swS(51, "Race", Swaps.Kind.RACE, 60))) else it }
+        assertTrue(Swaps.options(tt, swMon.plusDays(1), busy, swTwo, swMon).isEmpty())
+        // races never move
+        assertTrue(Swaps.options(swS(51, "Race", Swaps.Kind.RACE, 60), swMon.plusDays(5), busy, swTwo, swMon).isEmpty())
+    }
+
+    @Test fun swapsEasyMissedDoublePlacement() {
+        val slots = swSlots()
+        // Mon easy missed. Wed and Fri have two windows; Sunday (long) too but never gets a double
+        val win: (LocalDate) -> Swaps.DayWin = {
+            val dow = it.dayOfWeek.value
+            if (dow == 3 || dow == 5 || dow == 7) Swaps.DayWin(2, listOf(7 * 60, 17 * 60)) else Swaps.DayWin(1)
+        }
+        val opts = Swaps.options(slots[0].sessions[0], swMon, slots, win, swMon)
+        assertEquals(swMon.plusDays(2), (opts[0].changes.single() as Swaps.Change.AddDouble).date)
+        assertEquals(30, (opts[0].changes.single() as Swaps.Change.AddDouble).minutes)
+        assertTrue(opts.all { o -> swDoubles(o).none { it.dayOfWeek == java.time.DayOfWeek.SUNDAY } })
+        assertTrue("alternatives use other eligible days", opts.size >= 2 && swDoubles(opts[1]).single() == swMon.plusDays(4))
+        // nobody has two windows: falls back to the next easy day
+        val one = Swaps.options(slots[0].sessions[0], swMon, slots, swOne, swMon)
+        assertEquals(listOf(swMon.plusDays(2)), swDoubles(one.single()))
+        assertEquals(1, Swaps.options(slots[0].sessions[0], swMon, slots, swOne, swMon).size)
+    }
+
+    @Test fun swapsHorizonByWeekday() {
+        for (i in 0..4) assertEquals(swMon.plusDays(6), Swaps.horizon(swMon.plusDays(i.toLong())))
+        assertEquals(swMon.plusDays(13), Swaps.horizon(swMon.plusDays(5)))
+        assertEquals(swMon.plusDays(13), Swaps.horizon(swMon.plusDays(6)))
+    }
+
+    @Test fun swapsDoubleIsSixtyPercentOfMedianEasyRounded() {
+        fun slotsOf(vararg mins: Int) = mins.mapIndexed { i, m -> Swaps.Slot(swMon.plusDays(i.toLong()), listOf(swS(i.toLong(), "e", Swaps.Kind.EASY, m))) }
+        assertEquals(30, Swaps.doubleMinutes(slotsOf(50), swMon))
+        assertEquals(30, Swaps.doubleMinutes(slotsOf(40, 50, 60), swMon))
+        assertEquals(30, Swaps.doubleMinutes(slotsOf(45, 55), swMon))
+        assertEquals(35, Swaps.doubleMinutes(slotsOf(55), swMon))
+        assertEquals(25, Swaps.doubleMinutes(slotsOf(45), swMon))
+        assertEquals("no easy run planned", 30, Swaps.doubleMinutes(emptyList(), swMon))
+    }
+
+    @Test fun swapsNoAdjacencyViolationsAndStayInHorizon() {
+        val wins = listOf(swTwo, swOne, { d: LocalDate -> if (d.dayOfWeek.value % 2 == 0) Swaps.DayWin(0) else Swaps.DayWin(2, listOf(7 * 60, 16 * 60)) })
+        val patterns = listOf(
+            swPattern,
+            listOf(Swaps.Kind.EASY, Swaps.Kind.WORKOUT, Swaps.Kind.EASY, Swaps.Kind.EASY, Swaps.Kind.WORKOUT, Swaps.Kind.EASY, Swaps.Kind.LONG),
+            listOf(Swaps.Kind.WORKOUT, Swaps.Kind.EASY, Swaps.Kind.WORKOUT, Swaps.Kind.EASY, Swaps.Kind.EASY, Swaps.Kind.WORKOUT, Swaps.Kind.LONG),
+        )
+        for (pat in patterns) {
+            val slots = swWeek(swMon, 0, pat) + swWeek(swMon.plusDays(7), 10, pat)
+            for (i in 0..6) {
+                val missed = slots[i].sessions[0]
+                val d0 = slots[i].date
+                for (w in wins) for (op in Swaps.options(missed, d0, slots, w, d0)) {
+                    assertTrue("$pat day $i ${op.id}", op.changes.all { !it.date.isAfter(Swaps.horizon(d0)) })
+                    assertEquals("$pat day $i ${op.id}", emptyList<Pair<LocalDate, LocalDate>>(), Swaps.adjacencyViolations(op, missed, d0, slots))
+                    assertTrue(op.moves == op.changes.count { it is Swaps.Change.Move })
+                }
+            }
+        }
+    }
+
+    @Test fun swapsAvoidDaysWithoutGoodWindow() {
+        val slots = swSlots()
+        val tue = swMon.plusDays(1)
+        val wedBad: (LocalDate) -> Swaps.DayWin = { if (it == swMon.plusDays(2)) Swaps.DayWin(0) else Swaps.DayWin(2, listOf(7 * 60, 16 * 60)) }
+        val opts = Swaps.options(slots[1].sessions[0], tue, slots, wedBad, swMon)
+        val best = opts.first()
+        assertTrue("the best option doesn't put the workout on the bad day", swMoves(best)[1L] != swMon.plusDays(2))
+    }
+
+    @Test fun swapsDetectionRules() {
+        val d0 = RW_DATE
+        val wet = swapPlans(setOf(1), listOf(rwWorkout("Easy run", d0.plusDays(1), 7)))[1]
+        assertEquals("heavy rain all day", Swaps.atRisk(wet, rwS))
+        val dry = swapPlans(emptySet(), listOf(rwWorkout("Easy run", d0.plusDays(1), 7)))[1]
+        assertNull(Swaps.atRisk(dry, rwS))
+        val done = swapPlans(setOf(1), listOf(rwWorkout("Easy run", d0.plusDays(1), 7, WorkoutStatus.DONE)))[1]
+        assertNull("a run that is done is never at risk", Swaps.atRisk(done, rwS))
+        val none = swapPlans(setOf(1), emptyList())[1]
+        assertNull("no run planned", Swaps.atRisk(none, rwS))
+        assertFalse(Swaps.isMissedNow(dry, 20 * 60))
+        assertTrue("after 21:00 a planned run that isn't done counts as missed", Swaps.isMissedNow(dry, 21 * 60 + 1))
+        assertFalse(Swaps.isMissedNow(done, 22 * 60))
+        // good windows: a dry day has two, a wet day none
+        val hours = rwDay { rwHour(d0, it) }
+        val dryPlan = rwPlan(d0, hours)
+        val gw = Swaps.goodWindows(dryPlan, rwS, listOf(rwSun(d0)), UTC, 30, null)
+        assertEquals(2, gw.count); assertEquals(2, gw.times.size); assertTrue(gw.times[0] < gw.times[1])
+        val wetPlan = rwPlan(d0, rwDay { rwHour(d0, it, rain = 2.0, pct = 90.0) })
+        assertEquals(0, Swaps.goodWindows(wetPlan, rwS, listOf(rwSun(d0)), UTC, 30, null).count)
+        assertEquals("no forecast counts as one window", 1, Swaps.goodWindows(rwPlan(d0, emptyList()), rwS, emptyList(), UTC, 30, null).count)
+    }
 }

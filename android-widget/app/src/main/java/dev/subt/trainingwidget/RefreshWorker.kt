@@ -61,6 +61,7 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         runCatching { RunWindows.refreshIfDue(ctx, 60) }
         runCatching { Notifier.run(ctx) }
         runCatching { Notifier.runWindows(ctx) }
+        runCatching { Notifier.swapPrompts(ctx) }
         runCatching { Notifier.updateReady(ctx) }
         Result.success()
     }

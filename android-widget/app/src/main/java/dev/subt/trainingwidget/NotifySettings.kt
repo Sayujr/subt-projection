@@ -26,6 +26,8 @@ object NotifySettings {
         Cat("rw_tomorrow", "Tomorrow's run window", "The best time to run tomorrow, the evening before", true, 20 * 60),
         Cat("rw_today", "Today's run window", "Added to the morning workout notification", true, null),
         Cat("rw_shift", "Run window shifted", "When a refresh moves today's or tomorrow's best window by 30 min or more, or rain / risk changes", true, null),
+        Cat("swap_missed", "Missed-session options", "When a planned run looks missed: ways to fit it back into the week (once per session)", true, null),
+        Cat("swap_risk", "At-risk days (no good window)", "The evening before (or the morning of) a planned run with no good time to run it", true, null),
     )
     const val ALERTS_FROM_DEFAULT = 9 * 60
 
@@ -37,7 +39,7 @@ object NotifySettings {
         // Earlier versions had three switches: carry them over
         return when (c.key) {
             "recovery" -> p.getBoolean("notify_morning", c.defaultOn)
-            "workout", "reminder", "rw_tomorrow", "rw_today", "rw_shift" -> c.defaultOn
+            "workout", "reminder", "rw_tomorrow", "rw_today", "rw_shift", "swap_missed", "swap_risk" -> c.defaultOn
             else -> p.getBoolean("notify_alerts", c.defaultOn)
         }
     }

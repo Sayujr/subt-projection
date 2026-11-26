@@ -38,6 +38,7 @@ class RunWindowActivity : Activity() {
         private const val GOOD = 0xFF3DD68C.toInt()
         private const val WARN = 0xFFFFC53D.toInt()
         private const val LINK = 0xFF4EA1FF.toInt()
+        private const val ORANGE = 0xFFFF9F43.toInt()
     }
 
     private lateinit var col: LinearLayout
@@ -185,15 +186,30 @@ class RunWindowActivity : Activity() {
             Scoring.accuracyLine(this)?.let { text(c, it, 12.5f, DIM, top = 8) }
             RunWindows.asOf(this)?.let { text(c, "Forecast $it", 12f, WARN, top = 8) }
         }
-        // 1b. Actions: swap in intervals.icu (only on tap + confirm) and watch closely
+        // 1b. Fit it in (missed / at risk / tight window) and watch closely
         run {
-            val swap = if (date == LocalDate.now() || date == LocalDate.now().plusDays(1)) RunWindows.swapFor(this, date) else null
+            val cand = SwapFlow.forDate(this, date)
             val today = date == LocalDate.now()
-            if (swap != null || today) {
+            if (cand != null || today) {
                 val c = card()
-                if (swap != null) {
-                    text(c, Weather.swapText(swap).removeSuffix("?").replaceFirst("Move", "A better day is available. Move") + ".", 13.5f, TEXT)
-                    button(c, "Swap in intervals.icu") { confirmSwap(swap) }
+                if (cand != null) {
+                    val dayWord = date.format(DateTimeFormatter.ofPattern("EEEE", Locale.getDefault()))
+                    val name = cand.workout.name
+                    when (cand.trigger) {
+                        Swaps.Trigger.AT_RISK -> {
+                            text(c, "No good time to run $dayWord (${cand.why ?: "poor conditions"}). Likely to miss $name? See options.", 13.5f, ORANGE)
+                            button(c, "Show options ›") { SwapActivity.open(this, date, cand.workout.eventId, cand.trigger, cand.why) }
+                            button(c, "I'll still run it") { cand.workout.eventId?.let { SwapFlow.mark(this, it, "dismissed") }; render() }
+                        }
+                        Swaps.Trigger.TIGHT -> {
+                            text(c, "Tight window ${cand.why ?: ""} — can't fit $name in? Options.".replace("  ", " "), 13.5f, WARN)
+                            button(c, "Fit it in ›") { SwapActivity.open(this, date, cand.workout.eventId, cand.trigger, cand.why) }
+                        }
+                        else -> {
+                            text(c, "Missed $name? There are ways to fit it back into the week.", 13.5f, WARN)
+                            button(c, "Fit it in ›") { SwapActivity.open(this, date, cand.workout.eventId, cand.trigger, cand.why) }
+                        }
+                    }
                 }
                 if (today) {
                     val on = Watch.isOn(this)
@@ -279,46 +295,16 @@ class RunWindowActivity : Activity() {
             button(c, "Open in Rainbow") { openRainbow() }
             text(c, "The forecast refreshes by itself every 3 hours (hourly on a run day until the window starts), and not between 22:00 and 05:00.", 12f, FAINT, top = 10)
         }
-    }
-
-    private fun confirmSwap(sp: Weather.SwapPlan) {
-        AlertDialog.Builder(this)
-            .setTitle("Swap in intervals.icu?")
-            .setMessage(Weather.swapText(sp) + "\n\nThis changes the dates in your intervals.icu calendar.")
-            .setPositiveButton("Swap") { _, _ -> doSwap(sp) }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    /** Moves the session(s) in intervals.icu. Only reached from the confirm dialog. If the second move fails, the first is put back. */
-    private fun doSwap(sp: Weather.SwapPlan) {
-        val creds = Prefs.credentials(this)
-        val idA = sp.a.eventId
-        if (creds == null || idA == null) { Toast.makeText(this, "Connect intervals.icu first", Toast.LENGTH_LONG).show(); return }
-        status = "Swapping…"
-        render()
-        Thread {
-            var ok = true
-            val msg = try {
-                val api = IcuApi(creds)
-                api.moveEvent(idA, sp.aTo.toString(), sp.a.startLocal)
-                val b = sp.b; val bTo = sp.bTo
-                if (b != null && bTo != null && b.eventId != null) {
-                    try { api.moveEvent(b.eventId, bTo.toString(), b.startLocal) }
-                    catch (e: Exception) { runCatching { api.moveEvent(idA, sp.a.date, sp.a.startLocal) }; throw e }
+        // 6. Quiet manual option: only for a planned run still to do (today or later)
+        run {
+            val w = Weather.plannedWorkout(RunWindows.weekRuns(this), date.toString())
+            if (w != null && w.eventId != null && !date.isBefore(LocalDate.now()) && !plan.run.done) {
+                text(col, "Can't make this one ›", 12.5f, FAINT, top = 4).apply {
+                    setPadding(dp(6), dp(10), dp(6), dp(10))
+                    setOnClickListener { SwapActivity.open(this@RunWindowActivity, date, w.eventId, Swaps.Trigger.MANUAL) }
                 }
-                "Swapped in intervals.icu"
-            } catch (e: Exception) {
-                ok = false
-                "Couldn't swap: ${e.message ?: e.javaClass.simpleName}"
             }
-            runOnUiThread {
-                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                status = msg
-                if (ok) Refresh.now(applicationContext, replace = true)
-                if (!isFinishing) render()
-            }
-        }.start()
+        }
     }
 
     /** Launches the Rainbow app when one of its known package names is installed, otherwise its website. */

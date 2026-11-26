@@ -504,12 +504,39 @@ class IcuApi(private val creds: Credentials) {
 
     /**
      * Moves a planned session to [newDate], keeping its time of day from [startLocal]. Only ever called after you
-     * confirm a swap on the run-window day plan.
+     * confirm an option on the "Fit in a missed session" page.
      */
     fun moveEvent(eventId: Long, newDate: String, startLocal: String?) {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
         val time = startLocal?.takeIf { it.length > 11 && it[10] == 'T' }?.substring(11) ?: "00:00:00"
         sendJson("PUT", "/athlete/$ath/events/$eventId", JSONObject().put("start_date_local", "${newDate}T$time"))
+    }
+
+    /**
+     * Adds a planned run (an easy run, a double or a copy of a missed test) to the calendar. Only ever called after you
+     * confirm an option on the "Fit in a missed session" page. Returns the new event's id (kept so Undo can remove it).
+     */
+    fun createRunEvent(date: String, startMin: Int, name: String, minutes: Int, description: String): Long {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val start = String.format(java.util.Locale.US, "%sT%02d:%02d:00", date, startMin / 60, startMin % 60)
+        val body = JSONObject().put("category", "WORKOUT").put("type", "Run").put("start_date_local", start)
+            .put("name", name).put("moving_time", minutes * 60).put("description", description)
+        return JSONObject(sendJson("POST", "/athlete/$ath/events", body)).getLong("id")
+    }
+
+    /** Deletes an event. Only used by Undo, and only for events the missed-session feature itself created. */
+    fun deleteEvent(eventId: Long) {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val conn = Net.open(URL("$BASE/athlete/$ath/events/$eventId"))
+        try {
+            conn.requestMethod = "DELETE"
+            conn.connectTimeout = 15_000; conn.readTimeout = 25_000
+            val token = Base64.encodeToString("API_KEY:${creds.apiKey}".toByteArray(), Base64.NO_WRAP)
+            conn.setRequestProperty("Authorization", "Basic $token")
+            val code = conn.responseCode
+            if (code == 401 || code == 403) throw AuthException()
+            if (code !in 200..299) throw IOException("intervals.icu returned HTTP $code")
+        } finally { conn.disconnect() }
     }
 
     private fun sendJson(method: String, path: String, body: JSONObject): String {

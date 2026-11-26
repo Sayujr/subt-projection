@@ -30,6 +30,10 @@ object Notifier {
         channels(ctx)
         val target = when {
             tab == "SETTINGS" -> Intent(ctx, SetupActivity::class.java).putExtra(SetupActivity.EXTRA_OPEN, "update")
+            tab.startsWith("SWAP:") -> tab.removePrefix("SWAP:").split(":").let { parts ->
+                SwapActivity.intent(ctx, runCatching { LocalDate.parse(parts[0]) }.getOrNull(), parts.getOrNull(1)?.toLongOrNull(),
+                    runCatching { Swaps.Trigger.valueOf(parts.getOrNull(2).orEmpty()) }.getOrDefault(Swaps.Trigger.MANUAL), parts.getOrNull(3)?.replace("_", " "))
+            }
             tab.startsWith("RW:") -> Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, tab.removePrefix("RW:"))
             else -> Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, tab)
         }
@@ -78,6 +82,41 @@ object Notifier {
         val title = if (p.split != null) "Tomorrow's run: " + Weather.splitLabel(p.split, zone) else if (w == null) "Tomorrow: no run window fits" else "Tomorrow's run window: ${Weather.range(w, zone)}" + (if (w.icons.isNotEmpty()) " " + w.icons.joinToString("") else "")
         val body = listOfNotNull(p.run.name.takeIf { p.run.planned }?.let { "${it} · ${p.run.type.label}" }, p.summary.short, p.summary.suggestion).joinToString("\n")
         once(ctx, "rw_tomorrow", LocalDate.now().toString()) { post(ctx, DAILY, 20, title, body, "RW:$tomorrow") }
+    }
+
+    /**
+     * "Missed X? Options to fit it in" (once per missed session) and "No good time to run tomorrow" (once per session: the
+     * evening before, or the morning of). Opens the swap page; never changes anything by itself.
+     */
+    fun swapPrompts(ctx: Context) {
+        val N = NotifySettings
+        val now = LocalTime.now()
+        if (Weather.quiet(now.hour) || (now.hour * 60 + now.minute) < N.alertsFrom(ctx) - 4 * 60) return
+        val today = LocalDate.now()
+        for (cand in SwapFlow.candidates(ctx)) {
+            val id = cand.workout.eventId ?: continue
+            val name = cand.workout.name
+            when (cand.trigger) {
+                Swaps.Trigger.MISSED_YESTERDAY, Swaps.Trigger.MISSED_PASSED, Swaps.Trigger.MISSED_LATE -> {
+                    if (!N.isOn(ctx, N.cat("swap_missed"))) continue
+                    once(ctx, "swap_$id", "missed") {
+                        post(ctx, ALERTS, 22, "Missed $name? Options to fit it in", "See 1–3 ways to fit it back into your week. Nothing changes until you pick one.", "SWAP:${cand.date}:$id:${cand.trigger.name}")
+                    }
+                }
+                Swaps.Trigger.AT_RISK -> {
+                    if (!N.isOn(ctx, N.cat("swap_risk"))) continue
+                    val tomorrow = cand.date == today.plusDays(1) && N.inWindow(now, N.time(ctx, N.cat("rw_tomorrow")), 3)
+                    val sameDay = cand.date == today && now.hour in 5..11
+                    if (!tomorrow && !sameDay) continue
+                    val day = if (cand.date == today) "today" else "tomorrow"
+                    val why = (cand.why ?: "poor conditions").replace(" ", "_")
+                    once(ctx, "swap_$id", "risk") {
+                        post(ctx, ALERTS, 23, "No good time to run $day", "$name. Fit it in another day?", "SWAP:${cand.date}:$id:${cand.trigger.name}:$why")
+                    }
+                }
+                else -> Unit
+            }
+        }
     }
 
     /** "Run window shifted: …" (always on by default; opens that day's plan). */

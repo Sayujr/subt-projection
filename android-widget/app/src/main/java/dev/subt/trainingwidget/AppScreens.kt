@@ -1326,6 +1326,46 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
 
     // ================================================================ Run windows
 
+    /**
+     * The Today card's prompt: "Missed X? Options to fit it in" (yellow), "No good time to run ..." (orange, with "Show options" and
+     * "I'll still run it"), or a tight-window nudge. Re-judged on every draw, so it goes away when a good window appears.
+     */
+    private fun swapBanner(c: LinearLayout) {
+        val cand = runCatching { SwapFlow.banner(a) }.getOrNull() ?: return
+        val name = cand.workout.name
+        val orange = 0xFFFF9F43.toInt()
+        val atRisk = cand.trigger == Swaps.Trigger.AT_RISK
+        val color = if (atRisk) orange else WARN
+        val dayWord = if (cand.date == LocalDate.now()) "today" else "tomorrow"
+        val msg = when (cand.trigger) {
+            Swaps.Trigger.MISSED_PASSED -> "Window passed — missed $name? Options to fit it in ›"
+            Swaps.Trigger.AT_RISK -> "No good time to run $dayWord — likely to miss $name? See options ›"
+            Swaps.Trigger.TIGHT -> "Tight window today ${cand.why ?: ""} — can't fit it? Options ›".replace("  ", " ")
+            else -> "Missed $name? Options to fit it in ›"
+        }
+        val open = { SwapActivity.open(a, cand.date, cand.workout.eventId, cand.trigger, cand.why) }
+        val box = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            background = android.graphics.drawable.GradientDrawable().apply { setColor((color and 0x00FFFFFF) or 0x33000000); cornerRadius = dp(10).toFloat() }
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        box.addView(TextView(a).apply { text = msg; setTextColor(color); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f); setOnClickListener { open() } })
+        if (atRisk) {
+            val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+            row.addView(TextView(a).apply {
+                text = "Show options"; setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f); gravity = Gravity.CENTER
+                setBackgroundResource(R.drawable.chip_off); setPadding(dp(8), dp(9), dp(8), dp(9)); setOnClickListener { open() }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(TextView(a).apply {
+                text = "I'll still run it"; setTextColor(TEXT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f); gravity = Gravity.CENTER
+                setBackgroundResource(R.drawable.chip_off); setPadding(dp(8), dp(9), dp(8), dp(9))
+                setOnClickListener { cand.workout.eventId?.let { SwapFlow.mark(a, it, "dismissed") }; onChange() }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
+            box.addView(row)
+        }
+        c.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8); bottomMargin = dp(4) })
+    }
+
     /** "Best run window" under today's call: the window, its strip, tomorrow in one line; tap for the day plan. */
     fun runWindowCard(col: LinearLayout) {
         val zone = java.time.ZoneId.systemDefault()
@@ -1346,6 +1386,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             c.setOnClickListener { RunWindows.refreshAsync(a, manual = true) { onChange() } }
             return
         }
+        swapBanner(c)
         if (p.run.done) {
             // Today's run is synced as done: nothing more to plan today, tomorrow comes first
             text(c, "✓ Today's run is done", 22f, GOOD, bold = true, top = 2)
@@ -1399,6 +1440,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         if (plans.isEmpty()) text(c, "Forecast not loaded yet. Tap Refresh now.", 14f, DIM, top = 4)
         val wPx = chartW() - dp(insetDp)
         val nowSec = System.currentTimeMillis() / 1000
+        val weekRuns = RunWindows.weekRuns(a)
         plans.forEachIndexed { i, p ->
             val row = LinearLayout(a).apply {
                 orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, dp(4))
@@ -1425,9 +1467,32 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
                 val bmp = RwViews.strip(a, p, s, wPx, true, if (i == 0) nowSec else null)
                 image(row, bmp, (bmp.height / d).roundToInt())
             }
+            val pw = Weather.plannedWorkout(weekRuns, p.date.toString())
+            val pwId = pw?.eventId
+            if (pw != null && pwId != null && SwapFlow.state(a, pwId) == null) {
+                val risk = Swaps.atRisk(p, s)
+                if (risk != null) {
+                    text(row, "No good time to run (" + risk + ") — likely to miss " + pw.name + "? See options ›", 12.5f, 0xFFFF9F43.toInt(), top = 4).setOnClickListener {
+                        SwapActivity.open(a, p.date, pwId, Swaps.Trigger.AT_RISK, risk)
+                    }
+                }
+                if (!p.date.isBefore(LocalDate.now())) row.setOnLongClickListener {
+                    AlertDialog.Builder(a)
+                        .setTitle(pw.name)
+                        .setItems(arrayOf("Can't make " + pw.name + " ›")) { _, _ -> SwapActivity.open(a, p.date, pwId, Swaps.Trigger.MANUAL) }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                    true
+                }
+            }
             row.setOnClickListener { RunWindowActivity.open(a, p.date) }
             c.addView(row)
         }
+        if (plans.isNotEmpty()) c.addView(TextView(a).apply {
+            text = "Missed a session, or can't make one? Fit it in ›"
+            setTextColor(0xFF4EA1FF.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f); setPadding(0, dp(12), 0, 0)
+            setOnClickListener { SwapActivity.open(a, null, null, Swaps.Trigger.MANUAL) }
+        })
         val foot = TextView(a).apply {
             text = "Refresh now" + (RunWindows.asOf(a)?.let { "   ·   forecast $it" } ?: "")
             setTextColor(0xFF4EA1FF.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f); setPadding(0, dp(12), 0, 0)

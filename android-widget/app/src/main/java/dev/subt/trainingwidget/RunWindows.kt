@@ -64,8 +64,7 @@ object RunWindows {
     }
 
     /**
-     * Plans for [days] days from [from]. Today's plan skips windows already started (unless [useNow] is false);
-     * the 7-day list also gets the text-only "swap" hints.
+     * Plans for [days] days from [from]. Today's plan skips windows already started (unless [useNow] is false).
      */
     fun plans(ctx: Context, from: LocalDate, days: Int, useNow: Boolean = true): List<Weather.DayPlan> {
         val s = RwStore.load(ctx)
@@ -79,8 +78,7 @@ object RunWindows {
             val date = from.plusDays(i.toLong())
             Weather.plan(date, d.all, d.rb, d.suns, Weather.runOf(week, date.toString()), s, if (useNow && date == today) nowSec else null, zone)
         }
-        val hints = Weather.swapHints(list, zone)
-        return list.map { it.withSwap(hints[it.date]) }
+        return list
     }
 
     /** This week's sessions plus the planned ones over the next week (with their intervals.icu event ids). */
@@ -128,6 +126,7 @@ object RunWindows {
             runCatching { data(ctx)?.let { Scoring.recordForecasts(ctx, it) } }
             runCatching { Scoring.observeTile(ctx, data(ctx)) }
             runCatching { checkShift(ctx, notify) }
+            if (notify) runCatching { Notifier.swapPrompts(ctx) }
             runCatching { Watch.evaluate(ctx) }
             runCatching { RwWidgets.renderAll(ctx) }
         }
