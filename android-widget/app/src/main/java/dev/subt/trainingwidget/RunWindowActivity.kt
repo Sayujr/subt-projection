@@ -266,7 +266,7 @@ class RunWindowActivity : Activity() {
                         acc[id]?.takeIf { it.total >= 3 }?.pct?.let { "$it%" } ?: "–",
                     ), wt, color = if (dissent) WARN else TEXT)
                 }
-                text(c, "Yellow = disagrees with the median on cloud or rain somewhere in the window. Rain is mm per hour · chance. Right = how often that source's cloudy-or-not call matched what happened (last 30 days; needs a few of your "outside now" taps or Rainbow checks). NWS gives cloud only. UV shows each source's own value; the plan uses the highest.", 12f, FAINT, top = 6)
+                text(c, "Yellow = disagrees with the median on cloud or rain somewhere in the window. Rain is mm per hour · chance. Right = how often that source's cloudy-or-not call matched what happened (last 30 days; needs a few of your outside-now taps or Rainbow checks). NWS gives cloud only. UV shows each source's own value; the plan uses the highest.", 12f, FAINT, top = 6)
                 val fetched = data.fetched.entries.joinToString("  ·  ") { "${it.key} ${Weather.hhmm(it.value / 1000, zone)}" }
                 text(c, "Fetched: $fetched", 12f, FAINT, top = 4)
             }
