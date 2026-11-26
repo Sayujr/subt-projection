@@ -162,3 +162,8 @@ Rules for every run type:
 - **"Watch today closely"** mode: checks every 30 minutes, auto-on for narrow or disputed windows.
 - **Split-run suggestion** when no window fits.
 - **Swap with day Y** button: writes to intervals.icu only on an explicit tap and confirmation.
+
+## Queued: winter evening hours (not built)
+- In winter, runs that **start** up to 18:30 count as normal daytime windows, even though it's dark. They are not night fallbacks.
+- After an 18:30 start, hours count as night: used only as a fallback, with 🌙 and a lights reminder. The latest finish is still 20:00.
+- To confirm when building: does "early" (morning) need the same, i.e. starts from about 06:30 before sunrise counting as daytime?
