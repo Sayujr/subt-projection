@@ -106,7 +106,7 @@ object Weather {
     }
 
     private fun findHourly(o: JSONObject): JSONArray? {
-        for (k in listOf("hourly", "hours", "hourlyForecast", "forecast", "data")) {
+        for (k in listOf("timelines", "hourly", "hours", "hourlyForecast", "forecast", "data")) {
             val v = o.opt(k)
             if (v is JSONArray && v.length() > 0 && v.opt(0) is JSONObject) return v
             if (v is JSONObject) findHourly(v)?.let { return it }
@@ -121,7 +121,7 @@ object Weather {
         val out = ArrayList<Hour>()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val tKey = listOf("time", "timestamp", "validTime", "startTime", "datetime", "dateTime", "date", "forecastTime").firstOrNull { o.has(it) } ?: continue
+            val tKey = listOf("startTimestamp", "startTimeIso", "time", "timestamp", "validTime", "startTime", "datetime", "dateTime", "date", "forecastTime").firstOrNull { o.has(it) } ?: continue
             val t = parseInstant(o.opt(tKey)) ?: continue
             val cond = if (o.has("condition") && !o.isNull("condition")) o.optString("condition") else null
             val type = if (o.has("precipitationType") && !o.isNull("precipitationType")) o.optString("precipitationType") else null

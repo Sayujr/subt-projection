@@ -970,6 +970,17 @@ class RulesTest {
 
     // ---- parsers (field shapes from the spec)
 
+    /** A real Rainbow response (trimmed): hours sit under timelines.hourly with startTimestamp / startTimeIso. */
+    @Test fun rwParseRainbowRealShape() {
+        val json = """{"timelines": {"hourly": [{"startTimestamp": 1795640400, "startTimeIso": "2026-11-25T16:00:00-05:00", "precipitationChance": 0.2, "temperature": 7.98, "temperatureDewPoint": -2.21, "feelsLikeTemperature": 2.22, "precipitationType": "no_precipitation", "precipitationAmount": 0.0, "precipitationRate": 0.0, "windSpeed": 4.96, "windGust": 9.8, "windDirection": 56, "visibility": 24128, "uvIndex": 0, "humidity": 48, "pressure": 1036.67, "condition": "Cloudy"}, {"startTimestamp": 1795644000, "startTimeIso": "2026-11-25T17:00:00-05:00", "precipitationChance": 3.1, "temperature": 7.95, "temperatureDewPoint": -2.68, "feelsLikeTemperature": 2.18, "precipitationType": "no_precipitation", "precipitationAmount": 0.0, "precipitationRate": 0.0, "windSpeed": 4.88, "windGust": 11.06, "windDirection": 56, "visibility": 24128, "uvIndex": 0, "humidity": 47, "pressure": 1036.67, "condition": "Cloudy"}, {"startTimestamp": 1795647600, "startTimeIso": "2026-11-25T18:00:00-05:00", "precipitationChance": 6.0, "temperature": 8.08, "temperatureDewPoint": -1.28, "feelsLikeTemperature": 2.34, "precipitationType": "no_precipitation", "precipitationAmount": 0.0, "precipitationRate": 0.0, "windSpeed": 5.31, "windGust": 11.78, "windDirection": 57, "visibility": 24128, "uvIndex": 0, "humidity": 51, "pressure": 1036.24, "condition": "MostlyCloudy"}], "daily": [{"startTimestamp": 1795604400, "startTimeIso": "2026-11-25T06:00:00-05:00", "endTimestamp": 1795690800, "endTimeIso": "2026-11-26T06:00:00-05:00", "precipitationChance": 90.5, "temperatureMin": 3.43, "temperatureMax": 9.53, "uvIndexMax": 2, "windSpeedMax": 10.18, "windDirectionAvg": 62, "precipitationType": "rain", "precipitationAmount": 1.31, "condition": "Rain"}]}, "location": {"lat": 1.0, "lon": 2.0}, "units": {"temperature": "celsius", "feelsLikeTemperature": "celsius", "temperatureDewPoint": "celsius", "precipitationAmount": "millimeters", "precipitationRate": "millimeters_per_hour", "precipitationChance": "percent", "windSpeed": "meter_per_second", "windGust": "meter_per_second", "windDirection": "degree", "visibility": "meter", "uvIndex": "index", "humidity": "percent", "pressure": "hectopascal"}, "generatedAtTimestamp": 1795642333, "generatedAtTimeIso": "2026-11-25T21:32:13+00:00"}"""
+        val h = Weather.parseRainbow(json)
+        assertEquals(3, h.size)
+        assertEquals(1795640400L, h[0].t)
+        assertEquals(7.98, h[0].temp!!, 1e-9)
+        assertEquals(95.0, h[0].cloud!!, 1e-9)           // Cloudy
+        assertFalse(Weather.isFrozen(h[0].precipType))   // "no_precipitation"
+    }
+
     @Test fun rwParseRainbow() {
         val json = """{"hourly":[
             {"time":"2026-06-15T14:00:00Z","temperature":18.5,"feelsLikeTemperature":18.0,"temperatureDewPoint":9.0,"uvIndex":5.2,
