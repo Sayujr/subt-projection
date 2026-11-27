@@ -142,8 +142,9 @@ class FitnessActivity : Activity() {
     private fun verdict(s: Snapshot, call: FitnessPlan.Call) {
         val c = card()
         BandViews.heading(this, c, "VERDICT",
-            "Fitness (CTL) gained over the last 7 days against a build of +3 to +5 a week: on track from +3 to +7, slightly behind from +1 to +3, " +
-                "behind under +1, building too fast above +7. In a taper (A race 14 days, B 10, C 5) Fitness is meant to ease, so the call is whether it eases as planned.")
+            "Fitness (CTL) should rise about 2 to 4 points a month. Over the last 28 days: +2 to +4 on track, +4 to +6 building fast, above +6 too fast, " +
+                "0 to +2 slightly behind, below 0 behind. Form should stay in the grey zone (−10 to +5): fresher than that with Fitness behind means room to add load, more tired means trim whatever Fitness is doing. " +
+                "In a taper (A race 14 days, B 10, C 5) Fitness is meant to ease, so the call is whether it eases as planned.")
         text(c, call.status.label, 26f, call.status.color, bold = true, top = 2).apply { letterSpacing = 0.02f }
         text(c, call.sentence, 14.5f, DIM, top = 2)
     }
@@ -152,20 +153,21 @@ class FitnessActivity : Activity() {
         val st = FitnessPlan.shortTerm(s) ?: return
         val c = card()
         BandViews.heading(this, c, "SHORT TERM",
-            "Load is training stress (the number intervals.icu adds up). Needed is the weekly load that lifts Fitness by +4 from last Sunday, using " +
-                "CTL = yesterday's CTL + (load − yesterday's CTL) ÷ 42 with the same load each day. Fatigue ÷ Fitness is green under 1.2, amber to 1.4, red above. " +
+            "Load is training stress (the number intervals.icu adds up). Needed is the weekly load that lifts Fitness about +0.75 from last Sunday (about +3 a month) while Sunday's Form stays in the grey zone, using " +
+                "CTL = yesterday's CTL + (load − yesterday's CTL) ÷ 42 and ATL over 7 days, with the same load each day. Fatigue ÷ Fitness is green under 1.2, amber to 1.4, red above. " +
                 "Sunday and next week come from your planned sessions.")
         row(c, "Load done this week", "${st.done}")
         row(c, "Planned, still to do", "${st.planned}")
         st.needed?.let { n ->
-            row(c, "Needed for +${FitnessPlan.BUILD_TARGET.roundToInt()} Fitness", "$n")
+            row(c, "Needed for +0.75 Fitness", "$n" + if (st.formLimited) " (Form-limited)" else "")
             val gap = n - st.done - st.planned
             row(c, "Plan vs needed", if (gap > 0) "about $gap short" else "covered", if (gap > 0) 0xFFFFC53D.toInt() else GOOD)
             val parts = listOf(st.done.toDouble(), st.planned.toDouble(), max(gap, 0).toDouble())
             if (parts.sum() > 0) c.addView(BandViews.stripView(this, parts, listOf(GOOD, LINK, 0xFF3A4150.toInt()), resources.displayMetrics.widthPixels - dp(52)))
         }
         row(c, "Fatigue ÷ Fitness", String.format(Locale.US, "%.2f  %s", call.ratio, when { call.ratio > FitnessPlan.RATIO_RED -> "high"; call.ratio > FitnessPlan.RATIO_AMBER -> "elevated"; else -> "fine" }), FitnessPlan.ratioColor(call.ratio))
-        row(c, "Form", "${signed(st.form)} today" + (st.formSunday?.let { " · ${signed(it)} Sunday (plan)" } ?: ""))
+        row(c, "Form (grey zone −10 to +5)", "${signed(st.form)} today" + (st.formSunday?.let { " · ${signed(it)} Sunday" } ?: "") + (st.formNext?.let { " · ${signed(it)} next week" } ?: ""),
+            if (FitnessPlan.inGrey(st.form)) GOOD else 0xFFFFC53D.toInt())
         row(c, "Next week (plan)", if (st.nextCtl != null && st.nextAtl != null) "Fitness ${signed1(st.nextCtl)} · Fatigue ${signed1(st.nextAtl)}" else "not planned far enough")
     }
 
@@ -175,8 +177,8 @@ class FitnessActivity : Activity() {
         val race = band?.race
         BandViews.heading(this, c, if (race != null) "LONG TERM · TOWARDS ${race.name.take(20).uppercase(Locale.getDefault())}" else "LONG TERM · NEXT ${FitnessPlan.DEFAULT_WEEKS} WEEKS",
             "Blue is your Fitness for the last ${FitnessPlan.HISTORY_WEEKS} weeks, dashed is where your planned sessions take it. The green band starts ${FitnessPlan.HISTORY_WEEKS} weeks ago and rises " +
-                "+${FitnessPlan.BUILD_LO.roundToInt()} to +${FitnessPlan.BUILD_HI.roundToInt()} a week, capped at the race-day target (today's Fitness + ${FitnessPlan.BUILD_TARGET.roundToInt()} a week until the taper starts), then eases through the taper. " +
-                "The goal is the band's slope: a week counts as below it when Fitness gained less than +${FitnessPlan.BUILD_LO.roundToInt()}. Touch and drag the chart to read values.")
+                "+${FitnessPlan.MONTH_LO.roundToInt()} to +${FitnessPlan.MONTH_HI.roundToInt()} per 4 weeks, capped at the race-day target (today's Fitness + ${FitnessPlan.MONTH_TARGET.roundToInt()} per 4 weeks until the taper starts), then eases through the taper. " +
+                "A week counts as below the band when Fitness gained less than +${FitnessPlan.WEEK_LO}. Touch and drag the chart to read values.")
         if (band == null) { text(c, "Not enough history for the chart yet.", 13.5f, DIM, top = 4); return }
         val w = resources.displayMetrics.widthPixels - dp(52)
         val bmp = FitnessChart.render(s, band, w, dp(190), d)
@@ -196,8 +198,8 @@ class FitnessActivity : Activity() {
     private fun notes(s: Snapshot, call: FitnessPlan.Call) {
         val c = card()
         BandViews.heading(this, c, "COACH'S NOTES",
-            "Rule-based, smallest change first, at most 3 a week. Behind: a longer long run, a 60% double on an easy or workout day (never the long-run day), longer easy runs. " +
-                "Building too fast or Fatigue over 140% of Fitness: shorter easy runs and long run, skip a double, keep SubT controlled. " +
+            "Rule-based, smallest change first, at most 3 a week. Behind with Form fresher than the grey zone (or inside it): a longer long run, a 60% double on an easy or workout day (never the long-run day), longer easy runs. " +
+                "Building too fast, Form below the grey zone, or Fatigue over 140% of Fitness: shorter easy runs and long run, skip a double, keep SubT controlled. " +
                 "Apply writes to intervals.icu only after you confirm; Undo puts it back today. Your own events are never deleted.")
         FitnessFlow.undoRec(this)?.let { rec ->
             text(c, "Applied today: ${rec.label}", 13.5f, GOOD, top = 4)

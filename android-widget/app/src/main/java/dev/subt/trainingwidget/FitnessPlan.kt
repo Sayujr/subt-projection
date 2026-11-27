@@ -19,14 +19,17 @@ import kotlin.math.roundToInt
  */
 object FitnessPlan {
     // ---------------------------------------------------------------- defaults (no settings UI for these yet)
-    /** Fitness (CTL) gained per week while building: 3 to 5 is on track, 4 is the aim. */
-    const val BUILD_LO = 3.0
-    const val BUILD_TARGET = 4.0
-    const val BUILD_HI = 5.0
-    /** Gains from here up to [BUILD_LO] are "slightly behind"; below it "behind". */
-    const val SLIGHT_LO = 1.0
-    /** More than this a week is building too fast. */
-    const val TOO_FAST = 7.0
+    /** Fitness (CTL) should rise about 2 to 4 points per 28 days overall; 3 is the aim. */
+    const val MONTH_LO = 2.0
+    const val MONTH_TARGET = 3.0
+    const val MONTH_HI = 4.0
+    /** Above [MONTH_HI] up to this is "building fast" (amber); above it "too fast" (red). Below 0 is "behind". */
+    const val TOO_FAST = 6.0
+    const val WINDOW_DAYS = 28
+    /** The same targets per week. */
+    const val WEEK_LO = MONTH_LO / 4
+    const val WEEK_TARGET = MONTH_TARGET / 4
+    const val WEEK_HI = MONTH_HI / 4
     /** Fatigue ÷ Fitness: green below, amber up to [RATIO_RED], red above. */
     const val RATIO_AMBER = 1.2
     const val RATIO_RED = 1.4
@@ -51,6 +54,7 @@ object FitnessPlan {
         ON_TRACK("On track", GOOD),
         SLIGHTLY_BEHIND("Slightly behind", WARN),
         BEHIND("Behind", BAD),
+        BUILDING_FAST("Building fast", WARN),
         TOO_FAST("Building too fast", BAD),
         TAPER_OK("Tapering as planned", GOOD),
         TAPER_BUILDING("Tapering: still building", WARN),
@@ -75,15 +79,24 @@ object FitnessPlan {
 
     // ---------------------------------------------------------------- the maths
 
-    /** Fitness change over the last 7 days, or null without a week of data. */
-    fun weeklyRate(days: List<Day>): Double? {
-        if (days.size < 8) return null
+    /** Fitness change over the last [window] days, or null without that much data. */
+    fun ctlChange(days: List<Day>, window: Int): Double? {
+        if (days.size < window + 1) return null
         val last = days.last()
-        val ago = dayOf(last)?.minusDays(7)?.toString()
-        val prev = days.firstOrNull { it.date == ago } ?: days[days.size - 8]
+        val ago = dayOf(last)?.minusDays(window.toLong())?.toString()
+        val prev = days.firstOrNull { it.date == ago } ?: days[days.size - 1 - window]
         return last.ctl - prev.ctl
     }
 
+    /** Where Form sits against the grey zone (intervals.icu's −10 to +5, [FormZone.GREY]). */
+    fun formPhrase(f: Double): String = when {
+        f < FormZone.GREY.lower -> "below the grey zone (tired)"
+        f >= FormZone.GREY.upper -> "above the grey zone (fresh)"
+        else -> "in the grey zone"
+    }
+    fun inGrey(f: Double) = f >= FormZone.GREY.lower && f < FormZone.GREY.upper
+
+    /** [rate] = Fitness change over 28 days (or over 7 days when [taper]). */
     fun classify(rate: Double, taper: Boolean = false): Status =
         if (taper) when {
             rate > TAPER_CEIL -> Status.TAPER_BUILDING
@@ -91,8 +104,9 @@ object FitnessPlan {
             else -> Status.TAPER_OK
         } else when {
             rate > TOO_FAST -> Status.TOO_FAST
-            rate >= BUILD_LO -> Status.ON_TRACK
-            rate >= SLIGHT_LO -> Status.SLIGHTLY_BEHIND
+            rate > MONTH_HI -> Status.BUILDING_FAST
+            rate >= MONTH_LO -> Status.ON_TRACK
+            rate >= 0.0 -> Status.SLIGHTLY_BEHIND
             else -> Status.BEHIND
         }
 
@@ -104,6 +118,32 @@ object FitnessPlan {
         val r = ((CTL_DAYS - 1) / CTL_DAYS).pow(7)
         val daily = (ctl0 + ramp - ctl0 * r) / (1 - r)
         return daily * 7
+    }
+
+    /** Sunday's Form after 7 days of the same daily load [daily] (CTL over 42 days, ATL over 7). */
+    fun formAfterWeek(ctl0: Double, atl0: Double, daily: Double): Double {
+        var c = ctl0; var a = atl0
+        repeat(7) { c += (daily - c) / CTL_DAYS; a += (daily - a) / 7.0 }
+        return c - a
+    }
+
+    /** Daily load whose week ends at Form [target] (Form falls as load rises), by bisection. */
+    private fun dailyForForm(ctl0: Double, atl0: Double, target: Double): Double {
+        var lo = 0.0; var hi = 1000.0
+        repeat(60) { val m = (lo + hi) / 2; if (formAfterWeek(ctl0, atl0, m) > target) lo = m else hi = m }
+        return (lo + hi) / 2
+    }
+
+    /**
+     * Weekly load that keeps Fitness rising about +0.75 a week while Sunday's Form stays inside the grey zone:
+     * the load for +0.75, moved into the range of loads that end the week at Form −10 … +5. Same load every day.
+     */
+    fun neededWeekly(ctl0: Double, atl0: Double): Pair<Double, Boolean> {
+        val want = weeklyLoadFor(ctl0, WEEK_TARGET) / 7
+        val minDaily = dailyForForm(ctl0, atl0, FormZone.GREY.upper)   // any less ends fresher than the zone
+        val maxDaily = dailyForForm(ctl0, atl0, FormZone.GREY.lower)   // any more ends more tired
+        val use = want.coerceIn(minOf(minDaily, maxDaily), maxOf(minDaily, maxDaily))
+        return use * 7 to (use != want)
     }
 
     fun taperDays(category: String): Int = when (category) { "RACE_A" -> 14; "RACE_B" -> 10; "RACE_C" -> 5; else -> 0 }
@@ -123,28 +163,38 @@ object FitnessPlan {
 
     // ---------------------------------------------------------------- 1. verdict
 
-    data class Call(val status: Status, val sentence: String, val rate: Double, val ratio: Double, val form: Double, val taper: Race?)
+    data class Call(
+        val status: Status, val sentence: String,
+        /** Fitness change over 28 days, and over 7 days as context. */
+        val rate: Double, val rate7: Double,
+        val ratio: Double, val form: Double, val taper: Race?,
+        val formSunday: Double?, val formNext: Double?,
+    )
+
+    private fun signedD(v: Double): String = (if (v >= 0) "+" else "−") + f1(Math.abs(v))
 
     fun call(s: Snapshot): Call? {
         if (s.days.isEmpty()) return null
-        val rate = weeklyRate(s.days) ?: return null
+        val rate = ctlChange(s.days, WINDOW_DAYS) ?: return null
+        val rate7 = ctlChange(s.days, 7) ?: return null
         val today = todayOf(s)
         val d = s.days.last()
         val ratio = if (d.ctl > 0) d.atl / d.ctl else 1.0
         val taper = taperRace(s, today)
-        val status = classify(rate, taper != null)
-        val move = if (rate >= 0) "rose ${f1(rate)}" else "slipped ${f1(-rate)}"
-        val formTxt = "Form ${signed(d.form)}, ${FormZone.of(d.form).label.lowercase(Locale.ROOT)}"
-        val fat = "Fatigue is ${fatigueWord(ratio)} ($formTxt)."
+        val status = if (taper != null) classify(rate7, true) else classify(rate)
+        val st = shortTerm(s)
+        val form = "form ${formPhrase(d.form)}"
+        val proj = if (st?.formSunday != null) " Projected form: Sunday ${signed(st.formSunday)}" +
+            (st.formNext?.let { ", next week ${signed(it)}" } ?: "") + "." else ""
         val left = taper?.let { daysTo(it, today) }
+        val head = "${status.label}: "
         val sentence = when (status) {
-            Status.TOO_FAST -> "Fitness $move this week, more than the +${TOO_FAST.roundToInt()} a week ceiling. $fat"
-            Status.TAPER_OK -> "Fitness $move this week, as expected in the taper for ${taper?.name?.take(24)} (${left} days to go). $fat"
-            Status.TAPER_BUILDING -> "Fitness $move this week, but you are ${left} days from ${taper?.name?.take(24)}: a taper should hold or ease it. $fat"
-            Status.TAPER_DROPPING -> "Fitness $move this week, faster than a taper needs, with ${left} days to ${taper?.name?.take(24)}. $fat"
-            else -> "Fitness $move this week. $fat"
+            Status.TAPER_OK -> head + "fitness ${signed(rate7)} this week, as expected with ${left} days to ${taper?.name?.take(24)}, $form.$proj"
+            Status.TAPER_BUILDING -> head + "${left} days from ${taper?.name?.take(24)}, a taper should hold or ease fitness (${signed(rate7)} this week), $form.$proj"
+            Status.TAPER_DROPPING -> head + "fitness ${signed(rate7)} this week is faster than a taper needs, $form.$proj"
+            else -> head + "fitness ${signed(rate)} this month (${signedD(rate7)} this week), $form.$proj"
         }
-        return Call(status, sentence, rate, ratio, d.form, taper)
+        return Call(status, sentence, rate, rate7, ratio, d.form, taper, st?.formSunday, st?.formNext)
     }
 
     // ---------------------------------------------------------------- 2. short term
@@ -154,7 +204,9 @@ object FitnessPlan {
         val done: Int, val planned: Int,
         /** Load this week for +4 Fitness, or null when last Sunday's Fitness isn't known. */
         val needed: Int?,
-        val ratio: Double, val form: Double, val formSunday: Double?,
+        val ratio: Double, val form: Double, val formSunday: Double?, val formNext: Double?,
+        /** True when the needed load was moved to keep Form in the grey zone. */
+        val formLimited: Boolean,
         /** Projected change over next week from the plan. */
         val nextCtl: Double?, val nextAtl: Double?,
     ) {
@@ -174,7 +226,8 @@ object FitnessPlan {
         val done = if (dayLoads.isNotEmpty()) dayLoads.sum().roundToInt() else inWeek.filter { it.status == WorkoutStatus.DONE }.sumOf { it.load }
         val planned = inWeek.filter { it.status != WorkoutStatus.DONE }.sumOf { plannedLoad(it) }
         val base = s.days.firstOrNull { it.date == mon.minusDays(1).toString() }
-        val needed = base?.let { weeklyLoadFor(it.ctl, BUILD_TARGET).roundToInt() }
+        val needs = base?.let { neededWeekly(it.ctl, it.atl) }
+        val needed = needs?.first?.roundToInt()
         val d = s.days.last()
         val ratio = if (d.ctl > 0) d.atl / d.ctl else 1.0
         val projByDate = s.proj.associateBy { it.date }
@@ -182,7 +235,7 @@ object FitnessPlan {
         val thisSun = at(sun)
         val nextSun = at(sun.plusDays(7))
         return ShortTerm(
-            mon, sun, done, planned, needed, ratio, d.form, thisSun?.form,
+            mon, sun, done, planned, needed, ratio, d.form, thisSun?.form, nextSun?.form, needs?.second ?: false,
             if (thisSun != null && nextSun != null) nextSun.ctl - thisSun.ctl else null,
             if (thisSun != null && nextSun != null) nextSun.atl - thisSun.atl else null,
         )
@@ -194,7 +247,7 @@ object FitnessPlan {
     class Band(
         val start: LocalDate, val end: LocalDate, val race: Race?, val taperStart: LocalDate?,
         val lo: List<Double>, val hi: List<Double>,
-        /** Race-day target: today's Fitness + 4 a week for the weeks left before the taper starts. */
+        /** Race-day target: today's Fitness + 3 per 4 weeks for the time left before the taper starts. */
         val cap: Double,
     )
 
@@ -212,15 +265,15 @@ object FitnessPlan {
         val taperStart = if (race != null && raceDate != null) raceDate.minusDays(taperDays(race.category).toLong()) else null
         val buildEnd = taperStart ?: end
         val weeksLeft = maxOf(0L, ChronoUnit.DAYS.between(today, buildEnd)) / 7.0
-        val cap = nowCtl + BUILD_TARGET * weeksLeft
+        val cap = nowCtl + MONTH_TARGET * weeksLeft / 4.0
         val n = ChronoUnit.DAYS.between(start, end).toInt()
         if (n < 1) return null
         val lo = ArrayList<Double>(); val hi = ArrayList<Double>()
         for (i in 0..n) {
             val d = start.plusDays(i.toLong())
-            val t = i / 7.0
-            var l = minOf(startCtl + BUILD_LO * t, cap)
-            var h = minOf(startCtl + BUILD_HI * t, cap)
+            val t = i / 28.0
+            var l = minOf(startCtl + MONTH_LO * t, cap)
+            var h = minOf(startCtl + MONTH_HI * t, cap)
             if (taperStart != null && raceDate != null && d.isAfter(taperStart)) {
                 val span = maxOf(1L, ChronoUnit.DAYS.between(taperStart, raceDate)).toDouble()
                 val p = (ChronoUnit.DAYS.between(taperStart, d) / span).coerceIn(0.0, 1.0)
@@ -244,10 +297,10 @@ object FitnessPlan {
             val end = byDate[today.minusDays(7L * k).toString()] ?: continue
             val beg = byDate[today.minusDays(7L * k + 7).toString()] ?: continue
             known++
-            if (end.ctl - beg.ctl < BUILD_LO) below++
+            if (end.ctl - beg.ctl < WEEK_LO) below++
         }
         val parts = ArrayList<String>()
-        if (known > 0) parts += "$below of the last $known weeks below the +${BUILD_LO.roundToInt()} a week build rate"
+        if (known > 0) parts += "$below of the last $known weeks below the build rate (+${MONTH_LO.roundToInt()} to +${MONTH_HI.roundToInt()} a month)"
         // longest run in each of the last 4 weeks
         val cutoff = today.minusDays(27).toString()
         val longs = s.runs.filter { it.date >= cutoff && it.date <= today.toString() && Zones.isLong(it.name, it.date, it.seconds) }
@@ -326,8 +379,11 @@ object FitnessPlan {
     fun suggestions(s: Snapshot): List<Suggestion> {
         val c = call(s) ?: return emptyList()
         val mode = when {
+            // too tired for the grey zone: trim whatever the Fitness trend says
+            !inGrey(c.form) && c.form < FormZone.GREY.lower -> Mode.TRIM
             c.ratio > RATIO_RED || c.status == Status.TOO_FAST || c.status == Status.TAPER_BUILDING -> Mode.TRIM
-            c.status == Status.BEHIND || c.status == Status.SLIGHTLY_BEHIND -> Mode.ADD
+            c.status == Status.BEHIND || c.status == Status.SLIGHTLY_BEHIND ->
+                if (c.formSunday != null && c.formSunday < FormZone.GREY.lower) return emptyList() else Mode.ADD
             else -> return emptyList()
         }
         val today = todayOf(s)
@@ -462,7 +518,7 @@ object FitnessPlan {
         val lines = ArrayList<Coach.Line>()
         lines += Coach.Line(lvl, "${c.status.label}: ${c.sentence}")
         if (st != null) {
-            lines += Coach.Line(Coach.Level.INFO, "This week: ${st.done} load done, ${st.planned} planned" + (st.needed?.let { ", about $it needed for +${BUILD_TARGET.roundToInt()} Fitness" } ?: ""))
+            lines += Coach.Line(Coach.Level.INFO, "This week: ${st.done} load done, ${st.planned} planned" + (st.needed?.let { ", about $it needed for +${f1(WEEK_TARGET)} Fitness a week with Form in the grey zone" } ?: ""))
             lines += Coach.Line(when { c.ratio > RATIO_RED -> Coach.Level.ACT; c.ratio > RATIO_AMBER -> Coach.Level.WATCH; else -> Coach.Level.GOOD },
                 "Fatigue is ${(c.ratio * 100).roundToInt()}% of Fitness")
         }
@@ -470,11 +526,11 @@ object FitnessPlan {
         val data = buildString {
             appendLine("Date: ${todayOf(s)}")
             appendLine("Verdict: ${c.status.label}. ${c.sentence}")
-            appendLine("Fitness ${d.ctl.roundToInt()}, Fatigue ${d.atl.roundToInt()}, Form ${signed(d.form)}; Fitness change in the last 7 days ${f1(c.rate)}")
-            appendLine("Target build rate: +${BUILD_LO.roundToInt()} to +${BUILD_HI.roundToInt()} Fitness a week (on track); over +${TOO_FAST.roundToInt()} is too fast")
+            appendLine("Fitness ${d.ctl.roundToInt()}, Fatigue ${d.atl.roundToInt()}, Form ${signed(d.form)}; Fitness change ${signed(c.rate)} over 28 days, ${f1(c.rate7)} over 7 days")
+            appendLine("Targets: Fitness +${MONTH_LO.roundToInt()} to +${MONTH_HI.roundToInt()} over 28 days is on track, up to +${TOO_FAST.roundToInt()} building fast, above that too fast; Form in the grey zone (${FormZone.GREY.lower.roundToInt()} to +${FormZone.GREY.upper.roundToInt()})")
             if (st != null) {
-                appendLine("Load this week: ${st.done} done, ${st.planned} planned still to do, ${st.needed ?: "unknown"} needed for +${BUILD_TARGET.roundToInt()} Fitness")
-                st.formSunday?.let { appendLine("Form projected for Sunday: ${signed(it)}") }
+                appendLine("Load this week: ${st.done} done, ${st.planned} planned still to do, ${st.needed ?: "unknown"} needed for +${f1(WEEK_TARGET)} Fitness a week with Form in the grey zone")
+                st.formSunday?.let { appendLine("Form projected for Sunday: ${signed(it)}" + (st.formNext?.let { n -> ", next Sunday ${signed(n)}" } ?: "")) }
                 if (st.nextCtl != null && st.nextAtl != null) appendLine("Next week from the plan: Fitness ${if (st.nextCtl >= 0) "+" else ""}${f1(st.nextCtl)}, Fatigue ${if (st.nextAtl >= 0) "+" else ""}${f1(st.nextAtl)}")
             }
             race?.let { appendLine("Target race: ${it.name} (${it.category}) on ${it.date}" + (it.projCtl?.let { p -> ", projected Fitness ${p.roundToInt()}" } ?: "")) }
