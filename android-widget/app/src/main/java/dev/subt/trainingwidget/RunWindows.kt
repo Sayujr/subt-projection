@@ -16,7 +16,9 @@ object RunWindows {
      * remains today (the best one has started or passed, or none fits and there's no split). Otherwise today.
      */
     fun leadDay(hour: Int, passed: Boolean, done: Boolean, hasWindow: Boolean, hasSplit: Boolean = false): Lead =
-        if (hour >= 20 || done || passed || (!hasWindow && !hasSplit)) Lead.TOMORROW else Lead.TODAY
+        // Today stays first until 20:00 unless today's run is done: a passed or missing window
+        // still shows today (with the next best time), never jumps to tomorrow early
+        if (hour >= 20 || done) Lead.TOMORROW else Lead.TODAY
 
     /** Every source's cached forecast, parsed. */
     class WxData(

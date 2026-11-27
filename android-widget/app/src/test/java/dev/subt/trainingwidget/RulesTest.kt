@@ -1557,8 +1557,8 @@ class RulesTest {
         assertEquals("19:59 still today", L, RunWindows.leadDay(19, passed = false, done = false, hasWindow = true))
         assertEquals("from 20:00", T, RunWindows.leadDay(20, passed = false, done = false, hasWindow = true))
         assertEquals("today's run done", T, RunWindows.leadDay(8, passed = false, done = true, hasWindow = true))
-        assertEquals("window passed", T, RunWindows.leadDay(14, passed = true, done = false, hasWindow = true))
-        assertEquals("no window and no split", T, RunWindows.leadDay(9, passed = false, done = false, hasWindow = false))
+        assertEquals("window passed but not done: still today", L, RunWindows.leadDay(14, passed = true, done = false, hasWindow = true))
+        assertEquals("no window, not done: still today", L, RunWindows.leadDay(9, passed = false, done = false, hasWindow = false))
         assertEquals("no single window but a split", L, RunWindows.leadDay(9, passed = false, done = false, hasWindow = false, hasSplit = true))
     }
 
