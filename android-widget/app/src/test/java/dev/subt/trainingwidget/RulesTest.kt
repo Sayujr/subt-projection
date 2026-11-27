@@ -1551,6 +1551,17 @@ class RulesTest {
         assertNotNull("old data still shows rather than blanking", RunWindows.plan(ctx, today))
     }
 
+    @Test fun rwLeadsWithTomorrowInTheEvening() {
+        val L = RunWindows.Lead.TODAY; val T = RunWindows.Lead.TOMORROW
+        assertEquals("morning, window still ahead", L, RunWindows.leadDay(7, passed = false, done = false, hasWindow = true))
+        assertEquals("19:59 still today", L, RunWindows.leadDay(19, passed = false, done = false, hasWindow = true))
+        assertEquals("from 20:00", T, RunWindows.leadDay(20, passed = false, done = false, hasWindow = true))
+        assertEquals("today's run done", T, RunWindows.leadDay(8, passed = false, done = true, hasWindow = true))
+        assertEquals("window passed", T, RunWindows.leadDay(14, passed = true, done = false, hasWindow = true))
+        assertEquals("no window and no split", T, RunWindows.leadDay(9, passed = false, done = false, hasWindow = false))
+        assertEquals("no single window but a split", L, RunWindows.leadDay(9, passed = false, done = false, hasWindow = false, hasSplit = true))
+    }
+
     // ================================================================ Run windows, part 2
 
     // ---- location change prompt

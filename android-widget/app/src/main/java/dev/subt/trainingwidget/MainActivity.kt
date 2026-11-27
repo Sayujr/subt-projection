@@ -144,12 +144,19 @@ class MainActivity : Activity() {
         val name = intent?.getStringExtra(EXTRA_TAB) ?: return false
         val t = Tab.entries.firstOrNull { it.name == name } ?: return false
         tab = t
+        pendingScroll = intent?.getStringExtra(EXTRA_SCROLL)
+        if (t == Tab.WEEK && pendingScroll != null) { mode = RangeMode.WEEK; offset = 0 }
         return true
     }
 
     companion object {
         const val EXTRA_TAB = "tab"
+        /** With EXTRA_TAB = "WEEK": "rw7" scrolls to the "Run windows · 7 days" card. */
+        const val EXTRA_SCROLL = "scroll"
+        const val SCROLL_RW7 = "rw7"
     }
+
+    private var pendingScroll: String? = null
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
@@ -601,6 +608,10 @@ class MainActivity : Activity() {
         }
         content.removeAllViews()
         content.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        if (pendingScroll == SCROLL_RW7) {
+            pendingScroll = null
+            scroll.post { list.findViewWithTag<View>("rw7")?.let { scroll.scrollTo(0, it.top) } }
+        }
     }
 
     // ---------------------------------------------------------------- Load split by category

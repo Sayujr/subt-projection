@@ -174,6 +174,26 @@ class ScreensTest {
             capture("runwindow_$label", ctl.get().window.decorView)
             ctl.pause().stop().destroy()
         }
+        // Day plan for a later day (the day chips with Tomorrow selected, then a plain weekday) and the Today card in evening mode
+        safely("runwindow_chips_evening") {
+            val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, Fixture.today.plusDays(3).toString())
+            val ctl = Robolectric.buildActivity(RunWindowActivity::class.java, i).setup()
+            settle()
+            capture("runwindow_day_chips", ctl.get().window.decorView)
+            ctl.pause().stop().destroy()
+            // today's run synced as done leads the card with tomorrow, same as after 20:00
+            val snap = Prefs.snapshot(ctx)!!
+            Prefs.saveSnapshot(ctx, snap.copy(week = snap.week.map { w -> if (w.date == Fixture.today.toString() && w.type.contains("Run", ignoreCase = true)) w.copy(status = WorkoutStatus.DONE) else w }), 400)
+            val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+            val col = android.widget.LinearLayout(act).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(0xFF0F1218.toInt()) }
+            AppScreens(act, 392).runWindowCard(col)
+            val w = (392 * ctx.resources.displayMetrics.density).toInt()
+            col.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val h = col.measuredHeight.coerceIn(1, 4000)
+            col.layout(0, 0, w, h)
+            save("runwindow_card_evening", Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawColor(0xFF0F1218.toInt()); col.draw(this) } })
+            Fixture.seed(ctx); WxFixture.seed(ctx)
+        }
         // The Today card and the Week list on their own, as plain views
         safely("runwindow_card_and_list") {
             val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()

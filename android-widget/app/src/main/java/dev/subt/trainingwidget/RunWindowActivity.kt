@@ -43,6 +43,7 @@ class RunWindowActivity : Activity() {
     }
 
     private lateinit var col: LinearLayout
+    private lateinit var scroller: ScrollView
     private var date: LocalDate = LocalDate.now()
     private var status: String? = null
     private val zone = ZoneId.systemDefault()
@@ -54,6 +55,7 @@ class RunWindowActivity : Activity() {
         super.onCreate(savedInstanceState)
         date = runCatching { LocalDate.parse(intent?.getStringExtra(EXTRA_DATE).orEmpty()) }.getOrDefault(LocalDate.now())
         val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false; fitsSystemWindows = true }
+        scroller = sv
         col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(24)) }
         sv.addView(col)
         setContentView(sv)
@@ -105,6 +107,53 @@ class RunWindowActivity : Activity() {
         if (sub.isNotEmpty()) t.addView(TextView(this).apply { text = sub; textSize = 13f; setTextColor(DIM) })
         r.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(r)
+    }
+
+    private fun dayLabel(day: LocalDate, today: LocalDate): String = when (day) {
+        today -> "Today"
+        today.plusDays(1) -> "Tomorrow"
+        else -> day.format(DateTimeFormatter.ofPattern("EEE d", Locale.getDefault()))
+    }
+
+    /** Switches the page to [day] in place and returns to the top. */
+    private fun showDay(day: LocalDate) {
+        if (day == date) return
+        date = day
+        status = null
+        render()
+        scroller.post { scroller.scrollTo(0, 0) }
+    }
+
+    /** A row of chips for the days the forecast covers (today plus six), the current one highlighted, then a link to the week list. */
+    private fun dayChips() {
+        val today = LocalDate.now()
+        val days = (0..6).map { today.plusDays(it.toLong()) }.let { if (date in it) it else listOf(date) + it }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        for (day in days) {
+            val on = day == date
+            row.addView(TextView(this).apply {
+                text = dayLabel(day, today); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
+                setTextColor(if (on) TEXT else DIM); gravity = Gravity.CENTER; maxLines = 1
+                setBackgroundResource(if (on) R.drawable.chip_on else R.drawable.chip_off)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setOnClickListener { showDay(day) }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6) })
+        }
+        val hsv = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        hsv.addView(row)
+        col.addView(hsv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // keep the current chip in view when the row is wider than the screen
+        val idx = days.indexOf(date)
+        hsv.post { row.getChildAt(idx)?.let { hsv.scrollTo((it.left - dp(12)).coerceAtLeast(0), 0) } }
+        col.addView(TextView(this).apply {
+            text = "7-day view ›"; setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f); setTextColor(LINK); gravity = Gravity.END
+            setPadding(dp(6), dp(8), dp(6), dp(10))
+            setOnClickListener {
+                startActivity(Intent(this@RunWindowActivity, MainActivity::class.java)
+                    .putExtra(MainActivity.EXTRA_TAB, "WEEK").putExtra(MainActivity.EXTRA_SCROLL, MainActivity.SCROLL_RW7)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
     private fun button(parent: LinearLayout, t: String, onClick: () -> Unit) {
@@ -165,6 +214,7 @@ class RunWindowActivity : Activity() {
         val dayName = date.format(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.getDefault()))
         val s = RwStore.load(this)
         header("Run window", dayName)
+        dayChips()
         if (s.lat == null || s.lon == null) {
             val c = card()
             text(c, "Set your location in Settings → Run windows", 15f, TEXT)
@@ -242,7 +292,10 @@ class RunWindowActivity : Activity() {
             val c = card()
             BandViews.heading(this, c, "OVERALL PICK", "White box = the window, blue line = now. Cell colour is the weather: green cool, orange to red hotter, dark red hot and sunny, grey-blue cold; night cells are darker with a 🌙, hatched cells have no data. Icons: 💧 rain, ☁ cloud, ☀ UV over your limit, 🔥 hot, 🧤 cold, 🧊 ice, 😷 air quality. The line above the cells shows daylight (solid), 'dark OK' (dashed) and night (dotted).")
             scrollImage(c, RwViews.strip(this, plan, s, wPx, false, nowSec, other = if (plan.same) null else plan.rainbow, minCellDp = 22f), plan, wPx)
-            if (plan.rainbowPresent && plan.rbHours.isNotEmpty()) {
+            val rbConnected = RunWindows.data(this)?.rb?.isNotEmpty() == true
+            if (rbConnected && plan.rbHours.isEmpty()) {
+                text(c, "Rainbow: no hourly forecast for this day", 12.5f, DIM, top = 12)
+            } else if (plan.rainbowPresent && plan.rbHours.isNotEmpty()) {
                 label(c, if (plan.same) "Rainbow alone (same window)" else "Rainbow pick (dashed on the strip above)").setPadding(0, dp(12), 0, 0)
                 scrollImage(c, RwViews.strip(this, plan, s, wPx, false, nowSec, hours = plan.rbHours, win = plan.rainbow, minCellDp = 22f), plan, wPx)
             }

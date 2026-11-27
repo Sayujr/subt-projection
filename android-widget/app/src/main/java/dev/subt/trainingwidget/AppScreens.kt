@@ -1385,20 +1385,35 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             return
         }
         swapBanner(c)
-        if (p.run.done) {
-            // Today's run is synced as done: nothing more to plan today, tomorrow comes first
-            text(c, "✓ Today's run is done", 22f, GOOD, bold = true, top = 2)
-            val t = plans.getOrNull(1)
-            if (t != null && !t.noData) {
-                val tw = t.window
-                text(c, "Tomorrow  " + (if (tw == null) "no window" else Weather.range(tw, zone) + (if (tw.icons.isEmpty()) "" else " " + tw.icons.joinToString(" "))), 18f, TEXT, bold = true, top = 6)
-                text(c, (if (t.run.planned) "${t.run.name} · " else "") + t.summary.short, 13.5f, DIM)
-                val tb = RwViews.strip(a, t, s, chartW(), false, null)
-                image(c, tb, (tb.height / d).roundToInt())
+        val t = plans.getOrNull(1)
+        val lead = RunWindows.leadDay(java.time.LocalTime.now().hour, p.passed, p.run.done, p.window != null, p.split != null)
+        if (lead == RunWindows.Lead.TOMORROW && t != null && !t.noData) {
+            // Evening, today's run done, or nothing left today: tomorrow leads, today shrinks to one line
+            val tw = t.window
+            text(c, "Tomorrow  " + (if (tw == null) "no window" else Weather.range(tw, zone) + (if (tw.icons.isEmpty()) "" else "  " + tw.icons.joinToString(" "))), 26f, TEXT, bold = true, top = 2).apply { letterSpacing = 0.02f }
+            text(c, (if (t.run.planned) "${t.run.name} · " else "") + t.run.type.label + " · " + t.summary.short, 13.5f, DIM)
+            t.split?.let { text(c, Weather.splitLabel(it, zone), 14f, WARN, top = 2) }
+            val tb = RwViews.strip(a, t, s, chartW(), false, null)
+            image(c, tb, (tb.height / d).roundToInt())
+            val pw = p.window
+            val todayLine = when {
+                p.run.done -> "Today: ✓ run done"
+                p.passed -> "Today: window passed" + (if (pw != null) " (" + Weather.range(pw, zone) + ")" else "")
+                pw == null -> "Today: no window fits"
+                else -> "Today: " + Weather.range(pw, zone) + " · " + p.summary.short
             }
+            text(c, todayLine, 13f, if (p.run.done) GOOD else DIM, top = 8)
+            RunWindows.asOf(a)?.let { text(c, "Forecast $it", 12f, WARN, top = 4) }
             c.addView(RwUi.outsideRow(a))
             text(c, "Tap for tomorrow's plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 8)
             c.setOnClickListener { RunWindowActivity.open(a, today.plusDays(1)) }
+            return
+        }
+        if (p.run.done) {
+            text(c, "✓ Today's run is done", 22f, GOOD, bold = true, top = 2)
+            c.addView(RwUi.outsideRow(a))
+            text(c, "Tap for today's plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 8)
+            c.setOnClickListener { RunWindowActivity.open(a, today) }
             return
         }
         val w = p.window
@@ -1412,7 +1427,6 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val bmp = RwViews.strip(a, p, s, chartW(), false, System.currentTimeMillis() / 1000)
         image(c, bmp, (bmp.height / d).roundToInt())
         RunWindows.asOf(a)?.let { text(c, "Forecast $it", 12f, WARN, top = 4) }
-        val t = plans.getOrNull(1)
         if (t != null && !t.noData) {
             val tw = t.window
             text(c, "Tomorrow  " + (if (tw == null) "no window" else Weather.range(tw, zone) + (if (tw.icons.isEmpty()) "" else " " + tw.icons.joinToString(" "))) + " · " + t.summary.short, 13f, DIM, top = 8)
@@ -1427,6 +1441,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val zone = java.time.ZoneId.systemDefault()
         val s = RwStore.load(a)
         val c = card(col)
+        c.tag = "rw7"
         label(c, "Run windows · 7 days")
         if (s.lat == null || s.lon == null) {
             text(c, "Set your location in Settings → Run windows", 14.5f, DIM, top = 4)

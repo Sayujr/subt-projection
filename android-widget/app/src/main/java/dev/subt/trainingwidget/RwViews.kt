@@ -57,7 +57,7 @@ object RwViews {
         zone: ZoneId = ZoneId.systemDefault(), dScale: Float = 1f, minCellDp: Float = 0f,
     ): Bitmap {
         val d = ctx.resources.displayMetrics.density * dScale
-        val margin = if (mini) 2f * d else 8f * d
+        val margin = if (mini) 2f * d else 12f * d
         val t0 = plan.lo; val t1 = plan.hi
         val nCells = Math.ceil((t1 - t0) / 3600.0).toInt().coerceAtLeast(1)
         val w = maxOf(widthPx.coerceAtLeast(160), if (minCellDp > 0f) (nCells * minCellDp * d + 2 * margin).roundToInt() else 0)
@@ -85,10 +85,12 @@ object RwViews {
         val byT = HashMap<Long, Weather.Combined>()
         for (hr in hours) byT[Weather.hourFloor(hr.t)] = hr
         val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
-        val moonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8f * d; textAlign = Paint.Align.LEFT }
+        val moonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 7f * d; textAlign = Paint.Align.LEFT }
         val hatch = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1f * d; color = 0xFF465065.toInt() }
         val tiny = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 7f * d; textAlign = Paint.Align.CENTER; color = DIM }
         var slot = Weather.hourFloor(t0)
+        // contiguous blocks of hours with no data: [start, end) in seconds, labelled once each
+        val gaps = ArrayList<LongArray>()
         while (slot < t1) {
             val l = x(slot) + 0.5f; val r = x(slot + 3600) - 0.5f
             val hr = byT[slot]
@@ -101,29 +103,45 @@ object RwViews {
                 val step = 5f * d
                 while (k < r - l) { c.drawLine(l + k, cellBottom, l + k + cellH, cellTop, hatch); k += step }
                 c.restore()
-                val past = nowSec != null && slot + 3600 <= nowSec
-                if (past) { p.color = 0x59000000; c.drawRect(l, cellTop, r, cellBottom, p) }
-                if (!mini) {
-                    val label = if (past) "past" else "no data"
-                    if (tiny.measureText(label) <= r - l - 2f * d) c.drawText(label, (l + r) / 2f, cellTop + cellH / 2f + 3f * d, tiny)
-                }
+                val last = gaps.lastOrNull()
+                if (last != null && last[1] == slot) last[1] = slot + 3600 else gaps.add(longArrayOf(slot, slot + 3600))
             } else {
                 val night = Weather.isNight(hr.t, plan.sun, zone)
                 val cls = Weather.classify(hr, s, month, false)
-                p.color = if (night) darken(cls.tone.argb, 0.55f) else cls.tone.argb
+                // a night cell too narrow for the moon loses it and is darkened more instead
+                val showMoon = !mini && night && cellW >= 14f * d
+                p.color = if (night) darken(cls.tone.argb, if (mini || showMoon) 0.55f else 0.4f) else cls.tone.argb
                 c.drawRect(l, cellTop, r, cellBottom, p)
                 if (!mini) {
-                    if (night && cellW >= 14f * d) c.drawText("🌙", l + 2f * d, cellTop + 9f * d, moonPaint)
+                    if (showMoon) c.drawText("🌙", l + 1.5f * d, cellTop + 8f * d, moonPaint)
                     if (cellW >= 12f * d) {
                         val ic = primaryIcon(hr, cls, plan.run.type, s)
                         if (ic != null) {
                             iconPaint.textSize = (if (ic.second) 16f else 12f) * d
-                            c.drawText(ic.first, (l + r) / 2f, cellBottom - (cellH - 12f * d) / 2f - 2f * d + (if (ic.second) 2f * d else 0f), iconPaint)
+                            // with a moon in the corner the icon sits lower so the two never overlap
+                            val base = if (showMoon) cellBottom - (if (ic.second) 3f else 5f) * d
+                            else cellBottom - (cellH - 12f * d) / 2f - 2f * d + (if (ic.second) 2f * d else 0f)
+                            c.drawText(ic.first, (l + r) / 2f, base, iconPaint)
                         }
                     }
                 }
             }
             slot += 3600
+        }
+        // past hours (viewing today) are dimmed, so past and future read at a glance
+        if (nowSec != null && nowSec > t0) {
+            p.color = 0x59000000
+            c.drawRect(x(t0), cellTop, x(minOf(nowSec, t1)), cellBottom, p)
+        }
+        // one label per no-data block, centred: "past" only when the block is entirely before now
+        if (!mini) {
+            for (g in gaps) {
+                val gl = x(g[0]); val gr = x(g[1])
+                val past = nowSec != null && g[1] <= nowSec
+                val full = if (past) "past" else if (hours !== plan.hours) "no Rainbow data" else "no data"
+                val label = listOf(full, "no data").firstOrNull { tiny.measureText(it) <= gr - gl - 4f * d } ?: continue
+                c.drawText(label, (gl + gr) / 2f, cellTop + cellH / 2f + 3f * d, tiny)
+            }
         }
         // the window's cells get a subtle white wash so they pop
         if (win != null) {
@@ -171,15 +189,18 @@ object RwViews {
             if (t < t0) t += 3600
             while (t <= t1) {
                 val hr = Instant.ofEpochSecond(t).atZone(zone).hour
-                if (hr % 3 == 0 && sunX.none { Math.abs(it - x(t)) < 14f * d }) c.drawText(hr.toString(), x(t), cellBottom + 14f * d, ax)
+                if (hr % 3 == 0 && sunX.none { Math.abs(it - x(t)) < 14f * d }) {
+                    val label = hr.toString(); val half = ax.measureText(label) / 2f
+                    c.drawText(label, x(t).coerceIn(half + 2f * d, w - half - 2f * d), cellBottom + 14f * d, ax)
+                }
                 t += 3600
             }
             // sunrise / sunset ticks
             val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 1.5f * d; color = 0xFFFFC53D.toInt() }
             val em = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 12f * d; textAlign = Paint.Align.CENTER }
             plan.sun?.let { sun ->
-                if (sun.rise in t0..t1) { c.drawLine(x(sun.rise), cellTop, x(sun.rise), cellBottom + 3f * d, tick); c.drawText("🌅", x(sun.rise), cellBottom + 16f * d, em) }
-                if (sun.set in t0..t1) { c.drawLine(x(sun.set), cellTop, x(sun.set), cellBottom + 3f * d, tick); c.drawText("🌇", x(sun.set), cellBottom + 16f * d, em) }
+                if (sun.rise in t0..t1) { c.drawLine(x(sun.rise), cellTop, x(sun.rise), cellBottom + 3f * d, tick); c.drawText("🌅", x(sun.rise).coerceIn(8f * d, w - 8f * d), cellBottom + 16f * d, em) }
+                if (sun.set in t0..t1) { c.drawLine(x(sun.set), cellTop, x(sun.set), cellBottom + 3f * d, tick); c.drawText("🌇", x(sun.set).coerceIn(8f * d, w - 8f * d), cellBottom + 16f * d, em) }
             }
         }
         return bmp

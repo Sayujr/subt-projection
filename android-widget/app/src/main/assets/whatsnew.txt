@@ -1,3 +1,4 @@
+- Run windows: day chips on the day plan (jump between Today, Tomorrow and the week), a 7-day view link, evenings the Today card leads with tomorrow, cleaner Rainbow strip when it has no data
 - Cleaner screens: how-it-works notes, colour keys and timestamps moved behind small ⓘ icons next to each heading
 - Run windows: finishing by 20:00 is a preference, not a limit. If nothing else fits, a later night window is still suggested (🌙)
 - Run windows: the hour strip shows the weather for every hour (night darkened with 🌙, not blank), icons for rain, cloud, sun, heat, cold and ice, marks daylight / 'dark OK' / night zones, and always zooms to include your window

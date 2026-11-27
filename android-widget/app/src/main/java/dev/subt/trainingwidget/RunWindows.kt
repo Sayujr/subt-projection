@@ -9,6 +9,15 @@ import java.time.ZoneId
 
 /** Ties the forecast cache, your settings and the intervals.icu week together into day plans. */
 object RunWindows {
+    enum class Lead { TODAY, TOMORROW }
+
+    /**
+     * Which day the Today run-window card leads with: tomorrow from 20:00, once today's run is done, or when no window
+     * remains today (the best one has started or passed, or none fits and there's no split). Otherwise today.
+     */
+    fun leadDay(hour: Int, passed: Boolean, done: Boolean, hasWindow: Boolean, hasSplit: Boolean = false): Lead =
+        if (hour >= 20 || done || passed || (!hasWindow && !hasSplit)) Lead.TOMORROW else Lead.TODAY
+
     /** Every source's cached forecast, parsed. */
     class WxData(
         val src: Map<String, List<Weather.Hour>>,
