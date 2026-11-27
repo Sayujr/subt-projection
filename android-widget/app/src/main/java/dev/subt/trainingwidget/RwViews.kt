@@ -143,10 +143,12 @@ object RwViews {
                 c.drawText(label, (gl + gr) / 2f, cellTop + cellH / 2f + 3f * d, tiny)
             }
         }
-        // the window's cells get a subtle white wash so they pop
-        if (win != null) {
+        // every window of the day (v3), or the one given (Rainbow strip): tight ones amber
+        val boxes: List<Weather.Window> = if (win != null && win === plan.window && plan.windows.isNotEmpty()) plan.windows else listOfNotNull(win)
+        // the windows' cells get a subtle white wash so they pop
+        for (bw in boxes) {
             p.color = 0x1FFFFFFF
-            c.drawRect(x(win.start), cellTop, x(win.end), cellBottom, p)
+            c.drawRect(x(bw.start), cellTop, x(bw.end), cellBottom, p)
         }
         // the other (Rainbow) window, dashed
         if (other != null) {
@@ -157,20 +159,21 @@ object RwViews {
             val inset = if (mini) 0f else 3f * d
             c.drawRoundRect(RectF(x(other.start), cellTop - inset, x(other.end), cellBottom + inset), 4f * d, 4f * d, dash)
         }
-        // the window: white box with bold start / end above it
-        if (win != null) {
-            val box = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = (if (mini) 1.6f else 2.4f) * d; color = 0xFFFFFFFF.toInt() }
-            c.drawRoundRect(RectF(x(win.start), cellTop - 1f * d, x(win.end), cellBottom + 1f * d), 4f * d, 4f * d, box)
+        // each window: a box (white, amber when tight) with bold start / end above it
+        for (bw in boxes) {
+            val boxColor = if (bw.narrow) 0xFFFFC53D.toInt() else 0xFFFFFFFF.toInt()
+            val box = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = (if (mini) 1.6f else 2.4f) * d; color = boxColor }
+            c.drawRoundRect(RectF(x(bw.start), cellTop - 1f * d, x(bw.end), cellBottom + 1f * d), 4f * d, 4f * d, box)
             if (!mini) {
-                val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 12f * d; typeface = Typeface.DEFAULT_BOLD; color = 0xFFFFFFFF.toInt() }
-                val a = Weather.hhmm(win.start, zone); val b = Weather.hhmm(win.end, zone)
+                val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 12f * d; typeface = Typeface.DEFAULT_BOLD; color = boxColor }
+                val a = Weather.hhmm(bw.start, zone); val b = Weather.hhmm(bw.end, zone)
                 val base = topH - 6f * d
-                if (x(win.end) - x(win.start) >= 96f * d) {
-                    tp.textAlign = Paint.Align.LEFT; c.drawText(a, x(win.start), base, tp)
-                    tp.textAlign = Paint.Align.RIGHT; c.drawText(b, x(win.end), base, tp)
+                if (boxes.size == 1 && x(bw.end) - x(bw.start) >= 96f * d) {
+                    tp.textAlign = Paint.Align.LEFT; c.drawText(a, x(bw.start), base, tp)
+                    tp.textAlign = Paint.Align.RIGHT; c.drawText(b, x(bw.end), base, tp)
                 } else {
                     tp.textAlign = Paint.Align.CENTER
-                    val cx = ((x(win.start) + x(win.end)) / 2f).coerceIn(46f * d, w - 46f * d)
+                    val cx = ((x(bw.start) + x(bw.end)) / 2f).coerceIn(46f * d, w - 46f * d)
                     c.drawText("$a–$b", cx, base, tp)
                 }
             }

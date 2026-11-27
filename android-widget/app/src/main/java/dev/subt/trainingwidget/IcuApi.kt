@@ -535,6 +535,18 @@ class IcuApi(private val creds: Credentials) {
         return JSONObject(sendJson("POST", "/athlete/$ath/events", body)).getLong("id")
     }
 
+    /**
+     * Adds a planned ride (an indoor easy ride standing in for a double with no run window). Only called after you tap
+     * "Add to intervals.icu" and confirm. [type] is "Ride" or "VirtualRide". Returns the new event's id.
+     */
+    fun createRideEvent(date: String, startMin: Int, name: String, minutes: Int, description: String, type: String = "Ride"): Long {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val start = String.format(java.util.Locale.US, "%sT%02d:%02d:00", date, startMin / 60, startMin % 60)
+        val body = JSONObject().put("category", "WORKOUT").put("type", type).put("start_date_local", start)
+            .put("name", name).put("moving_time", minutes * 60).put("description", description)
+        return JSONObject(sendJson("POST", "/athlete/$ath/events", body)).getLong("id")
+    }
+
     /** A planned event's description (its workout text), or null. */
     fun eventDescription(eventId: Long): String? = runCatching {
         val ath = URLEncoder.encode(creds.athleteId, "UTF-8")

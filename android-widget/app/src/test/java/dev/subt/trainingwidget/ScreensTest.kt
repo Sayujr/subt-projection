@@ -279,6 +279,60 @@ class ScreensTest {
                 ctl.pause().stop().destroy()
             } finally { WxFixture.tweak = null; WxFixture.seed(ctx) }
         }
+        // Run windows v3: the Today card for a big window, a tight window and a two-run day with the bike swap; the day plan with
+        // chart + hour list; the chart with the scrub card showing (inside the window, then outside it)
+        safely("runwindow_v3") {
+            fun cardShot(name: String) {
+                val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+                val col = android.widget.LinearLayout(act).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(0xFF0F1218.toInt()) }
+                AppScreens(act, 392).runWindowCard(col)
+                val w = (392 * ctx.resources.displayMetrics.density).toInt()
+                col.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                val h = col.measuredHeight.coerceIn(1, 4000)
+                col.layout(0, 0, w, h)
+                save(name, Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawColor(0xFF0F1218.toInt()); col.draw(this) } })
+            }
+            try {
+                // big window: dry, low UV all day
+                WxFixture.tweak = { day, _, p -> if (day == 0) WxFixture.P(p.temp, 90.0, 0.8, 0.0, p.dew, p.wind) else p }
+                WxFixture.seed(ctx)
+                safely("runwindow_v3_big") { cardShot("runwindow_v3_card_big") }
+                safely("runwindow_v3_plan") {
+                    val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, Fixture.today.toString())
+                    val ctl = Robolectric.buildActivity(RunWindowActivity::class.java, i).setup()
+                    settle()
+                    capture("runwindow_v3_plan", ctl.get().window.decorView)
+                    ctl.pause().stop().destroy()
+                }
+                // the scrub card on the chart, in and out of the window
+                safely("runwindow_v3_scrub") {
+                    val p = RunWindows.plan(ctx, Fixture.today)!!
+                    val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+                    val v = RwUi.chart(act, p, RwStore.load(ctx), today = false)
+                    val w = (392 * ctx.resources.displayMetrics.density).toInt()
+                    v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                    v.layout(0, 0, w, v.measuredHeight)
+                    for ((name, frac) in listOf("in" to 0.38f, "out" to 0.93f)) {
+                        v.scrubTo(w * frac)
+                        check(v.currentProbe() != null) { "no probe" }
+                        save("runwindow_v3_scrub_$name", Bitmap.createBitmap(w, v.measuredHeight, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawColor(0xFF1D222D.toInt()); v.draw(this) } })
+                    }
+                    v.scrubTo(null)
+                }
+                // tight: dry only until 08:00
+                WxFixture.tweak = { day, hour, p -> if (day == 0 && hour >= 8) WxFixture.P(p.temp, 95.0, 0.3, 2.0, p.dew, p.wind) else if (day == 0) WxFixture.P(p.temp, 90.0, 0.3, 0.0, p.dew, p.wind) else p }
+                WxFixture.seed(ctx)
+                safely("runwindow_v3_tight") { cardShot("runwindow_v3_card_tight") }
+                // two runs today, nothing runnable after 16:00: the indoor bike offer
+                WxFixture.tweak = { day, hour, p -> if (day == 0 && hour >= 12) WxFixture.P(p.temp, 95.0, 0.3, 3.0, p.dew, p.wind) else if (day == 0) WxFixture.P(p.temp, 90.0, 0.8, 0.0, p.dew, p.wind) else p }
+                WxFixture.seed(ctx)
+                val snap = Prefs.snapshot(ctx)!!
+                val dbl = Workout("Easy run (double)", "Run", 2100, 24, 6000.0, WorkoutStatus.PLANNED, Fixture.today.toString(), eventId = 555L, startLocal = "${Fixture.today}T17:00:00")
+                val main = Workout("60m Easy", "Run", 3600, 34, 10500.0, WorkoutStatus.PLANNED, Fixture.today.toString(), eventId = 554L, startLocal = "${Fixture.today}T07:00:00")
+                Prefs.saveSnapshot(ctx, snap.copy(week = snap.week.filter { it.date != Fixture.today.toString() || !it.type.contains("Run", ignoreCase = true) } + listOf(main, dbl)), 400)
+                safely("runwindow_v3_two_runs") { cardShot("runwindow_v3_card_two_runs") }
+            } finally { WxFixture.tweak = null; Fixture.seed(ctx); WxFixture.seed(ctx) }
+        }
         // Missed-session swaps: the "Fit in a missed session" page from a planned week (workout today marked as skipped, and an at-risk day)
         safely("swap_activity") {
             val t = Fixture.today

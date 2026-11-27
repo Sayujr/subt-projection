@@ -1,3 +1,4 @@
+- Run windows v3: shows your whole runnable window (not one slot), tight windows in amber, best stretch for workouts, a graphic sky chart you can scrub for each hour's details, a richer hour-by-hour list, two-run days (② after 16:00, or an indoor ride of equal load), and calmer notifications (only when the window changes or closes)
 - Tap Today's call for a new Fitness & fatigue page: are you on track this week and towards your A race, with a target band, and suggestions to add or trim load you can apply in intervals.icu (with Undo)
 - Run windows: the Today card stays on today until 20:00 unless today's run is done (a passed window shows the next best time today, not tomorrow)
 - Run windows: day chips on the day plan (jump between Today, Tomorrow and the week), a 7-day view link, evenings the Today card leads with tomorrow, cleaner Rainbow strip when it has no data

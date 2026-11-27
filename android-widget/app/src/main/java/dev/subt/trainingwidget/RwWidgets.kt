@@ -44,11 +44,15 @@ object RwWidgets {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    /** "☁ Best 07:00–08:30 ⚠ · Cool, cloudy · 9–12° · dry", or the split suggestion. */
+    /** "☁ Run any time 07:00–15:00 · Cool, cloudy · 9–12° · dry", "☁ Tight: 05:30–07:10 ⚠", or the split suggestion. */
     fun lineText(p: Weather.DayPlan): String {
         val w = p.window
         val sp = p.split
+        val now = System.currentTimeMillis() / 1000
+        val head = RwText.headline(p, zone, if (p.date == LocalDate.now()) now else null)
         return when {
+            p.windows.isNotEmpty() && head.none -> "☁ Windows passed (${RwText.windowsList(p.windows, zone)})"
+            p.windows.isNotEmpty() -> "☁ " + head.text + RwText.bestLine(p.best, p.run, p.hours, zone)?.let { " · " + it.removePrefix("Best for ").substringBefore(" · ").let { b -> "best $b" } }.orEmpty()
             sp != null -> "☁ " + Weather.splitLabel(sp, zone)
             w == null -> "☁ No window fits today"
             p.passed -> "☁ Best was ${Weather.range(w, zone)}"
@@ -98,7 +102,10 @@ object RwWidgets {
     private fun winText(p: Weather.DayPlan): String {
         val w = p.window
         val sp = p.split
+        val head = RwText.headline(p, zone, if (p.date == LocalDate.now()) System.currentTimeMillis() / 1000 else null)
         return when {
+            p.windows.isNotEmpty() && head.none -> "was " + RwText.windowsList(p.windows, zone)
+            p.windows.isNotEmpty() -> head.text.removePrefix("Run any time ")
             sp != null -> "Split " + Weather.hhmm(sp.first.start, zone) + " + " + Weather.hhmm(sp.second.start, zone)
             w == null -> "no window"
             p.passed -> "was " + Weather.range(w, zone)

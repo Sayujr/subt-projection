@@ -1365,13 +1365,76 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         c.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8); bottomMargin = dp(4) })
     }
 
-    /** "Best run window" under today's call: the window, its strip, tomorrow in one line; tap for the day plan. */
+    /** "RUN WINDOW · TODAY · 2 RUNS" with a ⓘ that explains the chart. */
+    private fun rwLabel(c: LinearLayout, p: Weather.DayPlan, day: String) {
+        val t = (if (p.windows.size > 1) "RUN WINDOWS" else "RUN WINDOW") + " · $day" + (if (p.second != null) " · 2 RUNS" else "")
+        val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(TextView(a).apply { text = t; setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f); setTextColor(DIM); letterSpacing = 0.08f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val body = TextView(a).apply {
+            text = "The sky shows the cloud (hanging from the top), rain streaks and the temperature line. Green is the time you can run, amber means tight. The pill under it has the times; under that, UV by hour" +
+                (if (p.run.type == Weather.RunType.SUBT || p.run.type == Weather.RunType.TT) ", dew point and wind. 'Best' is the stretch inside the window that suits this workout." else ".") + " Touch and drag across the chart to read each hour."
+            setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f); setLineSpacing(dpf(2f).toFloat(), 1f)
+            setPadding(0, dp(4), 0, 0); visibility = if ("rwinfo" in openInfo) View.VISIBLE else View.GONE
+        }
+        row.addView(TextView(a).apply {
+            text = "ⓘ"; setTextColor(FAINT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f); setPadding(dp(10), 0, 0, 0)
+            setOnClickListener {
+                val o = body.visibility != View.VISIBLE
+                body.visibility = if (o) View.VISIBLE else View.GONE
+                if (o) openInfo += "rwinfo" else openInfo -= "rwinfo"
+            }
+        })
+        c.addView(row)
+        c.addView(body)
+    }
+
+    /** The v3 window block for one day: headline, sub lines, best stretch, the chart, the bike swap, and the links. */
+    private fun windowBlock(c: LinearLayout, p: Weather.DayPlan, s: RwSettings, zone: java.time.ZoneId, today: Boolean) {
+        val nowSec = if (today) System.currentTimeMillis() / 1000 else null
+        val head = RwText.headline(p, zone, nowSec)
+        val passed = p.windows.isNotEmpty() && head.none
+        val headText = when {
+            passed -> "Window passed"
+            head.none && p.split != null -> Weather.splitLabel(p.split, zone)
+            else -> head.text
+        }
+        text(c, headText, 24f, if (head.tight) WARN else if (passed) DIM else TEXT, bold = true, top = 2).apply { letterSpacing = 0.01f }
+        if (p.second != null && p.windows.isNotEmpty()) RwUi.twoRunLines(a, c, p, zone)
+        else {
+            val sub = RwText.subLine(p, s, zone) + (if (head.tight) RwText.nextText(p, zone, nowSec)?.let { " · $it" }.orEmpty() else "")
+            text(c, (if (passed) "Was ${RwText.windowsList(p.windows, zone)} · " else "") + sub, 13.5f, DIM, top = 3)
+        }
+        RwText.bestLine(p.best, p.run, p.hours, zone)?.let { text(c, it, 13.5f, GOOD, top = 3) }
+        if (head.none && !passed && p.split == null) text(c, p.summary.pick, 13f, DIM, top = 2)
+        if (today) Watch.reason(a)?.let { text(c, "Watching closely: $it", 12.5f, GOOD, top = 2) }
+        val chart = RwUi.chart(a, p, s, today)
+        c.addView(chart, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        RunWindows.asOf(a)?.let { text(c, "Forecast $it", 12f, WARN, top = 4) }
+        if (p.bikeSwap != null) RwUi.bikeBox(a, c, p, onChange)
+        // links: the hour list always, options when the window is tight or at risk
+        val links = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+        links.addView(TextView(a).apply {
+            text = "Hour by hour ›"; setTextColor(0xFF4EA1FF.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setOnClickListener { RunWindowActivity.open(a, p.date, hours = true) }
+        })
+        val cand = runCatching { SwapFlow.forDate(a, p.date) }.getOrNull()
+        if (cand != null && (cand.trigger == Swaps.Trigger.TIGHT || cand.trigger == Swaps.Trigger.AT_RISK)) {
+            links.addView(TextView(a).apply { text = "  ·  "; setTextColor(FAINT); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f) })
+            links.addView(TextView(a).apply {
+                text = "Can't make it? Options ›"; setTextColor(0xFF4EA1FF.toInt()); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setOnClickListener { SwapActivity.open(a, p.date, cand.workout.eventId, cand.trigger, cand.why) }
+            })
+        }
+        c.addView(links)
+    }
+
+    /** "Run window · today" under today's call: whole windows, the sky chart (touch to scrub), links; tap the card for the day plan. */
     fun runWindowCard(col: LinearLayout) {
         val zone = java.time.ZoneId.systemDefault()
         val s = RwStore.load(a)
         val c = card(col)
-        label(c, "Best run window")
         if (s.lat == null || s.lon == null) {
+            label(c, "Run window")
             text(c, "Set your location in Settings → Run windows", 14.5f, DIM, top = 4)
             c.setOnClickListener { a.startActivity(android.content.Intent(a, SetupActivity::class.java).putExtra(SetupActivity.EXTRA_OPEN, "rw")) }
             return
@@ -1381,59 +1444,42 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         RunWindows.autoRefresh(a) { onChange() }
         val p = plans.getOrNull(0)
         if (p == null || p.noData) {
+            label(c, "Run window")
             text(c, "Forecast not loaded yet. Tap to fetch it.", 14.5f, DIM, top = 4)
             c.setOnClickListener { RunWindows.refreshAsync(a, manual = true) { onChange() } }
             return
         }
-        swapBanner(c)
         val t = plans.getOrNull(1)
         val lead = RunWindows.leadDay(java.time.LocalTime.now().hour, p.passed, p.run.done, p.window != null, p.split != null)
         if (lead == RunWindows.Lead.TOMORROW && t != null && !t.noData) {
             // Evening, today's run done, or nothing left today: tomorrow leads, today shrinks to one line
-            val tw = t.window
-            text(c, "Tomorrow  " + (if (tw == null) "no window" else Weather.range(tw, zone) + (if (tw.icons.isEmpty()) "" else "  " + tw.icons.joinToString(" "))), 26f, TEXT, bold = true, top = 2).apply { letterSpacing = 0.02f }
-            text(c, (if (t.run.planned) "${t.run.name} · " else "") + t.run.type.label + " · " + t.summary.short, 13.5f, DIM)
-            t.split?.let { text(c, Weather.splitLabel(it, zone), 14f, WARN, top = 2) }
-            val tb = RwViews.strip(a, t, s, chartW(), false, null)
-            image(c, tb, (tb.height / d).roundToInt())
+            rwLabel(c, t, "TOMORROW")
+            swapBanner(c)
+            windowBlock(c, t, s, zone, today = false)
             val pw = p.window
             val todayLine = when {
                 p.run.done -> "Today: ✓ run done"
                 p.passed -> "Today: window passed" + (if (pw != null) " (" + Weather.range(pw, zone) + ")" else "")
                 pw == null -> "Today: no window fits"
-                else -> "Today: " + Weather.range(pw, zone) + " · " + p.summary.short
+                else -> "Today: " + RwText.headline(p, zone).text
             }
             text(c, todayLine, 13f, if (p.run.done) GOOD else DIM, top = 8)
-            RunWindows.asOf(a)?.let { text(c, "Forecast $it", 12f, WARN, top = 4) }
-            c.addView(RwUi.outsideRow(a))
-            text(c, "Tap for tomorrow's plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 8)
             c.setOnClickListener { RunWindowActivity.open(a, today.plusDays(1)) }
             return
         }
         if (p.run.done) {
+            rwLabel(c, p, "TODAY")
             text(c, "✓ Today's run is done", 22f, GOOD, bold = true, top = 2)
-            c.addView(RwUi.outsideRow(a))
             text(c, "Tap for today's plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 8)
             c.setOnClickListener { RunWindowActivity.open(a, today) }
             return
         }
-        val w = p.window
-        val head = if (w == null) "No window fits" else Weather.range(w, zone) + (if (w.icons.isEmpty()) "" else "  " + w.icons.joinToString(" "))
-        text(c, head, 26f, TEXT, bold = true, top = 2).apply { letterSpacing = 0.02f }
-        text(c, (if (p.passed) "Passed · " else "") + (if (p.run.planned) "${p.run.name} · " else "") + p.run.type.label + " · " + p.summary.short, 13.5f, DIM)
-        p.split?.let { text(c, Weather.splitLabel(it, zone), 14f, WARN, top = 2) }
-        Watch.reason(a)?.let { text(c, "Watching closely: $it", 12.5f, GOOD, top = 2) }
-        val rb = p.rainbow
-        if (!p.same && rb != null) text(c, "Rainbow alone: ${Weather.range(rb, zone)}", 12.5f, 0xFF8FD3FF.toInt(), top = 2)
-        val bmp = RwViews.strip(a, p, s, chartW(), false, System.currentTimeMillis() / 1000)
-        image(c, bmp, (bmp.height / d).roundToInt())
-        RunWindows.asOf(a)?.let { text(c, "Forecast $it", 12f, WARN, top = 4) }
+        rwLabel(c, p, "TODAY")
+        swapBanner(c)
+        windowBlock(c, p, s, zone, today = true)
         if (t != null && !t.noData) {
-            val tw = t.window
-            text(c, "Tomorrow  " + (if (tw == null) "no window" else Weather.range(tw, zone) + (if (tw.icons.isEmpty()) "" else " " + tw.icons.joinToString(" "))) + " · " + t.summary.short, 13f, DIM, top = 8)
+            text(c, "Tomorrow  " + RwText.headline(t, zone).text, 13f, DIM, top = 8)
         }
-        c.addView(RwUi.outsideRow(a))
-        text(c, "Tap for the day plan  ›", 12f, 0xFF4EA1FF.toInt(), top = 8)
         c.setOnClickListener { RunWindowActivity.open(a, today) }
     }
 
@@ -1469,6 +1515,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             top.addView(TextView(a).apply {
                 text = when {
                     p.noData -> "no forecast"
+                    p.windows.isNotEmpty() -> RwText.headline(p, zone).text.removePrefix("Run any time ")
                     w == null -> "no window"
                     else -> Weather.range(w, zone) + (if (w.icons.isEmpty()) "" else "  " + w.icons.joinToString(" "))
                 }

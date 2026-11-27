@@ -87,7 +87,8 @@ object RunWindows {
         val today = LocalDate.now()
         val list = (0 until days).map { i ->
             val date = from.plusDays(i.toLong())
-            Weather.plan(date, d.all, d.rb, d.suns, Weather.runOf(week, date.toString()), s, if (useNow && date == today) nowSec else null, zone)
+            val run = Weather.runOf(week, date.toString())
+            Weather.plan(date, d.all, d.rb, d.suns, run, s, if (useNow && date == today) nowSec else null, zone, second = if (run.planned && !run.done) Weather.secondOf(week, date.toString()) else null)
         }
         return list
     }
@@ -118,14 +119,15 @@ object RunWindows {
         return plans(ctx, date, 1).firstOrNull()
     }
 
-    /** "Best run window 07:00–08:30 ⚠ · Cool, cloudy · 9–12° · dry" for the morning notification; null when no usable window today. */
+    /** "Today: 07:00–14:00 · best for SubT 08:00–10:00" (plus the ② line) for the morning notification; null when there is no usable window today. */
     fun todayLine(ctx: Context): String? {
         val p = plan(ctx, LocalDate.now()) ?: return null
-        val w = p.window ?: return null
-        if (p.noData || p.passed) return null
+        if (p.noData || p.passed || p.run.done) return null
         val zone = ZoneId.systemDefault()
         p.split?.let { return "Run window: " + Weather.splitLabel(it, zone) }
-        return "Best run window ${Weather.range(w, zone)}" + (if (w.icons.isNotEmpty()) " " + w.icons.joinToString("") else "") + " · " + p.summary.short
+        if (p.windows.isEmpty()) return null
+        val n = RwText.dayNote(p, RwStore.load(ctx), zone, today = true, nowSec = System.currentTimeMillis() / 1000)
+        return (listOf(n.title) + n.body.lines().filter { it.startsWith("②") }).joinToString("\n")
     }
 
     // ---------------------------------------------------------------- refreshing
@@ -136,7 +138,7 @@ object RunWindows {
         if (rep.anyOk) {
             runCatching { data(ctx)?.let { Scoring.recordForecasts(ctx, it) } }
             runCatching { Scoring.observeTile(ctx, data(ctx)) }
-            runCatching { checkShift(ctx, notify) }
+            runCatching { checkWindows(ctx, notify) }
             if (notify) runCatching { Notifier.swapPrompts(ctx) }
             runCatching { Watch.evaluate(ctx) }
             runCatching { RwWidgets.renderAll(ctx) }
@@ -144,31 +146,42 @@ object RunWindows {
         return rep
     }
 
-    /** Compares today's and tomorrow's whole-day best window with the one last seen. */
-    private fun checkShift(ctx: Context, notify: Boolean) {
+    /**
+     * Compares today's and tomorrow's windows with the ones last seen. Alerts only when the window itself changes (see
+     * [RwText.windowChange]), never while you are inside an open window, plus one "You missed today's window" when the
+     * last window has closed with the run not done, and the optional "45 min left".
+     */
+    private fun checkWindows(ctx: Context, notify: Boolean) {
         val zone = ZoneId.systemDefault()
         val nowSec = System.currentTimeMillis() / 1000
-        // Today only looks at windows still ahead: never "shift" to a time that has already gone.
-        // Until today's run is synced as done, a missed window rolls on to the next best one.
-        for (p in plans(ctx, LocalDate.now(), 2, useNow = true)) {
-            if (p.noData || p.passed || p.run.done) continue
-            val new = Weather.sigOf(p) ?: continue
-            if (new.start < nowSec) continue
-            val key = "rw_sig_${p.date}"
-            val old = Weather.Sig.decode(RwStore.getStr(ctx, key))
-            RwStore.putStr(ctx, key, new.encode())
-            if (!notify) continue
-            // The old window has started or passed and the run isn't done: point to the next best one straight away
-            if (old != null && old.start <= nowSec && old.start != new.start) {
-                if (!NotifySettings.isOn(ctx, NotifySettings.cat("rw_shift"))) continue
-                Notifier.windowShifted(ctx, (if (nowSec < old.end) "Your window started at ${Weather.hhmm(old.start, zone)}. Not out yet? " else "Missed your window (${Weather.hhmm(old.start, zone)}–${Weather.hhmm(old.end, zone)})? ") + "Next best today: ${Weather.hhmm(new.start, zone)}–${Weather.hhmm(new.end, zone)}" +
-                    (if (p.run.planned) " for ${p.run.name}" else ""), p.date, title = "Next best run window")
-                continue
-            }
+        val today = LocalDate.now()
+        val plans = plans(ctx, today, 2, useNow = true)
+        for (p in plans) {
+            if (p.noData) continue
+            val spans = RwText.spans(p.windows)
+            val key = "rw_wins_${p.date}"
+            val old = RwText.decode(RwStore.getStr(ctx, key))
+            RwStore.putStr(ctx, key, RwText.encode(spans))
+            if (!notify || old == null || p.run.done || !p.run.planned) continue
+            if (p.date == today && RwText.insideOpen(spans, nowSec)) continue
             if (!NotifySettings.isOn(ctx, NotifySettings.cat("rw_shift"))) continue
-            val watching = p.date == LocalDate.now() && Watch.isOn(ctx)
-            val msg = Weather.shiftMessage(old, new, zone, any = watching) ?: continue
-            Notifier.windowShifted(ctx, msg, p.date)
+            RwText.windowChange(old, spans, zone)?.let { Notifier.windowShifted(ctx, it.body, p.date, it.title) }
+        }
+        val p0 = plans.firstOrNull() ?: return
+        if (!notify || p0.noData || !p0.run.planned || p0.run.done) return
+        val spans = RwText.spans(p0.windows)
+        if (NotifySettings.isOn(ctx, NotifySettings.cat("rw_missed"))) {
+            val closed = RwText.justClosed(spans, nowSec, p0.run.planned, p0.run.done)
+            if (closed != null) {
+                val tomorrow = plans.getOrNull(1)?.takeIf { !it.noData }?.let { RwText.spans(it.windows) }.orEmpty()
+                val note = RwText.missedNote(closed, spans, tomorrow, nowSec, zone)
+                Notifier.windowMissed(ctx, note, today, "$today|${closed.second}")
+            }
+        }
+        if (NotifySettings.isOn(ctx, NotifySettings.cat("rw_left"))) {
+            RwText.leftIn(spans, nowSec)?.let { w ->
+                Notifier.windowLeft(ctx, "Run ${p0.run.name}: the window closes at ${Weather.hhmm(w.second, zone)}.", today, "$today|${w.second}")
+            }
         }
     }
 
@@ -206,7 +219,8 @@ object RunWindows {
         val hour = LocalTime.now().hour
         if (hour < 5 || hour >= 22) return false
         val p = plans(ctx, LocalDate.now(), 1, useNow = false).firstOrNull() ?: return false
-        val w = p.window ?: return false
-        return p.run.planned && !p.run.done && System.currentTimeMillis() / 1000 < w.start
+        val last = p.windows.maxOfOrNull { it.end } ?: p.window?.end ?: return false
+        // until the last window has closed (plus a check for the "missed" notice)
+        return p.run.planned && !p.run.done && System.currentTimeMillis() / 1000 < last + 90 * 60
     }
 }

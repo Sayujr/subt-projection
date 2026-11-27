@@ -564,7 +564,7 @@ object Weather {
 
     // ================================================================ the planned run
 
-    data class PlannedRun(val name: String, val minutes: Int, val type: RunType, val planned: Boolean, val done: Boolean = false)
+    data class PlannedRun(val name: String, val minutes: Int, val type: RunType, val planned: Boolean, val done: Boolean = false, val load: Double? = null)
 
     fun typeOf(w: Workout): RunType = when {
         w.status == WorkoutStatus.RACE || Streaks.isTtName(w.name) -> RunType.TT
@@ -577,19 +577,30 @@ object Weather {
     fun plannedWorkout(week: List<Workout>, date: String): Workout? =
         week.filter { it.date == date && it.type.contains("Run", ignoreCase = true) && it.status == WorkoutStatus.PLANNED }.maxByOrNull { it.seconds }
 
+    private fun minutesOf(w: Workout): Int = when {
+        w.seconds > 0 -> (w.seconds / 60.0).roundToInt().coerceAtLeast(10)
+        w.distanceM > 0 -> (w.distanceM / 1000.0 * 5.5).roundToInt().coerceAtLeast(10)
+        else -> 60
+    }
+
     /** The day's run from the intervals.icu week: its planned duration, else distance at 5:30/km, else 60 min. */
     fun runOf(week: List<Workout>, date: String): PlannedRun {
         val runs = week.filter { it.date == date && it.type.contains("Run", ignoreCase = true) }
         val w = runs.filter { it.status != WorkoutStatus.DONE }.maxByOrNull { it.seconds }
             ?: runs.maxByOrNull { it.seconds }
             ?: return PlannedRun("No run planned", 60, RunType.EASY, planned = false)
-        val minutes = when {
-            w.seconds > 0 -> (w.seconds / 60.0).roundToInt().coerceAtLeast(10)
-            w.distanceM > 0 -> (w.distanceM / 1000.0 * 5.5).roundToInt().coerceAtLeast(10)
-            else -> 60
-        }
         // Any run synced as done that day counts: the planned session is complete
-        return PlannedRun(w.name, minutes, typeOf(w), planned = true, done = runs.any { it.status == WorkoutStatus.DONE })
+        return PlannedRun(w.name, minutesOf(w), typeOf(w), planned = true, done = runs.any { it.status == WorkoutStatus.DONE }, load = w.load.toDouble().takeIf { it > 0 })
+    }
+
+    /** The day's second planned run (a double), when two runs are planned and the first isn't done; null otherwise. */
+    fun secondOf(week: List<Workout>, date: String): PlannedRun? {
+        val planned = week.filter { it.date == date && it.type.contains("Run", ignoreCase = true) && it.status == WorkoutStatus.PLANNED }
+            .sortedByDescending { it.seconds }
+        if (planned.size < 2) return null
+        if (week.any { it.date == date && it.type.contains("Run", ignoreCase = true) && it.status == WorkoutStatus.DONE }) return null
+        val w = planned[1]
+        return PlannedRun(w.name, minutesOf(w), typeOf(w), planned = true, load = w.load.toDouble().takeIf { it > 0 })
     }
 
     // ================================================================ scoring
@@ -741,7 +752,7 @@ object Weather {
         val icons = ArrayList<String>()
         val warn = ArrayList<String>()
         if (risky) { icons += "⛔"; warn += "⛔ Even the best window is risky: gym recommended." }
-        if (w.narrow) { icons += "⚠"; warn += "⚠ Narrow: the good stretch barely fits your run." }
+        if (w.narrow) { icons += "⚠"; warn += "⚠ Tight: the window is only a little longer than your run." }
         if (w.night) { icons += "🌙"; warn += "🌙 Night run: take lights." }
         if (w.frozen) { icons += "🧊"; warn += "🧊 Ice or snow around: take care, or use the gym." }
         if (w.wet) { icons += "💧"; warn += "💧 Rain in the window (up to ${fmt1(w.maxRain)} mm/h): gym or outside." }
@@ -759,6 +770,162 @@ object Weather {
         return ov / max(1L, min(a.end - a.start, b.end - b.start)).toDouble()
     }
 
+    // ================================================================ v3: whole windows
+
+    enum class Grade { GOOD, OK, NO }
+
+    /** Why an hour can't be run in at all for this run type (null when it can). */
+    fun notRunnableReason(h: Combined, type: RunType, s: RwSettings, month: Int): String? {
+        if (h.frozen || h.icy) return "ice or snow"
+        if ((h.aqi ?: 0.0) > 150.0) return "air quality ${(h.aqi ?: 0.0).roundToInt()}"
+        if (h.rainMm > 0.5) return "rain ${fmt1(h.rainMm)} mm/h"
+        val lim = if (type == RunType.LONG) s.uvLimit - 1.0 else s.uvLimit
+        if (h.uv > lim + 1e-9) return "UV ${fmt1(h.uv)} over your limit of ${fmt1(lim)}"
+        if (type == RunType.SUBT || type == RunType.TT) {
+            val eff = effTemp(h.temp, h.feels)
+            if (eff != null && eff >= hotLimit(s, month)) return "too hot (${eff.roundToInt()} °C)"
+        }
+        return null
+    }
+
+    /** Good, OK (a mild penalty: drizzle, poor air, cold, warm for a workout) or not runnable. Time of day is handled by the window builder. */
+    fun gradeHour(h: Combined, type: RunType, s: RwSettings, month: Int): Grade {
+        if (notRunnableReason(h, type, s, month) != null) return Grade.NO
+        val eff = effTemp(h.temp, h.feels) ?: 10.0
+        val warm = (type == RunType.SUBT || type == RunType.TT) && eff >= hotLimit(s, month) - 3.0
+        return if (h.rainMm > 0.25 || (h.aqi ?: 0.0) > 100.0 || eff < s.cold || warm) Grade.OK else Grade.GOOD
+    }
+
+    class WinSet(val windows: List<Window>, val why: Map<Long, String>, val night: Boolean)
+
+    private fun floorTo(t: Long, step: Long) = Math.floorDiv(t, step) * step
+
+    /**
+     * Every runnable stretch of the day: contiguous good / OK hours inside the allowed hours that are at least the run
+     * plus the buffer long, each at full length. A window shorter than the run + buffer + 60 min is tight (narrow = true).
+     * Winter (Nov–Mar): windows start from 07:00 unless the only runnable time is earlier. Night windows only when
+     * nothing fits in daylight.
+     */
+    fun windowsFor(hours: List<Combined>, date: LocalDate, run: PlannedRun, suns: List<Sun>, s: RwSettings, zone: ZoneId): WinSet {
+        val sun = sunFor(suns, date)
+        val month = date.monthValue
+        val byT = hours.associateBy { it.t }
+        val pens = hours.associate { it.t to penalty(it, run.type, s, month) }
+        val why = HashMap<Long, String>()
+        val runnable = HashSet<Long>()
+        for (h in hours) {
+            val r = notRunnableReason(h, run.type, s, month)
+            if (r != null) why[h.t] = r else runnable += h.t
+        }
+        val needSec = (run.minutes + s.bufferMin) * 60L
+        fun scan(lo: Long, hi: Long, night: Boolean): List<Window> {
+            val out = ArrayList<Window>()
+            var curS = -1L
+            var curE = -1L
+            fun close() {
+                if (curS >= 0) {
+                    val a = ceilTo(curS, 1800L)
+                    val b = floorTo(curE, 1800L)
+                    if (b - a >= needSec) build(a, b, byT, pens, night)?.let { out += it.copy(narrow = b - a < needSec + 3600L) }
+                }
+                curS = -1L; curE = -1L
+            }
+            var t = hourFloor(lo)
+            while (t < hi) {
+                val a = max(t, lo)
+                val b = min(t + 3600, hi)
+                if (t in runnable && b > a) { if (curS < 0) curS = a; curE = b } else close()
+                t += 3600
+            }
+            close()
+            return out
+        }
+        val (lo, hi) = allowedRange(date, sun, s, zone, needSec)
+        var wins = scan(lo, hi, false)
+        if (winter(date)) {
+            val trimmed = scan(max(lo, atMinutes(date, 7 * 60, zone)), hi, false)
+            if (trimmed.isNotEmpty()) wins = trimmed
+        }
+        var night = false
+        if (wins.isEmpty()) { wins = scan(atMinutes(date, 5 * 60, zone), nightEnd(date, zone), true); night = wins.isNotEmpty() }
+        if (wins.isEmpty()) { wins = scan(atMinutes(date, 5 * 60, zone), atMinutes(date, 23 * 60, zone), true); night = wins.isNotEmpty() }
+        return WinSet(wins, why, night)
+    }
+
+    /** SubT and TT/CPT only: the stretch inside a window (run length + 30 min, rounded up to 30) with the best dew point, temperature and wind. */
+    fun bestStretch(wins: List<Window>, run: PlannedRun, hours: List<Combined>, s: RwSettings, month: Int): Window? {
+        if (run.type != RunType.SUBT && run.type != RunType.TT) return null
+        val byT = hours.associateBy { it.t }
+        val pens = hours.associate { it.t to penalty(it, run.type, s, month) }
+        val len = ceilTo((run.minutes + 30) * 60L, 1800L)
+        var best: Window? = null
+        for (w in wins) {
+            if (w.narrow || w.end - w.start < len + 1800L) continue
+            var st = w.start
+            while (st + len <= w.end) {
+                val c = build(st, st + len, byT, pens, w.night)
+                val cur = best
+                if (c != null && (cur == null || c.score < cur.score - 1e-9)) best = c
+                st += 1800
+            }
+        }
+        return best
+    }
+
+    /** Run ② (a double) needs to start at 16:00 or later: the best part of a window after 16:00 that still has room for it. */
+    fun placeSecond(wins: List<Window>, second: PlannedRun, hours: List<Combined>, date: LocalDate, s: RwSettings, nowSec: Long?, zone: ZoneId): Window? {
+        val byT = hours.associateBy { it.t }
+        val pens = hours.associate { it.t to penalty(it, second.type, s, date.monthValue) }
+        val sixteen = atMinutes(date, 16 * 60, zone)
+        val need = (second.minutes + s.bufferMin) * 60L
+        var best: Window? = null
+        for (w in wins) {
+            var st = max(w.start, sixteen)
+            if (nowSec != null) st = max(st, ceilTo(nowSec, 1800L))
+            if (w.end - st < need) continue
+            val c = build(st, w.end, byT, pens, w.night)?.copy(narrow = w.end - st < need + 3600L) ?: continue
+            val cur = best
+            if (cur == null || c.score < cur.score - 1e-9) best = c
+        }
+        return best
+    }
+
+    /** Indoor ride standing in for a run that has no window: 55–65% FTP at about 0.53 load per minute. */
+    const val RIDE_LOAD_PER_MIN = 0.53
+    /** Load per minute of an easy run when the planned session has no load of its own (a 35 min double is about 24). */
+    const val RUN_LOAD_PER_MIN = 0.69
+
+    data class BikeSwap(val minutes: Int, val load: Int, val runMinutes: Int, val runName: String)
+
+    fun bikeSwapFor(second: PlannedRun): BikeSwap {
+        val load = second.load ?: (second.minutes * RUN_LOAD_PER_MIN)
+        val mins = (Math.round(load / RIDE_LOAD_PER_MIN / 5.0) * 5).toInt().coerceAtLeast(20)
+        return BikeSwap(mins, load.roundToInt(), second.minutes, second.name)
+    }
+
+    /**
+     * "Day feels 2–6 °C · you're in the warmest 35%": the feels-like range over the allowed (daylight) hours, and where the
+     * window's mean feels-like sits among them. 🧤 once, when it gets below your cold setting.
+     */
+    fun tempLine(dh: List<Combined>, win: Window?, lo: Long, hi: Long, s: RwSettings): String? {
+        val day = dh.filter { it.t + 3600 > lo && it.t < hi }
+        val feels = day.mapNotNull { it.feels ?: it.temp }
+        if (feels.isEmpty()) return null
+        val mn = feels.min().roundToInt()
+        val mx = feels.max().roundToInt()
+        var out = "Day feels " + (if (mn == mx) "$mn" else "$mn–$mx") + " °C" + (if (feels.min() < s.cold) " 🧤" else "")
+        if (win != null && feels.max() - feels.min() >= 1.0) {
+            val inWin = day.filter { it.t < win.end && it.t + 3600 > win.start }.mapNotNull { it.feels ?: it.temp }
+            if (inWin.isNotEmpty()) {
+                val mean = inWin.average()
+                val warmer = (100.0 * feels.count { it >= mean - 1e-9 } / feels.size).roundToInt().coerceIn(1, 100)
+                val colder = (100.0 * feels.count { it <= mean + 1e-9 } / feels.size).roundToInt().coerceIn(1, 100)
+                out += if (warmer <= 50) " · you're in the warmest $warmer%" else " · you're in the coolest $colder%"
+            }
+        }
+        return out
+    }
+
     // ================================================================ the day plan and its summary
 
     data class Summary(
@@ -771,13 +938,16 @@ object Weather {
         val warnings: List<String>,
         /** One line for cards and the Week list. */
         val short: String,
+        /** "Day feels 2–6 °C · you're in the warmest 35%". */
+        val temp: String? = null,
     ) {
-        fun lines(): List<String> = listOfNotNull(shape, pick, rainbow, agree, listOfNotNull(suggestion, swap).joinToString(" "), warnings.takeIf { it.isNotEmpty() }?.joinToString("\n")).filter { it.isNotBlank() }
+        fun lines(): List<String> = listOfNotNull(shape, temp, pick, rainbow, agree, listOfNotNull(suggestion, swap).joinToString(" "), warnings.takeIf { it.isNotEmpty() }?.joinToString("\n")).filter { it.isNotBlank() }
     }
 
-    class DayPlan(
+    data class DayPlan(
         val date: LocalDate,
         val run: PlannedRun,
+        /** The first window still ahead today (or the longest one); with no window, the old least-bad pick. */
         val window: Window?,
         /** Rainbow's own pick (null when Rainbow isn't connected). */
         val rainbow: Window?,
@@ -785,7 +955,7 @@ object Weather {
         /** Both picks are the same, or overlap by 80 % or more. */
         val same: Boolean,
         val risky: Boolean,
-        /** Today's best window has already started or passed (shown for reference). */
+        /** Every window of today has passed (shown for reference). */
         val passed: Boolean,
         val hours: List<Combined>,
         val rbHours: List<Combined>,
@@ -796,13 +966,26 @@ object Weather {
         val noData: Boolean,
         /** Two shorter good windows, when no single window is acceptable (null otherwise). */
         val split: Split? = null,
+        /** Every runnable window of the day (≥ run + buffer), in time order; empty when none fits. */
+        val windows: List<Window> = emptyList(),
+        /** SubT / TT only: the best stretch inside a window. */
+        val best: Window? = null,
+        /** A second planned run (double), its placement after 16:00, and the indoor ride suggested when it has none. */
+        val second: PlannedRun? = null,
+        val secondWindow: Window? = null,
+        val bikeSwap: BikeSwap? = null,
+        /** Hour start → why that hour is not runnable (rain, UV, ice, heat…). */
+        val why: Map<Long, String> = emptyMap(),
+        /** The allowed running hours for the day. */
+        val allowedLo: Long = 0L,
+        val allowedHi: Long = 0L,
     ) {
-        fun withSwap(text: String?) = DayPlan(date, run, window, rainbow, rainbowPresent, same, risky, passed, hours, rbHours, sun, lo, hi, summary.copy(swap = text), noData, split)
+        fun withSwap(text: String?) = copy(summary = summary.copy(swap = text))
     }
 
     fun plan(
         date: LocalDate, all: List<Combined>, rb: List<Combined>, suns: List<Sun>, run: PlannedRun,
-        s: RwSettings, nowSec: Long?, zone: ZoneId,
+        s: RwSettings, nowSec: Long?, zone: ZoneId, second: PlannedRun? = null,
     ): DayPlan {
         val dh = all.filter { dayOf(it.t, zone) == date }
         val rh = rb.filter { dayOf(it.t, zone) == date }
@@ -819,20 +1002,48 @@ object Weather {
             passed = pk.best != null
         }
         val rpk = if (rh.isEmpty()) null else pick(rh, date, run, suns, s, if (passed) null else nowSec, zone)
-        val best = pk.best
+        val oldBest = pk.best
         val rbBest = rpk?.best
-        val same = best != null && rbBest != null && overlap(best, rbBest) >= 0.8
-        var sm = summarize(date, dh, rh, run, best, rbBest, same, rh.isNotEmpty(), pk.risky, passed, sun, s, zone)
-        val split = if (passed) null else findSplit(dh, date, run, suns, s, nowSec, zone)
-        val (lo, hi) = stripRange(
-            date, sun, s, zone, (run.minutes + s.bufferMin) * 60L,
-            listOfNotNull(best, rbBest, split?.first, split?.second), nowSec,
-        )
+        val same = oldBest != null && rbBest != null && overlap(oldBest, rbBest) >= 0.8
+
+        // v3: the whole windows
+        val needSec = (run.minutes + s.bufferMin) * 60L
+        val ws = windowsFor(dh, date, run, suns, s, zone)
+        val wins = ws.windows.map { decorate(it, run, s, false) }
+        var window = oldBest
+        var risky = pk.risky
+        var bestW: Window? = null
+        var secondW: Window? = null
+        var bike: BikeSwap? = null
+        if (wins.isNotEmpty()) {
+            val usable = wins.filter { nowSec == null || it.end - nowSec >= run.minutes * 60L }
+            window = usable.firstOrNull() ?: wins.maxByOrNull { it.end - it.start }
+            passed = nowSec != null && usable.isEmpty()
+            risky = false
+            bestW = bestStretch(wins, run, dh, s, date.monthValue)
+        }
+        if (second != null && run.planned && !run.done && second.planned && !second.done) {
+            secondW = placeSecond(wins, second, dh, date, s, nowSec, zone)
+            if (secondW == null) bike = bikeSwapFor(second)
+        }
+        val (aLo, aHi) = allowedRange(date, sun, s, zone, needSec)
+        val split = if (passed || wins.isNotEmpty()) null else findSplit(dh, date, run, suns, s, nowSec, zone)
+        val shown = ArrayList<Window>()
+        shown += wins
+        if (wins.isEmpty()) window?.let { shown += it }
+        rbBest?.let { shown += it }
+        split?.let { shown += it.first; shown += it.second }
+        secondW?.let { shown += it }
+        val (lo, hi) = stripRange(date, sun, s, zone, needSec, shown, nowSec)
+        var sm = summarize(date, dh, rh, run, window, rbBest, same, rh.isNotEmpty(), risky, passed, sun, s, zone, wins, bestW, second, secondW, bike, aLo, aHi)
         if (split != null) {
             val label = splitLabel(split, zone)
             sm = sm.copy(suggestion = "$label: no single ${run.minutes + s.bufferMin}-minute window is good, but two shorter ones are.", short = label)
         }
-        return DayPlan(date, run, best, rbBest, rh.isNotEmpty(), same, pk.risky, passed, dh, rh, sun, lo, hi, sm, noData = false, split = split)
+        return DayPlan(
+            date, run, window, rbBest, rh.isNotEmpty(), same, risky, passed, dh, rh, sun, lo, hi, sm, noData = false, split = split,
+            windows = wins, best = bestW, second = second, secondWindow = secondW, bikeSwap = bike, why = ws.why, allowedLo = aLo, allowedHi = aHi,
+        )
     }
 
     private fun tempWord(v: Double, s: RwSettings, month: Int): String = when {
@@ -864,6 +1075,7 @@ object Weather {
     private fun summarize(
         date: LocalDate, dh: List<Combined>, rh: List<Combined>, run: PlannedRun, best: Window?, rbBest: Window?,
         same: Boolean, rbPresent: Boolean, risky: Boolean, passed: Boolean, sun: Sun?, s: RwSettings, zone: ZoneId,
+        wins: List<Window>, bestW: Window?, second: PlannedRun?, secondW: Window?, bike: BikeSwap?, aLo: Long, aHi: Long,
     ): Summary {
         val month = date.monthValue
         // The day's shape
@@ -887,34 +1099,15 @@ object Weather {
             if (peak != null && peak.uv >= 3.0) append(", UV up to ${peak.uv.roundToInt()} around ${hhmm(peak.t, zone)}")
             append(".")
         }
+        val temp = tempLine(dh, best, aLo, aHi, s)
         // The pick
         val pick = when {
+            wins.isNotEmpty() -> RwText.pickLine(wins, bestW, run, dh, passed, zone)
             best == null -> "No ${run.minutes + s.bufferMin}-minute window fits your running hours."
-            else -> {
-                val reason = when (run.type) {
-                    RunType.TT -> "the coolest stretch that stays above ${s.cold.roundToInt()} °C (${(best.minTemp ?: 0.0).roundToInt()}–${(best.maxTemp ?: 0.0).roundToInt()} °C)"
-                    RunType.SUBT -> "the coolest, driest air (${(best.minTemp ?: 0.0).roundToInt()}–${(best.maxTemp ?: 0.0).roundToInt()} °C, dew point up to ${(best.maxDew ?: 0.0).roundToInt()})"
-                    RunType.LONG -> "UV stays at ${fmt1(best.maxUv)} and it feels no colder than ${(best.minFeels ?: 0.0).roundToInt()} °C"
-                    RunType.EASY -> "the lowest UV and the most cloud cover (UV up to ${fmt1(best.maxUv)})"
-                }
-                val lead = if (passed) "Today's best window has passed (it was ${range(best, zone)})" else "Best for your ${run.type.label} (${run.minutes} min + ${s.bufferMin} min buffer): ${range(best, zone)}"
-                lead + (if (best.icons.isNotEmpty()) " " + best.icons.joinToString(" ") else "") + ". Why: $reason."
-            }
+            else -> "No clean window: the least-bad time is ${range(best, zone)}" + (if (best.icons.isNotEmpty()) " " + best.icons.joinToString(" ") else "") + "."
         }
-        // Rainbow's own pick, when it differs
-        var rainbow: String? = null
-        if (rbPresent && !same && rbBest != null && best != null) {
-            val over = rh.filter { it.t < best.end && it.t + 3600 > best.start }
-            val rbRain = over.maxOfOrNull { it.rainMm } ?: 0.0
-            val rbCloud = over.mapNotNull { it.cloud }.takeIf { it.isNotEmpty() }?.average()
-            val why = when {
-                rbRain > 0.5 -> "Rainbow expects rain around ${range(best, zone)}"
-                rbCloud != null && best.avgCloud != null && abs(rbCloud - (best.avgCloud ?: 0.0)) >= 25 ->
-                    "Rainbow sees ${range(best, zone)} as ${if (rbCloud > (best.avgCloud ?: 0.0)) "cloudier" else "clearer"} than the other sources"
-                else -> "Rainbow only looks at its own forecast, so it weighs temperature and rain a little differently"
-            }
-            rainbow = "Rainbow alone would pick ${range(rbBest, zone)}. $why."
-        }
+        // Rainbow's own pick, when it differs: one line
+        val rainbow = if (rbPresent && !same && rbBest != null && best != null) "Rainbow prefers ${hhmm(rbBest.start, zone)}." else null
         // Agreement
         val agree = when {
             !rbPresent -> "Rainbow isn't connected: add your key in Settings → Run windows."
@@ -928,17 +1121,19 @@ object Weather {
             risky -> "Gym recommended: ice, snow or poor air make every window risky."
             best == null -> "Nothing fits: use the gym or shorten the run."
             passed -> "Today's window has passed."
-            best.wet -> "Gym or outside: rain is likely in the best window. If you go out, start at ${hhmm(best.start, zone)}."
-            best.narrow -> "Go at ${hhmm(best.start, zone)} sharp: the good stretch is short."
-            else -> "Go at ${hhmm(best.start, zone)}."
+            wins.isEmpty() && best.wet -> "Gym or outside: rain is likely in the best window. If you go out, start at ${hhmm(best.start, zone)}."
+            wins.isEmpty() -> "Go at ${hhmm(best.start, zone)}: it's the least-bad time."
+            best.narrow -> "Go at ${hhmm(best.start, zone)} sharp: the window is short."
+            else -> "Run any time ${range(best, zone)}."
         }
+        val extra = if (second != null && bike != null) listOf("② ${second.minutes}′ double: no run window after 16:00. Indoor ride instead? ${bike.minutes}′ easy ride ≈ same load.") else emptyList()
         // One line for cards
         val short = if (best == null) "No window" else {
             val mid = ((best.minTemp ?: 10.0) + (best.maxTemp ?: 10.0)) / 2
             tempWord(mid, s, month) + ", " + skyWord(best.avgCloud) +
                 " · ${(best.minTemp ?: 0.0).roundToInt()}–${(best.maxTemp ?: 0.0).roundToInt()}°" + if (best.wet) " · rain" else " · dry"
         }
-        return Summary(shape, pick, rainbow, agree, suggestion, null, best?.warnings.orEmpty(), short)
+        return Summary(shape, pick, rainbow, agree, suggestion, null, best?.warnings.orEmpty() + extra, short, temp)
     }
 
     /** Text-only "swap with day Y": when a day's window is poor and another day in the list is clearly better. */

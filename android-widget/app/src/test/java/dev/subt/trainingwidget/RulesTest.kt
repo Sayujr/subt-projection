@@ -1337,7 +1337,7 @@ class RulesTest {
         assertTrue(p.window!!.end <= rwT(d, 10, 30))
         assertTrue(p.rainbow!!.start >= rwT(d, 10))
         assertNotNull(p.summary.rainbow)
-        assertTrue(p.summary.rainbow!!.contains("Rainbow alone would pick"))
+        assertTrue(p.summary.rainbow!!.startsWith("Rainbow prefers "))
 
         val same = rwPlan(d, all, all)
         assertTrue(same.same)
@@ -1365,8 +1365,9 @@ class RulesTest {
         val p = rwPlan(d, hours)
         val lines = p.summary.lines()
         assertTrue(lines[0], lines[0].contains("°C") && lines[0].contains("rain 16:00–19:00") && lines[0].contains("UV up to 4"))
-        assertTrue(lines.any { it.startsWith("Best for your Easy run") })
-        assertTrue(p.summary.suggestion.startsWith("Go at") || p.summary.suggestion.startsWith("Gym"))
+        assertTrue(lines.any { it.startsWith("Windows: ") || it.startsWith("You can run") })
+        assertTrue(p.summary.suggestion.startsWith("Run any time") || p.summary.suggestion.startsWith("Go at") || p.summary.suggestion.startsWith("Gym"))
+        assertNotNull("the temperature line is there", p.summary.temp)
         assertTrue(p.summary.short.isNotBlank())
         assertFalse(rwPlan(d, emptyList()).let { !it.noData })
     }
@@ -1380,6 +1381,253 @@ class RulesTest {
         assertEquals(setOf(d), hints.keys)
         assertTrue(hints.getValue(d).contains("swap with Tuesday"))
         assertTrue(bad.withSwap(hints[d]).summary.lines().any { it.contains("swap with Tuesday") })
+    }
+
+    // ---- v3: whole windows
+
+    private fun rwWinSun(d: LocalDate) = Weather.Sun(d, rwT(d, 6, 59), rwT(d, 16, 37))
+    private fun rwWinPlan(d: LocalDate, hours: List<Weather.Combined>, run: Weather.PlannedRun, sun: Weather.Sun = rwSun(d), second: Weather.PlannedRun? = null) =
+        Weather.plan(d, hours, emptyList(), listOf(sun), run, rwS, null, UTC, second)
+
+    @Test fun rwHourGrading() {
+        val d = RW_DATE
+        fun why(h: Weather.Combined, t: Weather.RunType) = Weather.notRunnableReason(h, t, rwS, d.monthValue)
+        assertNull(why(rwHour(d, 12, uv = 1.5), Weather.RunType.EASY))
+        assertNotNull("long runs use limit - 1", why(rwHour(d, 12, uv = 1.5), Weather.RunType.LONG))
+        assertNotNull("UV over the limit", why(rwHour(d, 12, uv = 2.5), Weather.RunType.EASY))
+        assertNotNull("rain over 0.5 mm/h", why(rwHour(d, 12, rain = 0.8), Weather.RunType.EASY))
+        assertNull("light rain is fine", why(rwHour(d, 12, rain = 0.4), Weather.RunType.EASY))
+        assertEquals(Weather.Grade.OK, Weather.gradeHour(rwHour(d, 12, rain = 0.4), Weather.RunType.EASY, rwS, d.monthValue))
+        assertEquals(Weather.Grade.GOOD, Weather.gradeHour(rwHour(d, 12), Weather.RunType.EASY, rwS, d.monthValue))
+        assertNotNull("ice", why(rwHour(d, 12, frozen = true), Weather.RunType.EASY))
+        assertNotNull("bad air", why(rwHour(d, 12, aqi = 160.0), Weather.RunType.EASY))
+        assertNotNull("too hot for SubT", why(rwHour(d, 12, temp = 22.0), Weather.RunType.SUBT))
+        assertNotNull("too hot for TT", why(rwHour(d, 12, temp = 22.0), Weather.RunType.TT))
+        assertNull("heat is welcome on an easy run", why(rwHour(d, 12, temp = 22.0), Weather.RunType.EASY))
+    }
+
+    @Test fun rwBigWinterDayIsOneWindow() {
+        val d = RW_WINTER
+        val hours = rwDay { h -> if (h < 15) rwHour(d, h, temp = 8.0, cloud = 90.0, uv = 0.3) else rwHour(d, h, temp = 8.0, rain = 2.0, pct = 90.0) }
+        val p = rwWinPlan(d, hours, rwRun(Weather.RunType.EASY, 60), rwWinSun(d))
+        assertEquals(1, p.windows.size)
+        assertEquals(rwT(d, 7), p.windows[0].start); assertEquals(rwT(d, 15), p.windows[0].end)
+        assertFalse("8 h is not tight", p.windows[0].narrow)
+        assertEquals(p.windows[0], p.window)
+        assertNull("easy runs have no best part", p.best)
+        assertEquals("Run any time 07:00–15:00", RwText.headline(p, UTC).text)
+        assertFalse(RwText.headline(p, UTC).tight)
+        assertNotNull(p.summary.temp)
+        assertTrue("the old single-window summary line is gone", p.summary.lines().none { it.contains("Why:") })
+    }
+
+    @Test fun rwSummerTwoTightWindows() {
+        val d = RW_DATE
+        val hours = rwDay { h -> rwHour(d, h, temp = 15.0, uv = if (h in 7..17) 5.0 else 0.5) }
+        val p = rwWinPlan(d, hours, rwRun(Weather.RunType.SUBT, 90))
+        assertEquals(2, p.windows.size)
+        assertEquals(rwT(d, 5), p.windows[0].start); assertEquals(rwT(d, 7), p.windows[0].end)
+        assertEquals(rwT(d, 18), p.windows[1].start); assertEquals(rwT(d, 20, 30), p.windows[1].end)
+        assertTrue(p.windows.all { it.narrow })
+        val head = RwText.headline(p, UTC)
+        assertTrue(head.tight); assertEquals("Tight: 05:00–07:00 ⚠", head.text)
+        assertEquals("next 18:00–20:30", RwText.nextText(p, UTC))
+        assertNull("too tight for a best stretch", p.best)
+        assertNotNull(p.why[rwT(d, 9)])
+    }
+
+    @Test fun rwRainCutsTheWindow() {
+        val d = RW_DATE
+        val hours = rwDay { h -> if (h < 12) rwHour(d, h) else rwHour(d, h, rain = 2.0, pct = 90.0) }
+        val w = rwWinPlan(d, hours, rwRun(Weather.RunType.EASY, 60)).windows.single()
+        assertEquals(rwT(d, 5), w.start); assertEquals(rwT(d, 12), w.end)
+        // a run longer than the dry stretch leaves no window at all (and the old least-bad pick stays)
+        val none = rwWinPlan(d, hours.map { if (it.t < rwT(d, 7)) it.copy(rainMm = 2.0) else if (it.t >= rwT(d, 8)) it.copy(rainMm = 2.0) else it }, rwRun(Weather.RunType.EASY, 90))
+        assertTrue(none.windows.isEmpty()); assertNotNull(none.window)
+        assertTrue(RwText.headline(none, UTC).none)
+    }
+
+    @Test fun rwBestStretchOnlyForWorkouts() {
+        val d = RW_WINTER
+        val hours = rwDay { h -> rwHour(d, h, temp = 9.0, cloud = 95.0, uv = 0.3, dew = if (h in 8..10) 3.0 else 9.0) }
+        val subt = rwWinPlan(d, hours, rwRun(Weather.RunType.SUBT, 60), rwWinSun(d))
+        val b = subt.best!!
+        assertTrue("best sits in the low dew-point hours: ${Weather.range(b, UTC)}", b.start >= rwT(d, 8) && b.end <= rwT(d, 11))
+        assertTrue(b.start >= subt.windows[0].start && b.end <= subt.windows[0].end)
+        assertTrue(RwText.bestLine(b, subt.run, subt.hours, UTC)!!.startsWith("Best for SubT 08:00–09:30 · dew 3°"))
+        assertNull(rwWinPlan(d, hours, rwRun(Weather.RunType.EASY, 60), rwWinSun(d)).best)
+        assertNull(rwWinPlan(d, hours, rwRun(Weather.RunType.LONG, 90), rwWinSun(d)).best)
+        assertNotNull("TT gets one too", rwWinPlan(d, hours, rwRun(Weather.RunType.TT, 40), rwWinSun(d)).best)
+    }
+
+    @Test fun rwWinterWindowsStartAtSevenUnlessOnlyEarlierWorks() {
+        val d = RW_WINTER
+        val run = rwRun(Weather.RunType.EASY, 60)
+        val allDry = rwDay { rwHour(d, it) }
+        assertEquals("06:00 is dry but 07:00 on is fine too", rwT(d, 7), rwWinPlan(d, allDry, run).windows.first().start)
+        val earlyOnly = rwDay { h -> if (h in 5..7) rwHour(d, h) else rwHour(d, h, rain = 2.0, pct = 90.0) }
+        val w = rwWinPlan(d, earlyOnly, run).windows.single()
+        assertEquals("only early is dry: start early", rwT(d, 5, 30), w.start)
+        assertEquals(rwT(d, 8), w.end)
+        // summer is not trimmed
+        assertEquals(rwT(RW_DATE, 5), rwWinPlan(RW_DATE, rwDay { rwHour(RW_DATE, it) }, run).windows.first().start)
+    }
+
+    @Test fun rwTwoRunsPlacement() {
+        val d = RW_DATE
+        val main = rwRun(Weather.RunType.EASY, 60)
+        val dbl = Weather.PlannedRun("double", 35, Weather.RunType.EASY, planned = true, load = 24.0)
+        // one big window reaching past 16:00: ② goes in it
+        val dry = rwWinPlan(d, rwDay { rwHour(d, it) }, main, second = dbl)
+        assertEquals(rwT(d, 16), dry.secondWindow!!.start); assertNull(dry.bikeSwap)
+        val lines = RwText.twoRunLines(dry, UTC)!!
+        assertTrue(lines.first.startsWith("① run")); assertTrue(lines.hi.startsWith("after 16:00 → 16:00–20:30")); assertFalse(lines.bad)
+        // a separate late window
+        val split = rwWinPlan(d, rwDay { h -> if (h in 12..16) rwHour(d, h, rain = 2.0, pct = 90.0) else rwHour(d, h) }, main, second = dbl)
+        assertEquals(2, split.windows.size)
+        assertEquals(rwT(d, 17), split.secondWindow!!.start)
+        assertNull(split.bikeSwap)
+        // nothing after 16:00: the indoor ride, load-equivalent
+        val none = rwWinPlan(d, rwDay { h -> if (h >= 12) rwHour(d, h, rain = 3.0, pct = 90.0) else rwHour(d, h) }, main, second = dbl)
+        assertNull(none.secondWindow)
+        val bike = none.bikeSwap!!
+        assertEquals(45, bike.minutes); assertEquals(24, bike.load); assertEquals(35, bike.runMinutes)
+        assertTrue(RwText.bikeLine(bike).startsWith("45′ easy ride · 55–65% FTP · ≈ same load")); assertTrue(RwText.bikeLine(bike).contains("(≈ 24)"))
+        assertEquals("- 45m 55-65%", RwText.bikeDescription(bike).lines().first())
+        assertTrue(RwText.twoRunLines(none, UTC)!!.bad)
+        // without a stored load, an easy run's load per minute is used
+        assertEquals(45, Weather.bikeSwapFor(Weather.PlannedRun("double", 35, Weather.RunType.EASY, planned = true)).minutes)
+        assertEquals(20, Weather.bikeSwapFor(Weather.PlannedRun("strides", 10, Weather.RunType.EASY, planned = true, load = 3.0)).minutes)
+        // no second run: nothing extra
+        assertNull(rwWinPlan(d, rwDay { rwHour(d, it) }, main).secondWindow)
+    }
+
+    @Test fun rwSecondRunFromTheWeek() {
+        val ds = RW_DATE.toString()
+        fun wk(name: String, sec: Int, st: WorkoutStatus = WorkoutStatus.PLANNED, load: Int = 30) = Workout(name, "Run", sec, load, 0.0, st, ds)
+        val week = listOf(wk("60m Easy", 3600), wk("35' double", 2100, load = 24))
+        assertEquals("60m Easy", Weather.runOf(week, ds).name)
+        val second = Weather.secondOf(week, ds)!!
+        assertEquals(35, second.minutes); assertEquals(24.0, second.load!!, 1e-9)
+        assertNull("one run: no second", Weather.secondOf(listOf(wk("60m Easy", 3600)), ds))
+        assertNull("the first is done: no second", Weather.secondOf(listOf(wk("60m Easy", 3600, WorkoutStatus.DONE), wk("35' double", 2100)), ds))
+    }
+
+    @Test fun rwTemperatureLinePercentile() {
+        val d = RW_WINTER
+        val feels = mapOf(7 to 2.0, 8 to 3.0, 9 to 4.0, 10 to 5.0, 11 to 6.0, 12 to 5.0, 13 to 4.0, 14 to 3.0)
+        val hours = rwDay { h -> rwHour(d, h, temp = 8.0, feels = feels[h] ?: 5.0) }
+        val base = rwPick(d, hours, rwRun(Weather.RunType.EASY)).best!!
+        val warm = Weather.tempLine(hours, base.copy(start = rwT(d, 10), end = rwT(d, 12)), rwT(d, 7), rwT(d, 15), rwS)
+        assertEquals("Day feels 2–6 °C 🧤 · you're in the warmest 13%", warm)
+        val cool = Weather.tempLine(hours, base.copy(start = rwT(d, 7), end = rwT(d, 9)), rwT(d, 7), rwT(d, 15), rwS)!!
+        assertTrue(cool, cool.endsWith("you're in the coolest 13%"))
+        assertEquals(1, Regex("🧤").findAll(warm!!).count())
+        val mild = Weather.tempLine(rwDay { rwHour(d, it, temp = 10.0, feels = 10.0) }, base, rwT(d, 7), rwT(d, 15), rwS)!!
+        assertFalse("no glove when it isn't cold", mild.contains("🧤"))
+        assertTrue(mild.startsWith("Day feels 10 °C"))
+    }
+
+    @Test fun rwWindowChangeRules() {
+        val d = RW_DATE
+        fun w(a: Int, b: Int, am: Int = 0, bm: Int = 0) = rwT(d, a, am) to rwT(d, b, bm)
+        val base = listOf(w(7, 15))
+        assertNull("unchanged", RwText.windowChange(base, base, UTC))
+        assertNull("20 minutes is not a change", RwText.windowChange(base, listOf(w(7, 14, 0, 40)), UTC))
+        val shrink = RwText.windowChange(base, listOf(w(7, 12)), UTC)!!
+        assertEquals("Window changed: now 07:00–12:00", shrink.title)
+        assertTrue(shrink.body, shrink.body.contains("ends earlier") && shrink.body.contains("was 07:00–15:00"))
+        assertNotNull("grows by 30 minutes", RwText.windowChange(base, listOf(rwT(d, 6, 30) to rwT(d, 15)), UTC))
+        assertTrue("grows at the end", RwText.windowChange(base, listOf(w(7, 16)), UTC)!!.body.contains("lasts longer"))
+        assertTrue("split in two", RwText.windowChange(base, listOf(w(7, 11), w(13, 15)), UTC)!!.body.contains("split"))
+        val closed = RwText.windowChange(base, emptyList(), UTC)!!
+        assertEquals("Run window closed", closed.title)
+        assertEquals("New run window: 17:00–18:30", RwText.windowChange(emptyList(), listOf(w(17, 18, 0, 30)), UTC)!!.title)
+        assertNull(RwText.windowChange(emptyList(), emptyList(), UTC))
+        assertEquals(base, RwText.decode(RwText.encode(base)))
+        assertEquals(emptyList<Pair<Long, Long>>(), RwText.decode(RwText.encode(emptyList())))
+        assertNull(RwText.decode(null))
+    }
+
+    @Test fun rwNoAlertsInsideAWindowThenOneMissedNotice() {
+        val d = RW_DATE
+        val wins = listOf(rwT(d, 7) to rwT(d, 15), rwT(d, 17, 30) to rwT(d, 18, 30))
+        assertTrue("inside the morning window", RwText.insideOpen(wins, rwT(d, 9)))
+        assertFalse("between windows", RwText.insideOpen(wins, rwT(d, 16)))
+        assertNull("nothing while inside an open window", RwText.justClosed(wins, rwT(d, 10), planned = true, done = false))
+        assertNull("window still open at 14:59", RwText.justClosed(wins, rwT(d, 14, 59), true, false))
+        val closed = RwText.justClosed(wins, rwT(d, 15, 5), true, false)
+        assertEquals(wins[0], closed)
+        assertNull("run done: no notice", RwText.justClosed(wins, rwT(d, 15, 5), true, true))
+        assertNull("not a run day", RwText.justClosed(wins, rwT(d, 15, 5), false, false))
+        assertEquals("still within the 3 h after the evening window", wins[1], RwText.justClosed(wins, rwT(d, 19), true, false))
+        assertNull("too long ago", RwText.justClosed(wins, rwT(d, 22), true, false))
+        val note = RwText.missedNote(closed!!, wins, listOf(rwT(d.plusDays(1), 7) to rwT(d.plusDays(1), 14)), rwT(d, 15, 5), UTC)
+        assertEquals("You missed today's window (07:00–15:00)", note.title)
+        assertEquals("Next option: 17:30–18:30 · or tomorrow 07:00–14:00", note.body)
+        val late = RwText.missedNote(wins[1], wins.take(1) + wins.drop(1), emptyList(), rwT(d, 19), UTC)
+        assertTrue(late.body.contains("No more windows today"))
+        // 45 minutes left
+        assertEquals(wins[0], RwText.leftIn(wins, rwT(d, 14, 20)))
+        assertNull(RwText.leftIn(wins, rwT(d, 13, 0)))
+        assertNull("the last few minutes are too late to bother", RwText.leftIn(wins, rwT(d, 14, 57)))
+        assertNull("not inside a window", RwText.leftIn(wins, rwT(d, 16)))
+    }
+
+    @Test fun rwNotificationTexts() {
+        val d = RW_WINTER
+        val easy = rwWinPlan(d, rwDay { h -> if (h < 15) rwHour(d, h, temp = 8.0, cloud = 95.0, uv = 0.3) else rwHour(d, h, rain = 2.0, pct = 90.0) }, rwRun(Weather.RunType.EASY, 60), rwWinSun(d))
+        val eve = RwText.dayNote(easy, rwS, UTC, today = false)
+        assertEquals("Tomorrow you can run 07:00–15:00", eve.title)
+        assertTrue(eve.body, eve.body.contains("UV ≤ 0.3"))
+        assertEquals("Today: 07:00–15:00", RwText.dayNote(easy, rwS, UTC, today = true).title)
+        val subt = rwWinPlan(d, rwDay { h -> rwHour(d, h, temp = 9.0, cloud = 95.0, uv = 0.3, dew = if (h in 8..10) 3.0 else 9.0) }, rwRun(Weather.RunType.SUBT, 60), rwWinSun(d))
+        val morning = RwText.dayNote(subt, rwS, UTC, today = true)
+        assertEquals("Today: ${RwText.range(subt.windows[0], UTC)} · best for SubT ${RwText.range(subt.best!!, UTC)}", morning.title)
+        val tight = rwWinPlan(RW_DATE, rwDay { h -> rwHour(RW_DATE, h, temp = 15.0, uv = if (h in 7..17) 5.0 else 0.5) }, rwRun(Weather.RunType.SUBT, 90))
+        val tn = RwText.dayNote(tight, rwS, UTC, today = true)
+        assertEquals("Tight today: only 05:00–07:00", tn.title)
+        assertTrue(tn.body.startsWith("Next: 18:00–20:30"))
+        val twoWins = rwWinPlan(RW_DATE, rwDay { h -> if (h in 12..16) rwHour(RW_DATE, h, rain = 2.0, pct = 90.0) else rwHour(RW_DATE, h) }, rwRun(Weather.RunType.EASY, 60))
+        assertEquals("Tomorrow you can run 05:00–12:00 and 17:00–20:30", RwText.dayNote(twoWins, rwS, UTC, today = false).title)
+        val dbl = Weather.PlannedRun("double", 35, Weather.RunType.EASY, planned = true, load = 24.0)
+        val bike = rwWinPlan(RW_DATE, rwDay { h -> if (h >= 12) rwHour(RW_DATE, h, rain = 3.0, pct = 90.0) else rwHour(RW_DATE, h) }, rwRun(Weather.RunType.EASY, 60), second = dbl)
+        assertTrue(RwText.dayNote(bike, rwS, UTC, today = false).body.contains("② no run window after 16:00: 45′ indoor ride instead?"))
+        val none = rwWinPlan(RW_DATE, rwDay { rwHour(RW_DATE, it, rain = 3.0, pct = 90.0) }, rwRun(Weather.RunType.EASY, 60))
+        assertEquals("Tomorrow: no run window fits", RwText.dayNote(none, rwS, UTC, today = false).title)
+    }
+
+    @Test fun rwChartDrawsAndScrubs() {
+        val d = RW_WINTER
+        val hours = rwDay { h -> rwHour(d, h, temp = 8.0, cloud = 90.0, uv = 0.3, dew = 4.0, rain = if (h >= 15) 2.0 else 0.0) }
+        val p = rwWinPlan(d, hours, rwRun(Weather.RunType.SUBT, 60), rwWinSun(d))
+        val spec = RwChart.spec(p, rwS, UTC)
+        assertTrue(spec.extra)
+        assertEquals(1, spec.wins.size)
+        val geo = RwChart.geo(spec, 800, 2f)
+        assertTrue(geo.h > 150f)
+        // scrub inside the window
+        val inside = RwChart.probe(spec, geo, geo.x(9.5f))!!
+        assertTrue(inside.inWindow); assertNull(inside.why)
+        assertEquals("09:00", inside.time(UTC))
+        // outside it: the reason is rain
+        val out = RwChart.probe(spec, geo, geo.x(16.5f))!!
+        assertFalse(out.inWindow)
+        assertTrue(out.why!!.startsWith("rain"))
+        // outside the running hours
+        val night = RwChart.probe(spec, geo, geo.x(spec.start + 0.5f))!!
+        if (!night.inWindow) assertNotNull(night.why)
+        // nowcast: 10-minute steps within 4 h of now
+        val now = rwT(d, 10, 5)
+        val steps = listOf(Weather.NowStep(rwT(d, 10, 20), rwT(d, 10, 30), 1.2, "rain"))
+        val s2 = RwChart.spec(p, rwS, UTC, now, steps)
+        val fine = RwChart.probe(s2, geo, geo.x(10.4f))!!
+        assertTrue(fine.fineStep)
+        assertEquals("10:20", fine.time(UTC))
+        assertEquals(1.2, fine.rain, 1e-9)
+        // lifted
+        assertEquals(RwChart.uvColor(0.5, 2.0), 0xFF3DD68C.toInt())
+        assertEquals(RwChart.uvColor(2.5, 2.0), 0xFFFFC53D.toInt())
     }
 
     // ---- shift detection
@@ -1521,7 +1769,8 @@ class RulesTest {
 
     @Test fun rwNotificationCategories() {
         val N = NotifySettings
-        for (k in listOf("rw_tomorrow", "rw_today", "rw_shift")) assertTrue("$k on by default", N.isOn(ctx, N.cat(k)))
+        for (k in listOf("rw_tomorrow", "rw_today", "rw_shift", "rw_missed")) assertTrue("$k on by default", N.isOn(ctx, N.cat(k)))
+        assertFalse("45 min left is off by default", N.isOn(ctx, N.cat("rw_left")))
         assertEquals(20 * 60, N.time(ctx, N.cat("rw_tomorrow")))
         assertTrue("tomorrow's window wakes the app at its time", N.wakeTimes(ctx).any { it.hour == 20 && it.minute == 0 })
         N.setOn(ctx, N.cat("rw_shift"), false)

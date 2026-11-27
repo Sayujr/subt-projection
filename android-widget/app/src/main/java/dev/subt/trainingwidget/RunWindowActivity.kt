@@ -30,8 +30,9 @@ import kotlin.math.roundToInt
 class RunWindowActivity : Activity() {
     companion object {
         const val EXTRA_DATE = "date"
-        fun open(ctx: Context, date: LocalDate) =
-            ctx.startActivity(Intent(ctx, RunWindowActivity::class.java).putExtra(EXTRA_DATE, date.toString()))
+        const val EXTRA_HOURS = "hours"
+        fun open(ctx: Context, date: LocalDate, hours: Boolean = false) =
+            ctx.startActivity(Intent(ctx, RunWindowActivity::class.java).putExtra(EXTRA_DATE, date.toString()).putExtra(EXTRA_HOURS, hours))
 
         private const val TEXT = 0xFFF2F4F8.toInt()
         private const val DIM = 0xFF9AA3B2.toInt()
@@ -46,6 +47,8 @@ class RunWindowActivity : Activity() {
     private lateinit var scroller: ScrollView
     private var date: LocalDate = LocalDate.now()
     private var status: String? = null
+    private var hourCard: View? = null
+    private var scrollToHours = false
     private val zone = ZoneId.systemDefault()
 
     private val d get() = resources.displayMetrics.density
@@ -54,6 +57,7 @@ class RunWindowActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         date = runCatching { LocalDate.parse(intent?.getStringExtra(EXTRA_DATE).orEmpty()) }.getOrDefault(LocalDate.now())
+        scrollToHours = intent?.getBooleanExtra(EXTRA_HOURS, false) == true
         val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false; fitsSystemWindows = true }
         scroller = sv
         col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(24)) }
@@ -242,11 +246,22 @@ class RunWindowActivity : Activity() {
         run {
             val c = card()
             label(c, "Summary")
-            val w = plan.window
-            text(c, if (w == null) "No window" else Weather.range(w, zone) + (if (w.icons.isNotEmpty()) "  " + w.icons.joinToString(" ") else ""), 26f, TEXT, bold = true, top = 2)
+            val head = RwText.headline(plan, zone, nowSec)
+            val passedAll = plan.windows.isNotEmpty() && head.none
+            val big = when {
+                passedAll -> "Window passed"
+                head.none && plan.split != null -> Weather.splitLabel(plan.split, zone)
+                else -> head.text
+            }
+            text(c, big, 26f, if (head.tight) WARN else TEXT, bold = true, top = 2)
             text(c, "${plan.run.name} · ${plan.run.type.label} · ${plan.run.minutes} min" + if (plan.run.planned) "" else " (nothing planned: using 60 min)", 13.5f, DIM)
-            val lines = plan.summary.lines()
+            RwUi.twoRunLines(this, c, plan, zone)
+            RwText.bestLine(plan.best, plan.run, plan.hours, zone)?.let { text(c, it, 14f, GOOD, top = 6) }
+            val sm = plan.summary
+            val lines = listOfNotNull(sm.shape, sm.temp, sm.pick.takeIf { plan.windows.isEmpty() }, sm.rainbow, sm.agree,
+                listOfNotNull(sm.suggestion, sm.swap).joinToString(" "), sm.warnings.takeIf { it.isNotEmpty() }?.joinToString("\n")).filter { it.isNotBlank() }
             for ((i, l) in lines.withIndex()) text(c, l, 14f, if (l.startsWith("⛔") || l.startsWith("⚠")) WARN else TEXT, top = if (i == 0) 10 else 8)
+            if (plan.bikeSwap != null) RwUi.bikeBox(this, c, plan) { render() }
             if (date == LocalDate.now()) Watch.reason(this)?.let { text(c, "Watching closely: $it", 13.5f, GOOD, top = 8) }
             Scoring.accuracyLine(this)?.let { text(c, it, 12.5f, DIM, top = 8) }
             RunWindows.asOf(this)?.let { text(c, "Forecast $it", 12f, WARN, top = 8) }
@@ -287,41 +302,22 @@ class RunWindowActivity : Activity() {
                 }
             }
         }
-        // 2. Strips
+        // 2. The chart (touch and drag to read each hour)
         run {
             val c = card()
-            BandViews.heading(this, c, "OVERALL PICK", "White box = the window, blue line = now. Cell colour is the weather: green cool, orange to red hotter, dark red hot and sunny, grey-blue cold; night cells are darker with a 🌙, hatched cells have no data. Icons: 💧 rain, ☁ cloud, ☀ UV over your limit, 🔥 hot, 🧤 cold, 🧊 ice, 😷 air quality. The line above the cells shows daylight (solid), 'dark OK' (dashed) and night (dotted).")
-            scrollImage(c, RwViews.strip(this, plan, s, wPx, false, nowSec, other = if (plan.same) null else plan.rainbow, minCellDp = 22f), plan, wPx)
+            BandViews.heading(this, c, "THE DAY", "Sky and cloud (hanging from the top), rain streaks and the white temperature line. Green = the time you can run, amber = tight; the pill underneath has the times, and a darker 'best' part marks the stretch that suits a workout. UV dots by hour (green within your limit of ${s.uvLimit.roundToInt()}). Touch and drag across it to read each hour." + (if (!plan.same && plan.rainbow != null) " The dashed outline is Rainbow's own pick." else ""))
+            c.addView(RwUi.chart(this, plan, s, date == LocalDate.now()), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
             val rbConnected = RunWindows.data(this)?.rb?.isNotEmpty() == true
-            if (rbConnected && plan.rbHours.isEmpty()) {
-                text(c, "Rainbow: no hourly forecast for this day", 12.5f, DIM, top = 12)
-            } else if (plan.rainbowPresent && plan.rbHours.isNotEmpty()) {
-                label(c, if (plan.same) "Rainbow alone (same window)" else "Rainbow pick (dashed on the strip above)").setPadding(0, dp(12), 0, 0)
-                scrollImage(c, RwViews.strip(this, plan, s, wPx, false, nowSec, hours = plan.rbHours, win = plan.rainbow, minCellDp = 22f), plan, wPx)
-            }
+            if (rbConnected && plan.rbHours.isEmpty()) text(c, "Rainbow: no hourly forecast for this day", 12.5f, DIM, top = 8)
         }
-        // 3. Hour table for the window
-        val w = plan.window
-        if (w != null) {
+        // 3. Hour by hour
+        run {
             val c = card()
-            BandViews.heading(this, c, "THE WINDOW, HOUR BY HOUR", "Rain is mm per hour · chance. Wind and gusts in km/h. Yellow rows: rain over 0.5 mm/h or UV over your limit of ${s.uvLimit.roundToInt()}.")
-            val wt = listOf(1.0f, 1.2f, 0.8f, 0.6f, 0.7f, 1.4f, 1.3f)
-            cells(c, listOf("Hour", "°C feels", "Cloud", "UV", "Dew", "Rain mm·%", "Wind"), wt, header = true)
-            val hf = DateTimeFormatter.ofPattern("HH:mm")
-            for (h in plan.hours.filter { it.t < w.end && it.t + 3600 > w.start }) {
-                val wet = h.rainMm > 0.5
-                cells(c, listOf(
-                    hf.format(java.time.Instant.ofEpochSecond(h.t).atZone(zone)),
-                    "${h.temp?.roundToInt() ?: "–"} / ${h.feels?.roundToInt() ?: "–"}",
-                    "${h.cloud?.roundToInt() ?: "–"}%",
-                    String.format(Locale.US, "%.1f", h.uv),
-                    "${h.dew?.roundToInt() ?: "–"}",
-                    String.format(Locale.US, "%.1f·%d%%", h.rainMm, h.rainPct.roundToInt()),
-                    "${h.wind?.roundToInt() ?: "–"} (${h.gust?.roundToInt() ?: "–"})",
-                ), wt, color = if (wet || h.uv > s.uvLimit) WARN else TEXT)
-            }
-            plan.sun?.let { text(c, "🌅 sunrise ${Weather.hhmm(it.rise, zone)}   🌇 sunset ${Weather.hhmm(it.set, zone)}", 13f, DIM, top = 8) }
+            hourCard = c
+            label(c, "Hour by hour · " + date.format(DateTimeFormatter.ofPattern("EEE d", Locale.getDefault())))
+            c.addView(RwHourList.build(this, plan, s, zone))
         }
+        val w = plan.window
         // 4. Sources
         run {
             val c = card()
@@ -369,6 +365,14 @@ class RunWindowActivity : Activity() {
                 }
             }
         }
+        maybeScrollToHours()
+    }
+
+    /** Opened from the card's "Hour by hour ›": scroll to the list once. */
+    private fun maybeScrollToHours() {
+        if (!scrollToHours) return
+        scrollToHours = false
+        hourCard?.let { v -> scroller.post { scroller.scrollTo(0, (v.top - dp(8)).coerceAtLeast(0)) } }
     }
 
     /** Launches the Rainbow app when one of its known package names is installed, otherwise its website. */

@@ -69,7 +69,7 @@ object Notifier {
         Prefs.setLastNotified(ctx, key, value)
     }
 
-    /** Tomorrow's best run window, in the evening (default 20:00); once per day. Needs a location, not intervals.icu. */
+    /** Tomorrow's windows, in the evening (default 20:00): "Tomorrow you can run A–B"; once per day. Needs a location, not intervals.icu. */
     fun runWindows(ctx: Context) {
         val N = NotifySettings
         val c = N.cat("rw_tomorrow")
@@ -78,10 +78,25 @@ object Notifier {
         val p = RunWindows.plan(ctx, tomorrow) ?: return
         if (p.noData) return
         val zone = java.time.ZoneId.systemDefault()
-        val w = p.window
-        val title = if (p.split != null) "Tomorrow's run: " + Weather.splitLabel(p.split, zone) else if (w == null) "Tomorrow: no run window fits" else "Tomorrow's run window: ${Weather.range(w, zone)}" + (if (w.icons.isNotEmpty()) " " + w.icons.joinToString("") else "")
-        val body = listOfNotNull(p.run.name.takeIf { p.run.planned }?.let { "${it} · ${p.run.type.label}" }, p.summary.short, p.summary.suggestion).joinToString("\n")
+        val title: String
+        val body: String
+        if (p.split != null && p.windows.isEmpty()) {
+            title = "Tomorrow's run: " + Weather.splitLabel(p.split, zone); body = p.summary.short
+        } else {
+            val n = RwText.dayNote(p, RwStore.load(ctx), zone, today = false)
+            title = n.title; body = n.body
+        }
         once(ctx, "rw_tomorrow", LocalDate.now().toString()) { post(ctx, DAILY, 20, title, body, "RW:$tomorrow") }
+    }
+
+    /** One "You missed today's window (A–B)" per closed window while the run isn't done. */
+    fun windowMissed(ctx: Context, note: RwText.Note, date: LocalDate, key: String) {
+        once(ctx, "rw_missed", key) { post(ctx, ALERTS, 24, note.title, note.body, "RW:$date") }
+    }
+
+    /** Optional "45 min left in today's window" (off by default); once per window. */
+    fun windowLeft(ctx: Context, text: String, date: LocalDate, key: String) {
+        once(ctx, "rw_left", key) { post(ctx, ALERTS, 25, "45 min left in today's window", text, "RW:$date") }
     }
 
     /**

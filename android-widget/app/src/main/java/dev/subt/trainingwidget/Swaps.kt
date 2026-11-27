@@ -484,7 +484,7 @@ object Swaps {
     }
 
     /** A narrow ⚠ window on a day with a run still to do. */
-    fun isTight(p: Weather.DayPlan): Boolean = p.run.planned && !p.run.done && !p.noData && !p.passed && p.window?.narrow == true
+    fun isTight(p: Weather.DayPlan): Boolean = p.run.planned && !p.run.done && !p.noData && !p.passed && p.window?.narrow == true && (p.windows.isEmpty() || p.windows.all { it.narrow })
 
     fun reasonText(t: Trigger, why: String?): String = when (t) {
         Trigger.MISSED_YESTERDAY -> "Looks missed: yesterday's run wasn't done"
