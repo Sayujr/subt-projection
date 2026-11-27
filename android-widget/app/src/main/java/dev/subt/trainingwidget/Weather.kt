@@ -265,40 +265,6 @@ object Weather {
         return out
     }
 
-    private val M15_MODELS = listOf("ncep_hrrr_conus", "ncep_nbm_conus", "best_match")
-
-    /**
-     * Open-Meteo `minutely_15`: one [Hour] per 15-minute slot ([Hour.t] = slot start, a multiple of 900 s), the median over whichever
-     * model columns are present (`temperature_2m_ncep_hrrr_conus`, …, or the plain name for a single model). Precipitation is mm per
-     * 15 minutes in the answer and comes out as mm/h. Cloud and UV are null when the answer has no such column (the caller interpolates
-     * the hourly ones). Never throws; unusable input gives an empty list.
-     */
-    fun parseMinutely15(json: String): List<Hour> {
-        val o = runCatching { JSONObject(json) }.getOrNull() ?: return emptyList()
-        val off = ZoneOffset.ofTotalSeconds(o.optInt("utc_offset_seconds", 0))
-        val m = o.optJSONObject("minutely_15") ?: return emptyList()
-        val times = m.optJSONArray("time") ?: return emptyList()
-        fun cols(v: String): List<JSONArray> = (listOf(v) + M15_MODELS.map { "${v}_$it" }).mapNotNull { m.optJSONArray(it) }
-        val temp = cols("temperature_2m"); val feels = cols("apparent_temperature"); val dew = cols("dew_point_2m")
-        val cloud = cols("cloud_cover"); val rain = cols("precipitation"); val uv = cols("uv_index")
-        val wind = cols("wind_speed_10m"); val gust = cols("wind_gusts_10m")
-        fun at(c: List<JSONArray>, i: Int): Double? = median(c.mapNotNull { it.num(i) })
-        val out = LinkedHashMap<Long, Hour>()
-        for (i in 0 until times.length()) {
-            val raw = localToEpoch(times.optString(i), off)
-            if (raw < 0) continue
-            val t = raw - Math.floorMod(raw, 900L)
-            val tp = at(temp, i)
-            val r = at(rain, i)?.let { it * 4.0 }
-            if (tp == null && r == null) continue
-            out[t] = Hour(
-                t = t, temp = tp, feels = at(feels, i), dew = at(dew, i), cloud = at(cloud, i), uv = at(uv, i),
-                rainMm = r, wind = at(wind, i), gust = at(gust, i),
-            )
-        }
-        return out.values.sortedBy { it.t }
-    }
-
     /** NWS /points response → the forecastGridData URL. */
     fun parseNwsGridUrl(json: String): String? =
         runCatching { JSONObject(json).optJSONObject("properties")?.optString("forecastGridData") }.getOrNull()?.takeIf { it.isNotBlank() }
@@ -456,61 +422,6 @@ object Weather {
             val t0 = h.temp
             if (t0 != null && t0 <= 0.0 && out.take(i).any { it.t >= h.t - 12 * 3600 && it.rainMm > 0.1 }) h.copy(icy = true) else h
         }
-    }
-
-    /** Linear interpolation of an hourly value between hour centres at [t]; the nearer hour alone when the other is missing. */
-    private fun interp(byT: Map<Long, Combined>, t: Long, f: (Combined) -> Double?): Double? {
-        val mid = t + 450
-        val h0 = hourFloor(mid - 1800)               // the hour whose centre is at or before the slot's middle
-        val a = byT[h0]?.let(f); val b = byT[h0 + 3600]?.let(f)
-        if (a == null || b == null) return a ?: b ?: byT[hourFloor(t)]?.let(f)
-        val frac = ((mid - (h0 + 1800)) / 3600.0).coerceIn(0.0, 1.0)
-        return a + (b - a) * frac
-    }
-
-    /**
-     * The 15-minute slots as [Combined] (t = slot start, rain in mm/h). Temperature, wind and dew come from the 15-minute model
-     * data, cloud and UV from the hourly consensus (interpolated) when the 15-minute data has none. Rain keeps the hour's
-     * consensus total and only takes its shape within the hour from the 15-minute data; the Rainbow nowcast, where it covers
-     * a slot, overrides it (10-minute maxima).
-     */
-    fun fineCombined(fine: List<Hour>, hourly: List<Combined>, nowcast: List<NowStep> = emptyList()): List<Combined> {
-        if (fine.isEmpty()) return emptyList()
-        val byT = hourly.associateBy { it.t }
-        val perHour = fine.groupBy { hourFloor(it.t) }
-        val out = ArrayList<Combined>(fine.size)
-        for (f in fine.sortedBy { it.t }) {
-            val base = byT[hourFloor(f.t)]
-            val temp = f.temp ?: interp(byT, f.t) { it.temp }
-            val cloud = f.cloud ?: interp(byT, f.t) { it.cloud }
-            if (temp == null && cloud == null) continue
-            val uv = f.uv ?: interp(byT, f.t) { it.uv } ?: 0.0
-            // rain: shape from the slots, total from the hourly consensus
-            var rain = f.rainMm ?: base?.rainMm ?: 0.0
-            if (base != null) {
-                val shape = perHour[hourFloor(f.t)].orEmpty().mapNotNull { it.rainMm }
-                val mean = if (shape.isEmpty()) 0.0 else shape.average()
-                rain = when {
-                    base.rainMm <= 0.0 -> 0.0
-                    f.rainMm != null && mean > 1e-9 -> base.rainMm * f.rainMm / mean
-                    else -> base.rainMm
-                }
-            }
-            var frozen = base?.frozen == true
-            val over = nowcast.filter { it.begin < f.t + 900 && it.end > f.t }
-            if (over.isNotEmpty()) {
-                rain = over.maxOf { it.rate }
-                frozen = frozen || over.any { it.rate > 0 && isFrozen(it.type) }
-            }
-            out += Combined(
-                t = f.t, temp = temp, feels = f.feels ?: interp(byT, f.t) { it.feels } ?: temp, dew = f.dew ?: interp(byT, f.t) { it.dew },
-                cloud = cloud, uv = uv, rainMm = rain, rainPct = base?.rainPct ?: 0.0,
-                wind = f.wind ?: interp(byT, f.t) { it.wind }, gust = f.gust ?: interp(byT, f.t) { it.gust },
-                aqi = base?.aqi, frozen = frozen, icy = base?.icy == true,
-                agree = base?.agree ?: 0, total = base?.total ?: 0, dissent = base?.dissent.orEmpty(),
-            )
-        }
-        return out
     }
 
     // ================================================================ hour classification and colour
@@ -895,10 +806,7 @@ object Weather {
      * Winter (Nov–Mar): windows start from 07:00 unless the only runnable time is earlier. Night windows only when
      * nothing fits in daylight.
      */
-    fun windowsFor(
-        hours: List<Combined>, date: LocalDate, run: PlannedRun, suns: List<Sun>, s: RwSettings, zone: ZoneId,
-        fine: List<Combined> = emptyList(),
-    ): WinSet {
+    fun windowsFor(hours: List<Combined>, date: LocalDate, run: PlannedRun, suns: List<Sun>, s: RwSettings, zone: ZoneId): WinSet {
         val sun = sunFor(suns, date)
         val month = date.monthValue
         val byT = hours.associateBy { it.t }
@@ -909,17 +817,6 @@ object Weather {
             val r = notRunnableReason(h, run.type, s, month)
             if (r != null) why[h.t] = r else runnable += h.t
         }
-        // 15-minute slots (today and tomorrow, when the 15-minute forecast is there): edges may fall on :15 / :30 / :45
-        val useFine = fine.isNotEmpty()
-        val slotOk = HashMap<Long, Boolean>()
-        for (f in fine) {
-            val r = notRunnableReason(f, run.type, s, month)
-            slotOk[f.t] = r == null
-            if (r != null) why[f.t] = r else if (f.t % 3600L != 0L) why.remove(f.t)
-        }
-        val step = if (useFine) 900L else 3600L
-        val edge = if (useFine) 900L else 1800L
-        fun ok(t: Long): Boolean = if (useFine) (slotOk[t] ?: (hourFloor(t) in runnable)) else t in runnable
         val needSec = (run.minutes + s.bufferMin) * 60L
         fun scan(lo: Long, hi: Long, night: Boolean): List<Window> {
             val out = ArrayList<Window>()
@@ -927,18 +824,18 @@ object Weather {
             var curE = -1L
             fun close() {
                 if (curS >= 0) {
-                    val a = ceilTo(curS, edge)
-                    val b = floorTo(curE, edge)
+                    val a = ceilTo(curS, 1800L)
+                    val b = floorTo(curE, 1800L)
                     if (b - a >= needSec) build(a, b, byT, pens, night)?.let { out += it.copy(narrow = b - a < needSec + 3600L) }
                 }
                 curS = -1L; curE = -1L
             }
-            var t = floorTo(lo, step)
+            var t = hourFloor(lo)
             while (t < hi) {
                 val a = max(t, lo)
-                val b = min(t + step, hi)
-                if (ok(t) && b > a) { if (curS < 0) curS = a; curE = b } else close()
-                t += step
+                val b = min(t + 3600, hi)
+                if (t in runnable && b > a) { if (curS < 0) curS = a; curE = b } else close()
+                t += 3600
             }
             close()
             return out
@@ -1082,16 +979,15 @@ object Weather {
         /** The allowed running hours for the day. */
         val allowedLo: Long = 0L,
         val allowedHi: Long = 0L,
-        /** The day's 15-minute slots (t = slot start, rain in mm/h); empty without the 15-minute forecast. */
-        val fine: List<Combined> = emptyList(),
-    )
+    ) {
+        fun withSwap(text: String?) = copy(summary = summary.copy(swap = text))
+    }
 
     fun plan(
         date: LocalDate, all: List<Combined>, rb: List<Combined>, suns: List<Sun>, run: PlannedRun,
-        s: RwSettings, nowSec: Long?, zone: ZoneId, second: PlannedRun? = null, fine: List<Combined> = emptyList(),
+        s: RwSettings, nowSec: Long?, zone: ZoneId, second: PlannedRun? = null,
     ): DayPlan {
         val dh = all.filter { dayOf(it.t, zone) == date }
-        val fh = fine.filter { dayOf(it.t, zone) == date }
         val rh = rb.filter { dayOf(it.t, zone) == date }
         val sun = sunFor(suns, date)
         if (dh.isEmpty()) {
@@ -1112,7 +1008,7 @@ object Weather {
 
         // v3: the whole windows
         val needSec = (run.minutes + s.bufferMin) * 60L
-        val ws = windowsFor(dh, date, run, suns, s, zone, fh)
+        val ws = windowsFor(dh, date, run, suns, s, zone)
         val wins = ws.windows.map { decorate(it, run, s, false) }
         var window = oldBest
         var risky = pk.risky
@@ -1146,7 +1042,7 @@ object Weather {
         }
         return DayPlan(
             date, run, window, rbBest, rh.isNotEmpty(), same, risky, passed, dh, rh, sun, lo, hi, sm, noData = false, split = split,
-            windows = wins, best = bestW, second = second, secondWindow = secondW, bikeSwap = bike, why = ws.why, allowedLo = aLo, allowedHi = aHi, fine = fh,
+            windows = wins, best = bestW, second = second, secondWindow = secondW, bikeSwap = bike, why = ws.why, allowedLo = aLo, allowedHi = aHi,
         )
     }
 
@@ -1240,6 +1136,22 @@ object Weather {
         return Summary(shape, pick, rainbow, agree, suggestion, null, best?.warnings.orEmpty() + extra, short, temp)
     }
 
+    /** Text-only "swap with day Y": when a day's window is poor and another day in the list is clearly better. */
+    fun swapHints(plans: List<DayPlan>, zone: ZoneId): Map<LocalDate, String> {
+        val out = HashMap<LocalDate, String>()
+        for (p in plans) {
+            val w = p.window ?: continue
+            if (!p.run.planned || p.run.done || p.passed) continue
+            if (!(p.risky || w.wet || w.score >= 10.0)) continue
+            val q = plans.filter { it.date != p.date && it.date.isAfter(p.date.minusDays(1)) && !it.risky }
+                .mapNotNull { o -> o.window?.takeIf { !it.wet && it.score + 5.0 <= w.score }?.let { o to it } }
+                .minByOrNull { it.second.score } ?: continue
+            val day = q.first.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
+            out[p.date] = "Or swap with $day, which has a much better window (${range(q.second, zone)}). This is only a suggestion: nothing is changed."
+        }
+        return out
+    }
+
     // ================================================================ split runs
 
     const val SPLIT_MIN = 25
@@ -1296,6 +1208,54 @@ object Weather {
             }
         }
         return best
+    }
+
+    // ================================================================ swap with another day
+
+    /** Move [a] to [aTo]; when [b] is set (the other day's run) it moves to [bTo], i.e. the two swap places. */
+    data class SwapPlan(val a: Workout, val aTo: LocalDate, val b: Workout?, val bTo: LocalDate?)
+
+    private fun dayLabel(d: LocalDate) = d.format(DateTimeFormatter.ofPattern("EEE d", java.util.Locale.getDefault()))
+
+    fun swapText(p: SwapPlan): String {
+        val from = LocalDate.parse(p.a.date)
+        val head = "Move '${p.a.name}' from ${dayLabel(from)} to ${dayLabel(p.aTo)}"
+        val b = p.b
+        val bTo = p.bTo
+        return if (b == null || bTo == null) "$head?" else "$head and '${b.name}' from ${dayLabel(LocalDate.parse(b.date))} to ${dayLabel(bTo)}?"
+    }
+
+    /**
+     * Today's or tomorrow's planned run day is bad (⛔, or the best window is wet) and another day in the next 6 days,
+     * with a planned run or none, has a clearly better window (score at least 5 lower, dry, not risky): returns what would
+     * move. Days whose sessions have no intervals.icu event id are skipped, so a button never offers something it can't do.
+     * [plans] start at [today]; [week] is the planned sessions (this week and the days after).
+     */
+    fun swapSuggestions(plans: List<DayPlan>, week: List<Workout>, today: LocalDate): Map<LocalDate, SwapPlan> {
+        val out = HashMap<LocalDate, SwapPlan>()
+        for (p in plans) {
+            val offset = java.time.temporal.ChronoUnit.DAYS.between(today, p.date)
+            if (offset !in 0..1) continue
+            val w = p.window ?: continue
+            if (!p.run.planned || p.run.done || p.passed || p.noData) continue
+            if (!(p.risky || w.wet)) continue
+            val mine = plannedWorkout(week, p.date.toString()) ?: continue
+            if (mine.eventId == null) continue
+            var bestPlan: SwapPlan? = null
+            var bestScore = Double.MAX_VALUE
+            for (q in plans) {
+                val qo = java.time.temporal.ChronoUnit.DAYS.between(today, q.date)
+                if (q.date == p.date || qo !in 0..6 || q.noData || q.passed || q.risky) continue
+                val qw = q.window ?: continue
+                if (qw.wet || qw.dangerous || qw.score + 5.0 > w.score) continue
+                val other = if (q.run.planned) plannedWorkout(week, q.date.toString()) else null
+                if (q.run.planned && (other == null || other.eventId == null)) continue   // a race or a session we can't move
+                val sc = qw.score + if (other != null) 2.0 else 0.0
+                if (sc < bestScore) { bestScore = sc; bestPlan = SwapPlan(mine, q.date, other, if (other != null) p.date else null) }
+            }
+            bestPlan?.let { out[p.date] = it }
+        }
+        return out
     }
 
     // ================================================================ shift detection
