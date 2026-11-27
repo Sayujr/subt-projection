@@ -166,6 +166,13 @@ class ScreensTest {
             File(outDir, "example_note.txt").writeText(Prefs.coachNotes(ctx).values.first())
             ctl.pause().stop().destroy()
         }
+        // Fitness & fatigue: am I on track?
+        safely("fitness") {
+            val ctl = Robolectric.buildActivity(FitnessActivity::class.java, Intent(ctx, FitnessActivity::class.java)).setup()
+            settle()
+            capture("fitness", ctl.get().window.decorView)
+            ctl.pause().stop().destroy()
+        }
         // Run windows: the day plan for today and tomorrow (the Today card and the Week list show up in app_home / app_week)
         for ((label, offset) in listOf("today" to 0L, "tomorrow" to 1L, "wet_day" to 2L)) safely("runwindow_$label") {
             val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, Fixture.today.plusDays(offset).toString())

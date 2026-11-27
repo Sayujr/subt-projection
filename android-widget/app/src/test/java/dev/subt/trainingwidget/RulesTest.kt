@@ -15,6 +15,8 @@ import org.robolectric.annotation.Config
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** The training rules the app shows you. A change that breaks one fails the build before it reaches the phone. */
 @RunWith(RobolectricTestRunner::class)
@@ -2132,4 +2134,174 @@ class RulesTest {
         assertEquals(0, Swaps.goodWindows(wetPlan, rwS, listOf(rwSun(d0)), UTC, 30, null).count)
         assertEquals("no forecast counts as one window", 1, Swaps.goodWindows(rwPlan(d0, emptyList()), rwS, emptyList(), UTC, 30, null).count)
     }
+
+    // ================================================================ Fitness & fatigue page
+
+    private val fsToday = LocalDate.of(2026, 3, 2) // a Monday
+
+    /** 100 days of Fitness ending at [now], gaining [rate] over the last 7 days; Fatigue = Fitness − [form] today. */
+    private fun fsDays(now: Double, rate: Double, form: Double): List<Day> = (100 downTo 0).map { i ->
+        val c = if (i <= 7) now - rate * i / 7.0 else (now - rate) - (i - 7) * 0.2
+        Day(fsToday.minusDays(i.toLong()).toString(), c, if (i == 0) c - form else c)
+    }
+
+    private fun fsRun(name: String, dayOffset: Long, min: Int, load: Int, id: Long, hour: Int = 7) = Workout(
+        name, "Run", min * 60, load, 0.0, WorkoutStatus.PLANNED, fsToday.plusDays(dayOffset).toString(), eventId = id,
+        startLocal = "${fsToday.plusDays(dayOffset)}T%02d:00:00".format(hour))
+
+    private fun fsWeek() = listOf(
+        fsRun("Easy run", 0, 50, 30, 1), fsRun("3x10' SubT", 1, 70, 65, 2), fsRun("Easy run", 2, 50, 30, 3),
+        fsRun("3x10' SubT", 3, 70, 65, 4), fsRun("Easy run", 4, 50, 30, 5), fsRun("Easy run", 5, 40, 24, 6),
+        fsRun("Long run 26 km", 6, 130, 120, 7),
+    )
+
+    private fun fsSnap(rate: Double, now: Double = 55.0, form: Double = 6.0, week: List<Workout> = fsWeek(), races: List<Race> = emptyList(), runs: List<RunMetric> = emptyList()) =
+        Snapshot(0L, fsToday.toString(), fsDays(now, rate, form), emptyList(), week = week, races = races, runs = runs)
+
+    @Test fun fitnessVerdictThresholds() {
+        val c = FitnessPlan::classify
+        assertEquals(FitnessPlan.Status.TOO_FAST, c(7.1, false))
+        assertEquals(FitnessPlan.Status.ON_TRACK, c(7.0, false))
+        assertEquals(FitnessPlan.Status.ON_TRACK, c(4.0, false))
+        assertEquals(FitnessPlan.Status.ON_TRACK, c(3.0, false))
+        assertEquals(FitnessPlan.Status.SLIGHTLY_BEHIND, c(2.99, false))
+        assertEquals(FitnessPlan.Status.SLIGHTLY_BEHIND, c(1.0, false))
+        assertEquals(FitnessPlan.Status.BEHIND, c(0.99, false))
+        assertEquals(FitnessPlan.Status.BEHIND, c(-1.8, false))
+        assertEquals(FitnessPlan.Status.TAPER_OK, c(-2.0, true))
+        assertEquals(FitnessPlan.Status.TAPER_OK, c(0.0, true))
+        assertEquals(FitnessPlan.Status.TAPER_BUILDING, c(2.0, true))
+        assertEquals(FitnessPlan.Status.TAPER_DROPPING, c(-7.0, true))
+        val call = FitnessPlan.call(fsSnap(-1.8))!!
+        assertEquals(FitnessPlan.Status.BEHIND, call.status)
+        assertEquals("Fitness slipped 1.8 this week. Fatigue is fine (Form +6, fresh).", call.sentence)
+        assertEquals(FitnessPlan.Status.ON_TRACK, FitnessPlan.call(fsSnap(4.0))!!.status)
+        assertEquals(FitnessPlan.Status.TOO_FAST, FitnessPlan.call(fsSnap(8.5))!!.status)
+        // inside an A race's 14-day taper the target is the taper plan
+        val race = Race(fsToday.plusDays(10).toString(), "Spring Marathon", "Run", "RACE_A")
+        assertEquals(FitnessPlan.Status.TAPER_OK, FitnessPlan.call(fsSnap(-2.0, races = listOf(race)))!!.status)
+        // ... but a C race 10 days out is not in its 5-day window
+        val c10 = Race(fsToday.plusDays(10).toString(), "Parkrun", "Run", "RACE_C")
+        assertEquals(FitnessPlan.Status.BEHIND, FitnessPlan.call(fsSnap(-2.0, races = listOf(c10)))!!.status)
+    }
+
+    @Test fun fitnessNeededWeeklyLoad() {
+        // steady state: holding Fitness at 50 takes 50 a day
+        assertEquals(350.0, FitnessPlan.weeklyLoadFor(50.0, 0.0), 1e-6)
+        // +4 from 50: (54 − 50·(41/42)^7) / (1 − (41/42)^7) a day
+        val weekly = FitnessPlan.weeklyLoadFor(50.0, 4.0)
+        val r = Math.pow(41.0 / 42.0, 7.0)
+        assertEquals(7 * (54.0 - 50.0 * r) / (1 - r), weekly, 1e-6)
+        assertEquals(530.4, weekly, 0.5)
+        // run the 42-day model for 7 days at that load: Fitness ends 4 higher
+        var ctl = 50.0
+        repeat(7) { ctl += (weekly / 7 - ctl) / 42.0 }
+        assertEquals(54.0, ctl, 1e-9)
+        assertTrue(FitnessPlan.weeklyLoadFor(60.0, 4.0) > weekly)
+        // the page uses last Sunday's Fitness as the start of the week
+        val days = fsDays(55.0, 3.0, 6.0)
+        val st = FitnessPlan.shortTerm(fsSnap(3.0))!!
+        val sundayCtl = days.first { it.date == fsToday.minusDays(1).toString() }.ctl
+        assertEquals(FitnessPlan.weeklyLoadFor(sundayCtl, 4.0).roundToInt(), st.needed)
+        assertEquals(0, st.done)
+        assertEquals(30 + 65 + 30 + 65 + 30 + 24 + 120, st.planned)
+    }
+
+    @Test fun fitnessBehindSuggestionsRespectRules() {
+        val sg = FitnessPlan.suggestions(fsSnap(0.5))
+        assertTrue(sg.isNotEmpty())
+        assertTrue("at most 3 a week", sg.count { it.week == 0 } <= 3)
+        assertTrue("all adds", sg.all { it.loadDelta > 0 && it.applicable })
+        assertEquals("smallest change first", sg.map { it.loadDelta }, sg.map { it.loadDelta }.sorted())
+        val longDay = fsToday.plusDays(6)
+        val doubles = sg.flatMap { it.changes }.filterIsInstance<FitnessPlan.Change.AddDouble>()
+        assertTrue("a double is offered", doubles.isNotEmpty())
+        for (dbl in doubles) {
+            assertTrue("never on the long-run day", dbl.date != longDay)
+            assertTrue("not today", dbl.date.isAfter(fsToday))
+            assertEquals("60% of the median easy run (50 min)", 30, dbl.minutes)
+        }
+        val long = sg.first { it.id == "w0-long-up" }.changes.single() as FitnessPlan.Change.Resize
+        assertEquals(longDay, long.date); assertEquals(130, long.fromMin); assertEquals(150, long.toMin) // behind: +20
+        assertEquals((20 * 120 / 130.0).roundToInt(), long.loadDelta)
+        assertEquals(130 * 60, long.fromSec)
+        // slightly behind: +10
+        val slight = FitnessPlan.suggestions(fsSnap(2.0)).first { it.id == "w0-long-up" }.changes.single() as FitnessPlan.Change.Resize
+        assertEquals(140, slight.toMin)
+        // easy runs get +10
+        val easy = sg.first { it.id == "w0-easy-up" }.changes.filterIsInstance<FitnessPlan.Change.Resize>()
+        assertTrue(easy.all { it.toMin == it.fromMin + 10 })
+        // on track or tapering as planned: nothing to change
+        assertTrue(FitnessPlan.suggestions(fsSnap(4.0)).isEmpty())
+        assertTrue(FitnessPlan.suggestions(fsSnap(-2.0, races = listOf(Race(fsToday.plusDays(10).toString(), "M", "Run", "RACE_A")))).isEmpty())
+    }
+
+    @Test fun fitnessTooFastSuggestsTrims() {
+        val week = fsWeek() + fsRun("Easy run (double)", 2, 30, 18, 8, hour = 16)
+        for (snap in listOf(fsSnap(8.5, week = week), fsSnap(4.0, week = week).let { it.copy(days = it.days.dropLast(1) + it.days.last().let { d -> d.copy(atl = d.ctl * 1.5) }) })) {
+            val sg = FitnessPlan.suggestions(snap)
+            assertTrue(sg.isNotEmpty())
+            assertTrue("no adds", sg.flatMap { it.changes }.none { it is FitnessPlan.Change.AddDouble })
+            assertTrue("no lengthening", sg.flatMap { it.changes }.filterIsInstance<FitnessPlan.Change.Resize>().all { it.toMin < it.fromMin })
+            assertTrue(sg.all { it.loadDelta <= 0 })
+            assertTrue(sg.any { it.id == "w0-easy-down" })
+            assertTrue("applicable ones first, smallest change first", sg.filter { it.applicable }.map { abs(it.loadDelta) }.let { it == it.sorted() })
+            // the double is advice only: the app never deletes your events
+            sg.firstOrNull { it.id == "w0-skip-double" }?.let { assertFalse(it.applicable) }
+        }
+        val sg = FitnessPlan.suggestions(fsSnap(8.5, week = week))
+        assertTrue(sg.any { it.id == "w0-skip-double" } || sg.size == 3)
+    }
+
+    @Test fun fitnessNextWeekSuggestions() {
+        val ahead = listOf(fsRun("Easy run", 8, 50, 30, 21), fsRun("Long run", 13, 120, 110, 22))
+        val sg = FitnessPlan.suggestions(fsSnap(0.5).copy(ahead = ahead))
+        assertTrue(sg.any { it.week == 1 })
+        assertTrue(sg.filter { it.week == 1 }.flatMap { it.changes }.all { it.date.isAfter(fsToday.plusDays(6)) })
+        assertTrue(sg.count { it.week == 1 } <= 3)
+    }
+
+    @Test fun fitnessEditSteps() {
+        assertEquals("- 60m 61-65%", FitnessPlan.editSteps("- 50m 61-65%", 50, 60, "61-65%"))
+        assertEquals("- 40m 61-65%\n\nnote", FitnessPlan.editSteps("- 50m 61-65%\n\nnote", 50, 40, "61-65%"))
+        assertEquals("- 20m 61-65%\n- 45m 66-70%\n- 10m 61-65%", FitnessPlan.editSteps("- 20m 61-65%\n- 45m 66-70%", 65, 75, "61-65%"))
+        assertEquals("- 20m 61-65%\n- 35m 66-70%", FitnessPlan.editSteps("- 20m 61-65%\n- 45m 66-70%", 65, 55, "61-65%"))
+        assertNull("can't take 30 off steps of 10 and 12", FitnessPlan.editSteps("- 10m 61-65%\n- 12m 66-70%", 22, -8, "61-65%"))
+        assertEquals("- 60m 61-65%", FitnessPlan.editSteps(null, 50, 60, "61-65%"))
+        assertEquals("- 60m 61-65%\n\nEasy jog", FitnessPlan.editSteps("Easy jog", 50, 60, "61-65%"))
+    }
+
+    @Test fun fitnessTargetBand() {
+        val race = Race(fsToday.plusDays(70).toString(), "Spring Marathon", "Run", "RACE_A")
+        val s = fsSnap(3.0, races = listOf(race))
+        val b = FitnessPlan.band(s)!!
+        assertEquals(fsToday.plusDays(70), b.end)
+        assertEquals(fsToday.minusWeeks(12), b.start)
+        assertEquals(fsToday.plusDays(56), b.taperStart) // A race: taper starts 14 days out
+        assertEquals(55.0 + 4.0 * 8, b.cap, 1e-9)
+        assertTrue(b.hi.all { it <= b.cap + 1e-9 })
+        assertTrue(b.lo.indices.all { b.lo[it] <= b.hi[it] + 1e-9 })
+        assertTrue("band eases in the taper", b.hi.last() < b.hi[b.hi.size - 15])
+        assertEquals(b.cap * FitnessPlan.TAPER_END_HI, b.hi.last(), 1e-6)
+        // no race: 8 weeks, no taper; B race is the fallback target
+        val none = FitnessPlan.band(fsSnap(3.0))!!
+        assertEquals(fsToday.plusWeeks(8), none.end); assertNull(none.race)
+        val bRace = Race(fsToday.plusDays(40).toString(), "Half", "Run", "RACE_B")
+        assertEquals("Half", FitnessPlan.targetRace(fsSnap(3.0, races = listOf(bRace)))?.name)
+        val aAndB = listOf(bRace, race)
+        assertEquals("Spring Marathon", FitnessPlan.targetRace(fsSnap(3.0, races = aAndB))?.name)
+    }
+
+    @Test fun fitnessReading() {
+        val runs = listOf(
+            RunMetric(fsToday.minusDays(22).toString(), "Long run", 130 * 60, null, null, null, null),
+            RunMetric(fsToday.minusDays(15).toString(), "Long run", 115 * 60, null, null, null, null),
+            RunMetric(fsToday.minusDays(2).toString(), "Long run", 100 * 60, null, null, null, null),
+        )
+        val t = FitnessPlan.reading(fsSnap(0.5, runs = runs))
+        assertTrue(t, t.contains("4 of the last 4 weeks below"))
+        assertTrue(t, t.contains("long runs down from 2h10 to 1h40"))
+        assertFalse(FitnessPlan.reading(fsSnap(4.0)).contains("long runs"))
+    }
 }
+

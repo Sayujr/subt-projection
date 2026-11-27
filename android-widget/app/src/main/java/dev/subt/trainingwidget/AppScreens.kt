@@ -1298,6 +1298,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
     fun verdictCard(col: LinearLayout) {
         val v = Verdict.compute(Prefs.snapshot(a), Prefs.rhrOverride(a), Prefs.hrvOverride(a)) ?: return
         val c = card(col)
+        c.setOnClickListener { FitnessActivity.open(a) }
         label(c, "Today's call")
         text(c, v.call.label, 26f, v.call.color, bold = true, top = 2).apply { letterSpacing = 0.02f }
         text(c, v.headline, 14.5f, DIM, top = 0)

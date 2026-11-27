@@ -513,6 +513,17 @@ class IcuApi(private val creds: Credentials) {
     }
 
     /**
+     * Changes a planned session's duration and workout text (its steps). Only ever called after you confirm a suggestion on the
+     * "Fitness & fatigue" page; Undo calls it again with the original values.
+     */
+    fun updateEventDuration(eventId: Long, movingTimeSec: Int, description: String?) {
+        val ath = URLEncoder.encode(creds.athleteId, "UTF-8")
+        val body = JSONObject().put("moving_time", movingTimeSec)
+        if (description != null) body.put("description", description)
+        sendJson("PUT", "/athlete/$ath/events/$eventId", body)
+    }
+
+    /**
      * Adds a planned run (an easy run, a double or a copy of a missed test) to the calendar. Only ever called after you
      * confirm an option on the "Fit in a missed session" page. Returns the new event's id (kept so Undo can remove it).
      */
