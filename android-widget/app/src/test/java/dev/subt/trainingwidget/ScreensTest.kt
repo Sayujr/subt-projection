@@ -294,7 +294,7 @@ class ScreensTest {
             }
             try {
                 // big window: dry, low UV all day
-                WxFixture.tweak = { day, _, p -> if (day == 0) WxFixture.P(p.temp, 90.0, 0.8, 0.0, p.dew, p.wind) else p }
+                WxFixture.tweak = { day, _, p -> if (day <= 1) WxFixture.P(p.temp, 90.0, 0.8, 0.0, p.dew, p.wind) else p }
                 WxFixture.seed(ctx)
                 safely("runwindow_v3_big") { cardShot("runwindow_v3_card_big") }
                 safely("runwindow_v3_plan") {
@@ -320,17 +320,26 @@ class ScreensTest {
                     v.scrubTo(null)
                 }
                 // tight: dry only until 08:00
-                WxFixture.tweak = { day, hour, p -> if (day == 0 && hour >= 8) WxFixture.P(p.temp, 95.0, 0.3, 2.0, p.dew, p.wind) else if (day == 0) WxFixture.P(p.temp, 90.0, 0.3, 0.0, p.dew, p.wind) else p }
+                WxFixture.tweak = { day, hour, p -> if (day <= 1 && hour >= 8) WxFixture.P(p.temp, 95.0, 0.3, 2.0, p.dew, p.wind) else if (day <= 1) WxFixture.P(p.temp, 90.0, 0.3, 0.0, p.dew, p.wind) else p }
                 WxFixture.seed(ctx)
                 safely("runwindow_v3_tight") { cardShot("runwindow_v3_card_tight") }
                 // two runs today, nothing runnable after 16:00: the indoor bike offer
-                WxFixture.tweak = { day, hour, p -> if (day == 0 && hour >= 12) WxFixture.P(p.temp, 95.0, 0.3, 3.0, p.dew, p.wind) else if (day == 0) WxFixture.P(p.temp, 90.0, 0.8, 0.0, p.dew, p.wind) else p }
+                WxFixture.tweak = { day, hour, p -> if (day <= 1 && hour >= 12) WxFixture.P(p.temp, 95.0, 0.3, 3.0, p.dew, p.wind) else if (day <= 1) WxFixture.P(p.temp, 90.0, 0.8, 0.0, p.dew, p.wind) else p }
                 WxFixture.seed(ctx)
                 val snap = Prefs.snapshot(ctx)!!
-                val dbl = Workout("Easy run (double)", "Run", 2100, 24, 6000.0, WorkoutStatus.PLANNED, Fixture.today.toString(), eventId = 555L, startLocal = "${Fixture.today}T17:00:00")
-                val main = Workout("60m Easy", "Run", 3600, 34, 10500.0, WorkoutStatus.PLANNED, Fixture.today.toString(), eventId = 554L, startLocal = "${Fixture.today}T07:00:00")
-                Prefs.saveSnapshot(ctx, snap.copy(week = snap.week.filter { it.date != Fixture.today.toString() || !it.type.contains("Run", ignoreCase = true) } + listOf(main, dbl)), 400)
+                fun two(d: java.time.LocalDate) = listOf(
+                    Workout("60m Easy", "Run", 3600, 34, 10500.0, WorkoutStatus.PLANNED, d.toString(), eventId = 554L, startLocal = "${d}T07:00:00"),
+                    Workout("Easy run (double)", "Run", 2100, 24, 6000.0, WorkoutStatus.PLANNED, d.toString(), eventId = 555L, startLocal = "${d}T17:00:00"))
+                val days = setOf(Fixture.today.toString(), Fixture.today.plusDays(1).toString())
+                Prefs.saveSnapshot(ctx, snap.copy(week = snap.week.filter { it.date !in days || !it.type.contains("Run", ignoreCase = true) } + two(Fixture.today) + two(Fixture.today.plusDays(1)), ahead = snap.ahead.filter { it.date !in days }), 400)
                 safely("runwindow_v3_two_runs") { cardShot("runwindow_v3_card_two_runs") }
+                safely("runwindow_v3_two_runs_plan") {
+                    val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, Fixture.today.toString())
+                    val ctl = Robolectric.buildActivity(RunWindowActivity::class.java, i).setup()
+                    settle()
+                    capture("runwindow_v3_two_runs_plan", ctl.get().window.decorView)
+                    ctl.pause().stop().destroy()
+                }
             } finally { WxFixture.tweak = null; Fixture.seed(ctx); WxFixture.seed(ctx) }
         }
         // Missed-session swaps: the "Fit in a missed session" page from a planned week (workout today marked as skipped, and an at-risk day)
