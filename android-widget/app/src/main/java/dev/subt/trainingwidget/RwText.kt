@@ -262,7 +262,40 @@ object RwText {
         return Note("You missed today's window (${rangeOf(closed.first, closed.second, zone)})", bits.joinToString(" · "))
     }
 
-    /** The window you're in with 45 minutes or less to go (and more than 5), or null. */
-    fun leftIn(wins: List<Pair<Long, Long>>, nowSec: Long, leftSec: Long = 45 * 60L): Pair<Long, Long>? =
+    /** The heads-up fires when this much (1h30) or less is left in the window you are in. */
+    const val HEADS_UP_SEC = 90 * 60L
+
+    /** The window you're in with [leftSec] (default 1h30) or less to go (and more than 5 minutes), or null. */
+    fun leftIn(wins: List<Pair<Long, Long>>, nowSec: Long, leftSec: Long = HEADS_UP_SEC): Pair<Long, Long>? =
         wins.firstOrNull { it.first <= nowSec && it.second - nowSec in 300L..leftSec }
+
+    /** The heads-up decision: the window you're in with 1h30 or less to go, only for a planned run that isn't done yet. */
+    fun headsUp(wins: List<Pair<Long, Long>>, nowSec: Long, planned: Boolean, done: Boolean): Pair<Long, Long>? =
+        if (!planned || done) null else leftIn(wins, nowSec)
+
+    /** "1h30" when about that much is left, else "N min". */
+    fun leftLabel(leftSec: Long): String = if (leftSec >= HEADS_UP_SEC - 300L) "1h30" else "${max(1L, (leftSec + 30) / 60)} min"
+
+    /** "1h30 left in today's window (ends 14:30)" / "Easy 60 still to do". */
+    fun headsUpNote(w: Pair<Long, Long>, nowSec: Long, runName: String, zone: ZoneId): Note =
+        Note("${leftLabel(w.second - nowSec)} left in today's window (ends ${Weather.hhmm(w.second, zone)})", "${runName.ifBlank { "Your run" }} still to do")
+
+    /** The key remembered once a heads-up went out: the day and the window. */
+    fun headsUpKey(date: java.time.LocalDate, w: Pair<Long, Long>) = "$date|${w.first}|${w.second}"
+
+    /**
+     * True when [stored] (the last [headsUpKey]) is for the same day and a window that overlaps [w]: a window that merely moved
+     * a little between two forecasts is still the same window, so no second notice.
+     */
+    fun headsUpSeen(stored: String?, date: java.time.LocalDate, w: Pair<Long, Long>): Boolean {
+        val p = stored?.split("|") ?: return false
+        if (p.size != 3 || p[0] != date.toString()) return false
+        val a = p[1].toLongOrNull() ?: return false
+        val b = p[2].toLongOrNull() ?: return false
+        return w.first < b && w.second > a
+    }
+
+    /** When to look again: 1h30 before the next window closes (or when it opens, for a shorter one), 10 s past; null when none is ahead. */
+    fun nextHeadsUpAt(wins: List<Pair<Long, Long>>, nowSec: Long): Long? =
+        wins.map { max(it.first, it.second - HEADS_UP_SEC) + 10 }.filter { it > nowSec + 30 }.minOrNull()
 }

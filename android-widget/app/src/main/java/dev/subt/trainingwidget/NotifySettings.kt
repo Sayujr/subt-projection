@@ -27,7 +27,8 @@ object NotifySettings {
         Cat("rw_today", "Today's run windows", "Added to the morning workout notification", true, null),
         Cat("rw_shift", "Run window changed", "Only when a window shrinks or grows by 30 min or more, splits, closes or a new one opens. Never while you're inside an open window", true, null),
         Cat("rw_missed", "Window closed, run not done", "One notice when today's window closes with the run still to do: next option and tomorrow", true, null),
-        Cat("rw_left", "45 min left in today's window", "While you're inside the window and the run isn't done", false, null),
+        // key kept from the old "45 min left" switch so saved choices carry over; now on by default
+        Cat("rw_left", "Heads-up: 1h30 left in today's window", "Once per window, when 1h30 or less is left and today's run isn't done", true, null),
         Cat("swap_missed", "Missed-session options", "When a planned run looks missed: ways to fit it back into the week (once per session)", true, null),
         Cat("swap_risk", "At-risk days (no good window)", "The evening before (or the morning of) a planned run with no good time to run it", true, null),
     )

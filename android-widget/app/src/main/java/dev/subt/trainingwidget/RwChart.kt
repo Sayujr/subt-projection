@@ -7,6 +7,7 @@ import android.graphics.DashPathEffect
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -15,6 +16,7 @@ import android.text.TextUtils
 import android.view.MotionEvent
 import android.view.View
 import java.time.ZoneId
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
@@ -22,9 +24,11 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * The graphic day chart (Today card and day plan): a sky that goes from night to day with a cloud blanket hanging from the
- * top, rain streaks, a white temperature line, the window band(s) with a pill row under it, UV dots, and (SubT / TT days)
- * dew point and wind rows. Drawn in dp units on a scaled canvas. [RwChartView] adds touch-and-drag scrubbing.
+ * The graphic day chart (Today card and day plan), Rainbow-style: a sky that goes from deep-navy night through an orange dawn and
+ * dusk glow to day blue, soft puffy clouds (more and thicker with cloud cover, greyer at night), stars on clear nights, rain
+ * streaks, a white temperature line, the window band(s) with a pill row under it, UV dots, and (SubT / TT days) dew point and
+ * wind rows. Drawn in dp units on a scaled canvas into a cached bitmap; [RwChartView] adds touch-and-drag scrubbing on top
+ * without redrawing the sky.
  */
 object RwChart {
     private const val GOOD = 0xFF3DD68C.toInt()
@@ -58,6 +62,8 @@ object RwChart {
         val nowSec: Long?,
         val steps: List<Weather.NowStep>,
         val typeLabel: String,
+        /** 15-minute slots by slot start (today and tomorrow, when that forecast is there). */
+        val fine: Map<Long, Weather.Combined> = emptyMap(),
     ) {
         fun fh(t: Long): Float = (t - day0) / 3600f
     }
@@ -86,7 +92,7 @@ object RwChart {
         return Spec(
             p, zone, day0, start, end, hours, rise, set, wins, best, runs, rb,
             extra = p.run.type == Weather.RunType.SUBT || p.run.type == Weather.RunType.TT, uvLim = lim, nowSec = nowSec, steps = steps,
-            typeLabel = p.run.type.label,
+            typeLabel = p.run.type.label, fine = p.fine.associateBy { it.t },
         )
     }
 
@@ -157,6 +163,121 @@ object RwChart {
         return Rendered(bmp, g)
     }
 
+    // ================================================================ the sky
+
+    /** The mockup's little generator (the same numbers every time for a seed). */
+    class Rnd(private var s: Long) {
+        fun next(): Double { s = (s * 9301L + 49297L) % 233280L; return s / 233280.0 }
+    }
+
+    /** A generator for one hour of the day and one purpose, so an hour always looks the same however the chart's range moves. */
+    fun rndFor(kind: Int, hour: Int): Rnd {
+        val r = Rnd(((hour + 1L) * 7919L + kind * 104729L) % 233280L)
+        repeat(3) { r.next() }
+        return r
+    }
+
+    /** One soft cloud puff inside an hour: position across the hour, height and size, each 0..1. */
+    class Puff(val fx: Float, val fy: Float, val fr: Float)
+
+    const val MAX_PUFFS = 9
+
+    /** The [MAX_PUFFS] puffs of an hour; the first [puffCount] of them are drawn, so more cloud only adds puffs. */
+    fun puffs(hour: Int): List<Puff> {
+        val r = rndFor(1, hour)
+        return List(MAX_PUFFS) { Puff(r.next().toFloat(), r.next().toFloat(), r.next().toFloat()) }
+    }
+
+    fun puffCount(cloud: Double): Int = (cloud.coerceIn(0.0, 100.0) / 100.0 * MAX_PUFFS).roundToInt()
+
+    /** A star: position across the hour and down the upper sky, and its brightness. */
+    class Star(val fx: Float, val fy: Float, val alpha: Float)
+
+    fun stars(hour: Int): List<Star> {
+        val r = rndFor(2, hour)
+        return List(6) { Star(r.next().toFloat(), (r.next() * 0.7).toFloat(), (0.4 + r.next() * 0.5).toFloat()) }
+    }
+
+    /** Sky colour [r, g, b] at hour [h]: deep navy night, an orange glow within 45 minutes of sunrise and sunset, day blue. */
+    fun skyColor(h: Float, rise: Float, set: Float): IntArray {
+        val d = min(h - rise, set - h)
+        if (d < -0.75f) return intArrayOf(14, 20, 44)
+        if (d >= 0.75f) return intArrayOf(70, 110, 170)
+        val t = (d + 0.75f) / 1.5f
+        val glow = 1f - abs(t - 0.5f) * 2f
+        return intArrayOf(
+            (14 + t * (70 - 14) + glow * 120).roundToInt().coerceIn(0, 255),
+            (20 + t * (110 - 20) + glow * 40).roundToInt().coerceIn(0, 255),
+            (44 + t * (170 - 44)).roundToInt().coerceIn(0, 255),
+        )
+    }
+
+    private fun argb(a: Float, r: Int, g: Int, b: Int) = ((a.coerceIn(0f, 1f) * 255).roundToInt() shl 24) or (r shl 16) or (g shl 8) or b
+
+    /** Sky, stars, soft clouds and rain streaks inside the chart box (the caller has clipped to it). */
+    private fun drawSky(c: Canvas, spec: Spec, g: Geo) {
+        val x0 = g.x0; val x1 = g.x1; val top = TOP; val base = BASE
+        val start = g.start.toInt()
+        val k = (base - top) / 106f              // the mockup's chart was 106 high
+        val span = g.end - g.start
+        fun X(h: Float) = g.x(h)
+        val hourW = X(1f) - X(0f)
+        // colour per x: top lighter, bottom darker
+        val col = Paint()
+        var x = x0
+        while (x < x1) {
+            val h = g.start + (x - x0) / (x1 - x0) * span
+            val cl = skyColor(h, spec.rise, spec.set)
+            col.shader = LinearGradient(0f, top, 0f, base, argb(1f, cl[0], cl[1], cl[2]),
+                argb(1f, (cl[0] * 0.55f).roundToInt(), (cl[1] * 0.55f).roundToInt(), (cl[2] * 0.55f).roundToInt()), Shader.TileMode.CLAMP)
+            c.drawRect(x, top, min(x + 1.3f, x1), base, col)
+            x += 1f
+        }
+        // stars on clear night hours
+        val starP = Paint(Paint.ANTI_ALIAS_FLAG)
+        spec.hours.forEachIndexed { i, hr ->
+            val hh = start + i
+            val cloud = hr?.cloud ?: 0.0
+            if (cloud >= 40.0) return@forEachIndexed
+            for (st in stars(hh)) {
+                val h = hh + st.fx
+                if (h < spec.rise - 0.5f || h > spec.set + 0.5f) {
+                    starP.color = argb(st.alpha, 255, 255, 255)
+                    c.drawRect(X(h), top + st.fy * (base - top), X(h) + 1f, top + st.fy * (base - top) + 1f, starP)
+                }
+            }
+        }
+        // clouds: soft puffs, more and thicker with cloud cover, greyer at night
+        spec.hours.forEachIndexed { i, hr ->
+            val cl = hr?.cloud ?: return@forEachIndexed
+            val hh = start + i
+            val night = hh < spec.rise - 0.3f || hh > spec.set + 0.3f
+            val a = ((0.25 + cl / 100.0 * 0.45) * (if (night) 0.55 else 1.0)).toFloat()
+            val (r, gg, b) = if (night) Triple(170, 178, 200) else Triple(245, 247, 252)
+            val pf = Paint(Paint.ANTI_ALIAS_FLAG)
+            for (p in puffs(hh).take(puffCount(cl))) {
+                val cx = X(hh.toFloat()) + p.fx * hourW
+                val cy = top + (8f + p.fy * 38f * (0.4f + cl.toFloat() / 100f)) * k
+                val rad = (10f + p.fr * 16f * (0.5f + cl.toFloat() / 100f)) * k
+                pf.shader = RadialGradient(cx, cy, rad, argb(a, r, gg, b), argb(0f, r, gg, b), Shader.TileMode.CLAMP)
+                c.drawCircle(cx, cy, rad, pf)
+            }
+        }
+        // rain streaks: denser with mm/h
+        val rainP = stroke(0x999AC3FF.toInt(), 1.1f)
+        spec.hours.forEachIndexed { i, hr ->
+            val m = hr?.rainMm ?: 0.0
+            if (m <= 0.25) return@forEachIndexed
+            val hh = start + i
+            val r = rndFor(3, hh)
+            repeat((m * 5).roundToInt().coerceIn(1, 18)) {
+                val sx = X(hh.toFloat()) + r.next().toFloat() * hourW
+                val sy = top + (40f + r.next().toFloat() * 40f) * k
+                c.drawLine(sx, sy, sx - 3f, sy + 12f * k, rainP)
+            }
+        }
+    }
+
     private fun draw(c: Canvas, spec: Spec, g: Geo) {
         val start = g.start.toInt()
         val x0 = g.x0; val x1 = g.x1; val w = g.w
@@ -169,39 +290,7 @@ object RwChart {
         c.save()
         val clip = Path().apply { addRoundRect(RectF(x0, top, x1, base), 10f, 10f, Path.Direction.CW) }
         c.clipPath(clip)
-        val nightP = fill(0xFF000000.toInt()).apply { shader = LinearGradient(0f, top, 0f, base, 0xFF151B2E.toInt(), 0xFF10131C.toInt(), Shader.TileMode.CLAMP) }
-        c.drawRect(x0, top, x1, base, nightP)
-        val dayShader = LinearGradient(0f, top, 0f, base, 0xFF3B5A86.toInt(), 0xFF22324A.toInt(), Shader.TileMode.CLAMP)
-        val dawn = fill(0xFF000000.toInt()).apply { shader = dayShader; alpha = (255 * 0.55f).toInt() }
-        c.drawRect(X(spec.rise - 0.5f), top, X(spec.set + 0.5f), base, dawn)
-        val day = fill(0xFF000000.toInt()).apply { shader = dayShader }
-        c.drawRect(X(spec.rise), top, X(spec.set), base, day)
-
-        // cloud blanket hanging from the top: thicker = cloudier
-        val blanket = Path()
-        blanket.moveTo(X(g.start), top)
-        spec.hours.forEachIndexed { i, h ->
-            val cl = h?.cloud ?: return@forEachIndexed
-            blanket.lineTo(X(start + i + 0.5f), top + (cl / 100.0 * ch * 0.55).toFloat())
-        }
-        blanket.lineTo(X(g.end), top)
-        blanket.close()
-        val cloudP = fill(0xFF000000.toInt()).apply { shader = LinearGradient(0f, top, 0f, top + ch * 0.55f, 0x8CE8EDF5.toInt(), 0x14E8EDF5, Shader.TileMode.CLAMP) }
-        c.drawPath(blanket, cloudP)
-
-        // rain streaks: denser with mm/h
-        val rainP = stroke(0xBF7FB8FF.toInt(), 1.6f)
-        val hourW = X(1f) - X(0f)
-        spec.hours.forEachIndexed { i, h ->
-            val r = h?.rainMm ?: 0.0
-            if (r > 0.25) {
-                val n = min(6, ceil(r * 1.5).toInt())
-                for (k in 0 until n) {
-                    val xx = X((start + i).toFloat()) + 4f + k * ((hourW - 8f) / 6f)
-                    c.drawLine(xx, top + 30f, xx - 4f, base - 4f, rainP)
-                }
-            }
-        }
+        drawSky(c, spec, g)
 
         // window band(s): green, amber when tight; edge lines
         for (s in spec.wins) {
@@ -235,9 +324,9 @@ object RwChart {
                 val px = X(start + i + 0.5f); val py = g.ty(t, tr.first, tr.second)
                 if (first) { path.moveTo(px, py); first = false } else path.lineTo(px, py)
             }
-            c.drawPath(path, stroke(0xE6FFFFFF.toInt(), 2f).apply { strokeJoin = Paint.Join.ROUND })
+            c.drawPath(path, stroke(0xE6FFFFFF.toInt(), 2f).apply { strokeJoin = Paint.Join.ROUND; setShadowLayer(3f, 0f, 1f, 0x99000000.toInt()) })
             val dot = fill(WHITE)
-            val tp = textPaint(WHITE, 10.5f, bold = true)
+            val tp = textPaint(WHITE, 10.5f, bold = true).apply { setShadowLayer(3f, 0f, 0.5f, 0xCC000000.toInt()) }
             spec.hours.forEachIndexed { i, h ->
                 val t = h?.temp ?: return@forEachIndexed
                 if ((start + i) % 3 == 0) {
@@ -247,6 +336,8 @@ object RwChart {
                 }
             }
         }
+        // scale hint, top-left
+        c.drawText("☁ thicker = cloudier", x0 + 6f, top + 12f, textPaint(0x99FFFFFF.toInt(), 9f, align = Paint.Align.LEFT).apply { setShadowLayer(2f, 0f, 0.5f, 0x99000000.toInt()) })
         c.restore()
 
         // ---- sky icons every 2 h
@@ -341,19 +432,27 @@ object RwChart {
         fun time(zone: ZoneId) = Weather.hhmm(timeSec, zone)
     }
 
-    /** Hour steps; 10-minute steps inside the 4 h of nowcast after [Spec.nowSec]. */
+    /** 10-minute steps inside the 4 h of nowcast after [Spec.nowSec], then 15-minute steps (today and tomorrow), then hour steps. */
     fun probe(spec: Spec, g: Geo, xDp: Float): Probe? {
         val tau = g.hourAt(xDp)
         val tSec = spec.day0 + (tau * 3600.0).toLong()
         val nowSec = spec.nowSec
-        val fine = nowSec != null && spec.steps.isNotEmpty() && tSec >= nowSec - 600 && tSec <= nowSec + 4 * 3600
+        val nowcast = nowSec != null && spec.steps.isNotEmpty() && tSec >= nowSec - 600 && tSec <= nowSec + 4 * 3600
         val hs = Weather.hourFloor(tSec)
-        val hr = spec.hours.getOrNull(((hs - spec.day0) / 3600).toInt() - spec.start)
-        val snapped = if (fine) Math.floorDiv(tSec, 600L) * 600L else hs
-        val px = if (fine) g.x(spec.fh(snapped)) else g.x(spec.fh(hs) + 0.5f)
-        val probeT = if (fine) snapped else hs + 1800
+        val hourly = spec.hours.getOrNull(((hs - spec.day0) / 3600).toInt() - spec.start)
+        val slot = Math.floorDiv(tSec, 900L) * 900L
+        val fineHr = spec.fine[slot]
+        val snapped = when {
+            nowcast -> Math.floorDiv(tSec, 600L) * 600L
+            fineHr != null -> slot
+            else -> hs
+        }
+        val stepped = nowcast || fineHr != null
+        val hr = if (nowcast) spec.fine[Math.floorDiv(snapped, 900L) * 900L] ?: hourly else fineHr ?: hourly
+        val px = if (stepped) g.x(spec.fh(snapped)) else g.x(spec.fh(hs) + 0.5f)
+        val probeT = if (stepped) snapped else hs + 1800
         var rain = hr?.rainMm ?: 0.0
-        if (fine) {
+        if (nowcast) {
             val m = spec.steps.filter { it.begin < snapped + 600 && it.end > snapped }.maxOfOrNull { it.rate }
             if (m != null) rain = m
         }
@@ -363,7 +462,7 @@ object RwChart {
         val night = a < spec.rise || a > spec.set
         var why: String? = null
         if (!inWin) {
-            why = spec.plan.why[hs]
+            why = spec.plan.why[Math.floorDiv(snapped, 900L) * 900L].takeIf { stepped } ?: spec.plan.why[hs]
             if (why == null && rain > 0.5) why = "rain ${RwText.num1(rain)} mm/h"
             if (why == null) {
                 val ps = spec.plan
@@ -374,7 +473,7 @@ object RwChart {
                 }
             }
         }
-        return Probe(probeT.let { if (fine) snapped else hs }, px, hr, rain, night, inWin, inBest, why, fine)
+        return Probe(snapped, px, hr, rain, night, inWin, inBest, why, stepped)
     }
 
     private val CARD_W = 214f
@@ -452,7 +551,8 @@ class RwChartView(ctx: Context) : View(ctx) {
         val sp = spec ?: return null
         val cur = rendered
         if (cur != null && renderedW == w) return cur
-        val r = RwChart.render(sp, w, dens)
+        // a drawing problem (or no memory for the bitmap) leaves the chart blank instead of taking the screen down
+        val r = try { RwChart.render(sp, w, dens) } catch (e: Throwable) { android.util.Log.w("RwChart", "chart not drawn", e); return null }
         rendered = r; renderedW = w
         return r
     }
@@ -468,7 +568,7 @@ class RwChartView(ctx: Context) : View(ctx) {
         val sp = spec ?: return
         val r = ensure(width.coerceAtLeast(1)) ?: return
         canvas.drawBitmap(r.bmp, 0f, 0f, null)
-        probe?.let { RwChart.drawScrub(canvas, sp, r.geo, it, dens) }
+        probe?.let { pr -> runCatching { RwChart.drawScrub(canvas, sp, r.geo, pr, dens) } }
     }
 
     /** Puts the scrub line at [xPx] (view pixels); null lifts it. Also used by tests. */

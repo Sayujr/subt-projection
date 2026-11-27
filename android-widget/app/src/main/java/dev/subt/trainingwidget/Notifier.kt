@@ -94,9 +94,11 @@ object Notifier {
         once(ctx, "rw_missed", key) { post(ctx, ALERTS, 24, note.title, note.body, "RW:$date") }
     }
 
-    /** Optional "45 min left in today's window" (off by default); once per window. */
-    fun windowLeft(ctx: Context, text: String, date: LocalDate, key: String) {
-        once(ctx, "rw_left", key) { post(ctx, ALERTS, 25, "45 min left in today's window", text, "RW:$date") }
+    /** "1h30 left in today's window (ends 14:30)": once per window (a window that only moved a little counts as the same one). */
+    fun windowLeft(ctx: Context, note: RwText.Note, date: LocalDate, window: Pair<Long, Long>) {
+        if (RwText.headsUpSeen(Prefs.lastNotified(ctx, "rw_left"), date, window)) return
+        Prefs.setLastNotified(ctx, "rw_left", RwText.headsUpKey(date, window))
+        post(ctx, ALERTS, 25, note.title, note.body, "RW:$date")
     }
 
     /**

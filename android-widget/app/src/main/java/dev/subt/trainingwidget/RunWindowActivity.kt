@@ -305,7 +305,7 @@ class RunWindowActivity : Activity() {
         // 2. The chart (touch and drag to read each hour)
         run {
             val c = card()
-            BandViews.heading(this, c, "THE DAY", "Sky and cloud (hanging from the top), rain streaks and the white temperature line. Green = the time you can run, amber = tight; the pill underneath has the times, and a darker 'best' part marks the stretch that suits a workout. UV dots by hour (green within your limit of ${s.uvLimit.roundToInt()}). Touch and drag across it to read each hour." + (if (!plan.same && plan.rainbow != null) " The dashed outline is Rainbow's own pick." else ""))
+            BandViews.heading(this, c, "THE DAY", RwUi.CHART_KEY + " Green = the time you can run, amber = tight; the pill underneath has the times, and a darker 'best' part marks the stretch that suits a workout. Touch and drag across it to read each hour (every 15 minutes today and tomorrow)." + (if (!plan.same && plan.rainbow != null) " The dashed outline is Rainbow's own pick." else ""))
             c.addView(RwUi.chart(this, plan, s, date == LocalDate.now()), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
             val rbConnected = RunWindows.data(this)?.rb?.isNotEmpty() == true
             if (rbConnected && plan.rbHours.isEmpty()) text(c, "Rainbow: no hourly forecast for this day", 12.5f, DIM, top = 8)

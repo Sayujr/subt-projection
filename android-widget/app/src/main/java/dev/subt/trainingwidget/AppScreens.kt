@@ -1373,8 +1373,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(TextView(a).apply { text = t; setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f); setTextColor(DIM); letterSpacing = 0.08f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val body = TextView(a).apply {
-            text = "The sky shows the cloud (hanging from the top), rain streaks and the temperature line. Green is the time you can run, amber means tight. The pill under it has the times; under that, UV by hour" +
-                (if (p.run.type == Weather.RunType.SUBT || p.run.type == Weather.RunType.TT) ", dew point and wind. 'Best' is the stretch inside the window that suits this workout." else ".") + " Touch and drag across the chart to read each hour."
+            text = RwUi.CHART_KEY + " Green is the time you can run, amber means tight. The pill under it has the times; under that, UV by hour" +
+                (if (p.run.type == Weather.RunType.SUBT || p.run.type == Weather.RunType.TT) ", dew point and wind. 'Best' is the stretch inside the window that suits this workout." else ".") + " Touch and drag across the chart to read each hour (every 10 minutes in the next 4 h of rain radar, then every 15 minutes today and tomorrow)."
             setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f); setLineSpacing(dpf(2f).toFloat(), 1f)
             setPadding(0, dp(4), 0, 0); visibility = if ("rwinfo" in openInfo) View.VISIBLE else View.GONE
         }

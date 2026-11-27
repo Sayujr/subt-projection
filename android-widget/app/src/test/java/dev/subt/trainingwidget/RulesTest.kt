@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -1372,17 +1373,6 @@ class RulesTest {
         assertFalse(rwPlan(d, emptyList()).let { !it.noData })
     }
 
-    @Test fun rwSwapHintIsTextOnly() {
-        val d = RW_DATE
-        val bad = rwPlan(d, rwDay { h -> rwHour(d, h, rain = 3.0, pct = 90.0) }, run = rwRun(Weather.RunType.EASY))
-        val d2 = d.plusDays(1)
-        val good = rwPlan(d2, rwDay { h -> rwHour(d2, h, rain = 0.0) })
-        val hints = Weather.swapHints(listOf(bad, good), UTC)
-        assertEquals(setOf(d), hints.keys)
-        assertTrue(hints.getValue(d).contains("swap with Tuesday"))
-        assertTrue(bad.withSwap(hints[d]).summary.lines().any { it.contains("swap with Tuesday") })
-    }
-
     // ---- v3: whole windows
 
     private fun rwWinSun(d: LocalDate) = Weather.Sun(d, rwT(d, 6, 59), rwT(d, 16, 37))
@@ -1567,9 +1557,10 @@ class RulesTest {
         assertEquals("Next option: 17:30–18:30 · or tomorrow 07:00–14:00", note.body)
         val late = RwText.missedNote(wins[1], wins.take(1) + wins.drop(1), emptyList(), rwT(d, 19), UTC)
         assertTrue(late.body.contains("No more windows today"))
-        // 45 minutes left
+        // 1h30 left
         assertEquals(wins[0], RwText.leftIn(wins, rwT(d, 14, 20)))
-        assertNull(RwText.leftIn(wins, rwT(d, 13, 0)))
+        assertNull("two hours left is too early", RwText.leftIn(wins, rwT(d, 13, 0)))
+        assertEquals(wins[0], RwText.leftIn(wins, rwT(d, 13, 30)))
         assertNull("the last few minutes are too late to bother", RwText.leftIn(wins, rwT(d, 14, 57)))
         assertNull("not inside a window", RwText.leftIn(wins, rwT(d, 16)))
     }
@@ -1628,6 +1619,189 @@ class RulesTest {
         // lifted
         assertEquals(RwChart.uvColor(0.5, 2.0), 0xFF3DD68C.toInt())
         assertEquals(RwChart.uvColor(2.5, 2.0), 0xFFFFC53D.toInt())
+    }
+
+
+    // ================================================================ 15-minute steps
+
+    private val M15_JSON = """{"utc_offset_seconds":0,"minutely_15":{"time":["2026-06-15T10:00","2026-06-15T10:15","2026-06-15T10:30","2026-06-15T10:45"],
+        "temperature_2m_ncep_hrrr_conus":[10.0,10.5,11.0,null],"temperature_2m_ncep_nbm_conus":[12.0,12.5,null,null],
+        "precipitation_ncep_hrrr_conus":[0.0,0.1,0.2,null],"wind_speed_10m_ncep_hrrr_conus":[8.0,9.0,10.0,11.0],
+        "dew_point_2m_ncep_hrrr_conus":[4.0,4.0,5.0,5.0]}}"""
+
+    @Test fun rwParseMinutely15() {
+        val h = Weather.parseMinutely15(M15_JSON)
+        assertEquals("the last slot has no temperature or rain: skipped", 3, h.size)
+        val t0 = Instant.parse("2026-06-15T10:00:00Z").epochSecond
+        assertEquals(listOf(t0, t0 + 900, t0 + 1800), h.map { it.t })
+        assertEquals("median of two models", 11.0, h[0].temp!!, 1e-9)
+        assertEquals(11.5, h[1].temp!!, 1e-9)
+        assertEquals("one model left", 11.0, h[2].temp!!, 1e-9)
+        assertEquals("mm per 15 min becomes mm/h", 0.4, h[1].rainMm!!, 1e-9)
+        assertEquals(9.0, h[1].wind!!, 1e-9)
+        assertEquals(4.0, h[0].dew!!, 1e-9)
+        assertNull("no cloud column: the hourly one is used later", h[0].cloud)
+        assertNull(h[0].uv)
+        // a single model answers with plain names; the offset moves local times to UTC
+        val plain = Weather.parseMinutely15("""{"utc_offset_seconds":-21600,"minutely_15":{"time":["2026-06-15T08:00","2026-06-15T08:15"],"temperature_2m":[9.0,9.5],"precipitation":[0.0,0.25],"cloud_cover":[40,50]}}""")
+        assertEquals(Instant.parse("2026-06-15T14:00:00Z").epochSecond, plain[0].t)
+        assertEquals(1.0, plain[1].rainMm!!, 1e-9)
+        assertEquals(50.0, plain[1].cloud!!, 1e-9)
+        // junk never throws
+        assertTrue(Weather.parseMinutely15("{}").isEmpty())
+        assertTrue(Weather.parseMinutely15("not json").isEmpty())
+        assertTrue(Weather.parseMinutely15("""{"minutely_15":{"time":["2026-06-15T10:07"],"temperature_2m":[1]}}""").size == 1)
+        assertTrue(Weather.parseMinutely15("""{"minutely_15":{"time":["bad"],"temperature_2m":[1]}}""").isEmpty())
+        assertTrue(Weather.parseMinutely15("""{"minutely_15":{"time":[]}}""").isEmpty())
+    }
+
+    @Test fun rwMinutely15Url() {
+        val u = WeatherApi.minutely15Url(40.015, -105.27, "temperature_2m,precipitation", "ncep_hrrr_conus,ncep_nbm_conus")
+        assertTrue(u, u.contains("minutely_15=temperature_2m,precipitation") && u.contains("models=ncep_hrrr_conus,ncep_nbm_conus") && u.contains("forecast_days=2"))
+        assertFalse(WeatherApi.minutely15Url(40.0, -105.0, "temperature_2m", null).contains("models="))
+    }
+
+    /** Hours 12 and 14 are wet by the hourly forecast (2 mm/h), but the 15-minute shape puts the rain in 12:15–12:30 and 14:45–15:00 only. */
+    private fun fineDay(d: LocalDate): Pair<List<Weather.Combined>, List<Weather.Combined>> {
+        val hourly = rwDay { h -> rwHour(d, h, rain = if (h == 12 || h == 14) 2.0 else 0.0, pct = if (h == 12 || h == 14) 80.0 else 0.0) }
+        val slots = (0..23).flatMap { h -> (0..3).map { q ->
+            val wet = (h == 12 && q == 1) || (h == 14 && q == 3)
+            Weather.Hour(t = rwT(d, h, q * 15), temp = 12.0, rainMm = if (wet) 8.0 else 0.0)
+        } }
+        return hourly to Weather.fineCombined(slots, hourly)
+    }
+
+    @Test fun rwFineRainKeepsTheHourlyTotal() {
+        val d = RW_DATE
+        val (_, fine) = fineDay(d)
+        assertEquals(96, fine.size)
+        val wet = fine.filter { it.rainMm > 0.0 }
+        assertEquals(listOf(rwT(d, 12, 15), rwT(d, 14, 45)), wet.map { it.t })
+        assertEquals("the hour's 2 mm/h spread over four slots: 8 in one", 8.0, wet[0].rainMm, 1e-9)
+        assertEquals("cloud comes from the hourly forecast", 80.0, fine[5].cloud!!, 1e-9)
+        // the Rainbow nowcast wins where it covers a slot
+        val fineNow = Weather.fineCombined(
+            (0..3).map { q -> Weather.Hour(t = rwT(d, 9, q * 15), temp = 12.0, rainMm = 0.0) },
+            rwDay { h -> rwHour(d, h) },
+            listOf(Weather.NowStep(rwT(d, 9, 15), rwT(d, 9, 30), 1.4, "rain")),
+        )
+        assertEquals(listOf(0.0, 1.4, 0.0, 0.0), fineNow.map { it.rainMm })
+    }
+
+    @Test fun rwWindowEdgesFallOnQuarterHours() {
+        val d = RW_DATE
+        val (hourly, fine) = fineDay(d)
+        val run = rwRun(Weather.RunType.EASY, 40)
+        val plain = Weather.plan(d, hourly, emptyList(), listOf(rwSun(d)), run, rwS, null, UTC)
+        assertEquals("hourly only: the wet hours cut the day at :00", listOf(rwT(d, 12), rwT(d, 20, 30)), plain.windows.map { it.end })
+        assertTrue(plain.windows.all { it.start % 1800 == 0L && it.end % 1800 == 0L })
+        val p = Weather.plan(d, hourly, emptyList(), listOf(rwSun(d)), run, rwS, null, UTC, fine = fine)
+        assertEquals(listOf(rwT(d, 12, 15), rwT(d, 14, 45), rwT(d, 20, 30)), p.windows.map { it.end })
+        assertEquals("a window may start on :30", rwT(d, 12, 30), p.windows[1].start)
+        assertEquals(rwT(d, 15), p.windows[2].start)
+        assertEquals(96, p.fine.size)
+        assertEquals("the :15 edge shows in the text", "05:00–12:15", RwText.range(p.windows[0], UTC))
+        assertFalse("the window's own slots are dry", p.windows[1].wet)
+        assertTrue("15-minute slots explain themselves", p.why[rwT(d, 12, 15)]!!.startsWith("rain"))
+        // no 15-minute data for the day: exactly the hourly answer
+        val same = Weather.plan(d, hourly, emptyList(), listOf(rwSun(d)), run, rwS, null, UTC, fine = emptyList())
+        assertEquals(plain.windows.map { it.start to it.end }, same.windows.map { it.start to it.end })
+        // every window still holds the run plus its buffer
+        val tinyRun = rwRun(Weather.RunType.EASY, 10)
+        val q = Weather.plan(d, hourly, emptyList(), listOf(rwSun(d)), tinyRun, rwS, null, UTC, fine = fine)
+        assertTrue(q.windows.all { it.end - it.start >= (10 + rwS.bufferMin) * 60L })
+    }
+
+    @Test fun rwScrubStepsGoFromTenMinutesToFifteenToHours() {
+        val d = RW_DATE
+        val (hourly, fine) = fineDay(d)
+        val p = Weather.plan(d, hourly, emptyList(), listOf(rwSun(d)), rwRun(Weather.RunType.EASY, 40), rwS, null, UTC, fine = fine)
+        val now = rwT(d, 9, 5)
+        val spec = RwChart.spec(p, rwS, UTC, now, listOf(Weather.NowStep(rwT(d, 9, 5), rwT(d, 13, 0), 0.0, null)))
+        val g = RwChart.geo(spec, 800, 2f)
+        val ten = RwChart.probe(spec, g, g.x(10.4f))!!             // 10:24, inside the 4 h of nowcast
+        assertTrue(ten.fineStep); assertEquals("10:20", ten.time(UTC))
+        val quarter = RwChart.probe(spec, g, g.x(14.8f))!!          // 14:48, past the nowcast, fine data
+        assertEquals("14:45", quarter.time(UTC))
+        assertEquals(8.0, quarter.rain, 1e-9)
+        assertFalse(quarter.inWindow)
+        assertTrue(quarter.why!!.startsWith("rain"))
+        val hourSpec = RwChart.spec(rwWinPlan(d, hourly, rwRun(Weather.RunType.EASY, 40)), rwS, UTC)   // no 15-minute data: hour steps
+        val hg = RwChart.geo(hourSpec, 800, 2f)
+        val hourStep = RwChart.probe(hourSpec, hg, hg.x(15.8f))!!
+        assertEquals("15:00", hourStep.time(UTC))
+        assertFalse(hourStep.fineStep)
+    }
+
+    // ================================================================ heads-up: 1h30 left
+
+    @Test fun rwHeadsUpFiresOnceAtNinetyMinutes() {
+        val d = RW_DATE
+        val wins = listOf(rwT(d, 7) to rwT(d, 15), rwT(d, 17, 30) to rwT(d, 19))
+        assertNull("two hours left: too early", RwText.headsUp(wins, rwT(d, 13, 0), true, false))
+        assertEquals("exactly 1h30 left", wins[0], RwText.headsUp(wins, rwT(d, 13, 30), true, false))
+        assertEquals(wins[0], RwText.headsUp(wins, rwT(d, 14, 20), true, false))
+        assertNull("run done", RwText.headsUp(wins, rwT(d, 13, 45), true, true))
+        assertNull("no run planned", RwText.headsUp(wins, rwT(d, 13, 45), false, false))
+        assertNull("between the windows", RwText.headsUp(wins, rwT(d, 16, 0), true, false))
+        assertNull("before the window opens", RwText.headsUp(wins, rwT(d, 6, 0), true, false))
+        assertNull("the last minutes are too late to bother", RwText.headsUp(wins, rwT(d, 14, 57), true, false))
+        assertNull("after the window", RwText.headsUp(wins, rwT(d, 15, 30), true, false))
+        assertEquals("a 90-minute window announces itself when it opens", wins[1], RwText.headsUp(wins, rwT(d, 17, 30), true, false))
+        // the words
+        val n = RwText.headsUpNote(wins[0], rwT(d, 13, 30), "Easy 60", UTC)
+        assertEquals("1h30 left in today's window (ends 15:00)", n.title)
+        assertEquals("Easy 60 still to do", n.body)
+        assertEquals("40 min left in today's window (ends 15:00)", RwText.headsUpNote(wins[0], rwT(d, 14, 20), "Easy 60", UTC).title)
+        assertEquals("Your run still to do", RwText.headsUpNote(wins[0], rwT(d, 14, 0), "", UTC).body)
+        // once per window: the same window, or one that moved a little, is not announced again; the next window is
+        val key = RwText.headsUpKey(d, wins[0])
+        assertTrue(RwText.headsUpSeen(key, d, wins[0]))
+        assertTrue("moved by half an hour: still the same window", RwText.headsUpSeen(key, d, rwT(d, 7, 30) to rwT(d, 15, 30)))
+        assertFalse(RwText.headsUpSeen(key, d, wins[1]))
+        assertFalse("another day", RwText.headsUpSeen(key, d.plusDays(1), wins[0]))
+        assertFalse(RwText.headsUpSeen(null, d, wins[0]))
+        assertFalse(RwText.headsUpSeen("garbage", d, wins[0]))
+        // when to look next: 1h30 before a window closes (10 s past), the window's opening for a short one
+        assertEquals(rwT(d, 13, 30) + 10, RwText.nextHeadsUpAt(wins, rwT(d, 9)))
+        assertEquals(rwT(d, 17, 30) + 10, RwText.nextHeadsUpAt(wins, rwT(d, 14, 0)))
+        assertNull(RwText.nextHeadsUpAt(wins, rwT(d, 18, 0)))
+        assertNull(RwText.nextHeadsUpAt(emptyList(), rwT(d, 9)))
+    }
+
+    @Test fun rwHeadsUpNotificationIsSentOncePerWindow() {
+        val d = LocalDate.now()
+        val w1 = Weather.atMinutes(d, 7 * 60, UTC) to Weather.atMinutes(d, 15 * 60, UTC)
+        val note = RwText.Note("1h30 left in today's window (ends 15:00)", "Easy still to do")
+        Notifier.windowLeft(ctx, note, d, w1)
+        val first = Prefs.lastNotified(ctx, "rw_left")
+        assertEquals(RwText.headsUpKey(d, w1), first)
+        Notifier.windowLeft(ctx, note, d, w1.first + 900 to w1.second + 900)     // forecast moved a little: same window
+        assertEquals(first, Prefs.lastNotified(ctx, "rw_left"))
+        val w2 = Weather.atMinutes(d, 17 * 60, UTC) to Weather.atMinutes(d, 19 * 60, UTC)
+        Notifier.windowLeft(ctx, note, d, w2)
+        assertEquals(RwText.headsUpKey(d, w2), Prefs.lastNotified(ctx, "rw_left"))
+    }
+
+    // ================================================================ the sky
+
+    @Test fun rwSkyRandomIsSeededAndStable() {
+        assertEquals("the mockup's generator", 114404.0 / 233280.0, RwChart.Rnd(7).next(), 1e-12)
+        val a = RwChart.puffs(10); val b = RwChart.puffs(10)
+        assertEquals(RwChart.MAX_PUFFS, a.size)
+        assertEquals(a.map { it.fx }, b.map { it.fx }); assertEquals(a.map { it.fy }, b.map { it.fy }); assertEquals(a.map { it.fr }, b.map { it.fr })
+        assertTrue(a.all { it.fx in 0f..1f && it.fy in 0f..1f && it.fr in 0f..1f })
+        assertNotEquals("another hour looks different", a.map { it.fx }, RwChart.puffs(11).map { it.fx })
+        assertEquals(RwChart.stars(22).map { it.fx }, RwChart.stars(22).map { it.fx })
+        assertTrue(RwChart.stars(22).all { it.fy <= 0.7f && it.alpha in 0.4f..0.9f })
+        // more cloud only adds puffs (the first ones stay)
+        assertEquals(0, RwChart.puffCount(0.0)); assertEquals(5, RwChart.puffCount(50.0)); assertEquals(9, RwChart.puffCount(100.0)); assertEquals(9, RwChart.puffCount(250.0))
+        // sky colour: navy at night, day blue at noon, orange glow at sunrise and sunset
+        assertEquals(listOf(14, 20, 44), RwChart.skyColor(3f, 7f, 17f).toList())
+        assertEquals(listOf(70, 110, 170), RwChart.skyColor(12f, 7f, 17f).toList())
+        val dawn = RwChart.skyColor(7f, 7f, 17f)
+        assertTrue("red leads at sunrise", dawn[0] > dawn[2] + 30 || dawn[0] > 150)
+        assertEquals(RwChart.skyColor(17f, 7f, 17f).toList(), dawn.toList())
     }
 
     // ---- shift detection
@@ -1769,8 +1943,11 @@ class RulesTest {
 
     @Test fun rwNotificationCategories() {
         val N = NotifySettings
-        for (k in listOf("rw_tomorrow", "rw_today", "rw_shift", "rw_missed")) assertTrue("$k on by default", N.isOn(ctx, N.cat(k)))
-        assertFalse("45 min left is off by default", N.isOn(ctx, N.cat("rw_left")))
+        for (k in listOf("rw_tomorrow", "rw_today", "rw_shift", "rw_missed", "rw_left")) assertTrue("$k on by default", N.isOn(ctx, N.cat(k)))
+        assertTrue("the heads-up keeps its old key", N.cat("rw_left").label.contains("1h30"))
+        N.setOn(ctx, N.cat("rw_left"), false)
+        assertFalse("a choice made earlier carries over", N.isOn(ctx, N.cat("rw_left")))
+        N.setOn(ctx, N.cat("rw_left"), true)
         assertEquals(20 * 60, N.time(ctx, N.cat("rw_tomorrow")))
         assertTrue("tomorrow's window wakes the app at its time", N.wakeTimes(ctx).any { it.hour == 20 && it.minute == 0 })
         N.setOn(ctx, N.cat("rw_shift"), false)
@@ -2082,43 +2259,6 @@ class RulesTest {
         Weather.plan(d, hours, emptyList(), listOf(rwSun(d)), Weather.runOf(week, d.toString()), rwS, null, UTC)
     }
 
-    @Test fun swapSuggested() {
-        val d0 = RW_DATE; val d1 = d0.plusDays(1)
-        val week = listOf(rwWorkout("Long run 26 km", d0, 101), rwWorkout("Easy + strides", d1, 102))
-        val plans = swapPlans(setOf(0, 2), week)
-        val s = Weather.swapSuggestions(plans, week, d0)
-        val sp = s.getValue(d0)
-        assertEquals(101L, sp.a.eventId); assertEquals(d1, sp.aTo)
-        assertEquals(102L, sp.b!!.eventId); assertEquals(d0, sp.bTo)
-        val text = Weather.swapText(sp)
-        assertTrue(text, text.startsWith("Move 'Long run 26 km' from ") && text.contains("and 'Easy + strides' from ") && text.endsWith("?"))
-        assertNull("tomorrow is fine, nothing to swap", s[d1])
-        // a day with no run: only the bad day's session moves
-        val alone = listOf(rwWorkout("Long run 26 km", d0, 101))
-        val s1 = Weather.swapSuggestions(swapPlans(setOf(0, 2), alone), alone, d0).getValue(d0)
-        assertNull(s1.b); assertNull(s1.bTo); assertEquals(d1, s1.aTo)
-        assertTrue(Weather.swapText(s1).let { it.startsWith("Move 'Long run 26 km' from ") && !it.contains(" and ") && it.endsWith("?") })
-    }
-
-    @Test fun swapNotSuggested() {
-        val d0 = RW_DATE; val d1 = d0.plusDays(1)
-        val week = listOf(rwWorkout("Long run 26 km", d0, 101), rwWorkout("Easy + strides", d1, 102))
-        assertTrue("dry today: nothing to fix", Weather.swapSuggestions(swapPlans(emptySet(), week), week, d0).isEmpty())
-        assertTrue("every day is wet: nothing clearly better", Weather.swapSuggestions(swapPlans(setOf(0, 1, 2), week), week, d0).isEmpty())
-        val noIds = listOf(rwWorkout("Long run 26 km", d0, null), rwWorkout("Easy + strides", d1, 102))
-        assertTrue("can't move a session without its event id", Weather.swapSuggestions(swapPlans(setOf(0, 2), noIds), noIds, d0).isEmpty())
-        val otherNoId = listOf(rwWorkout("Long run 26 km", d0, 101), rwWorkout("Easy + strides", d1, null))
-        assertTrue(Weather.swapSuggestions(swapPlans(setOf(0, 2), otherNoId), otherNoId, d0).isEmpty())
-        val done = listOf(rwWorkout("Long run 26 km", d0, 101, WorkoutStatus.DONE), rwWorkout("Easy + strides", d1, 102))
-        assertTrue("a run that is already done stays", Weather.swapSuggestions(swapPlans(setOf(0, 2), done), done, d0).isEmpty())
-        val nothing = emptyList<Workout>()
-        assertTrue("no run planned: nothing to move", Weather.swapSuggestions(swapPlans(setOf(0, 2), nothing), nothing, d0).isEmpty())
-        // only today and tomorrow get an offer: the third day is bad, but it's two days out
-        val week3 = week + rwWorkout("Hills", d0.plusDays(2), 103)
-        val plans3 = swapPlans(setOf(2), week3)
-        assertTrue(Weather.swapSuggestions(plans3, week3, d0).isEmpty())
-    }
-
     // ---- watch closely
 
     @Test fun watchAutoRule() {
@@ -2163,7 +2303,7 @@ class RulesTest {
         assertEquals(snap.week, back.week)
     }
 
-    @Test fun fixtureSplitAndSwap() {
+    @Test fun fixtureSplit() {
         Fixture.seed(ctx)
         val tomorrow = LocalDate.now().plusDays(1)
         try {
@@ -2184,10 +2324,6 @@ class RulesTest {
             assertTrue("a planned 70 min run", plan.run.planned && plan.run.minutes == 70)
             assertNotNull("tomorrow is split: ${plan.summary.suggestion}", plan.split)
             assertTrue(plan.window!!.wet)
-            val swap = RunWindows.swapFor(ctx, tomorrow)
-            assertNotNull("tomorrow is wet and a later day is clearly better", swap)
-            assertEquals(777L, swap!!.a.eventId)
-            assertTrue(swap.aTo.isAfter(LocalDate.now().minusDays(1)) && swap.aTo != tomorrow)
         } finally { WxFixture.tweak = null }
     }
 

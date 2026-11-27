@@ -14,6 +14,9 @@ import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.testing.WorkManagerTestInitHelper
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -87,6 +90,40 @@ class ScreensTest {
     }
 
     private fun slug(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+
+    @Test fun skyChartIsCachedAndStableBetweenRedraws() {
+        WxFixture.seed(ctx); WxFixture.seedFine(ctx)
+        val p = RunWindows.plan(ctx, Fixture.today)!!
+        assertFalse(p.noData)
+        val spec = RwChart.spec(p, RwStore.load(ctx), java.time.ZoneId.systemDefault())
+        val a = RwChart.render(spec, 800, 2f).bmp; val b = RwChart.render(spec, 800, 2f).bmp
+        val pa = IntArray(a.width * a.height); val pb = IntArray(b.width * b.height)
+        a.getPixels(pa, 0, a.width, 0, 0, a.width, a.height); b.getPixels(pb, 0, b.width, 0, 0, b.width, b.height)
+        assertTrue("the same picture every time (seeded clouds and stars)", pa.contentEquals(pb))
+        assertTrue("something is drawn", pa.any { it != 0 })
+        // the view draws its cached bitmap and the scrub overlay without rebuilding it
+        val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+        val v = RwUi.chart(act, p, RwStore.load(ctx), today = false) as RwChartView
+        val w = 800
+        v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        v.layout(0, 0, w, v.measuredHeight)
+        val out = Bitmap.createBitmap(w, v.measuredHeight, Bitmap.Config.ARGB_8888)
+        v.draw(Canvas(out))
+        for (f in listOf(0.2f, 0.5f, 0.8f)) { v.scrubTo(w * f); v.draw(Canvas(out)); assertNotNull(v.currentProbe()) }
+        v.scrubTo(null)
+        assertNull(v.currentProbe())
+    }
+
+    @Test fun chartWithoutForecastSaysSo() {
+        WxFixture.seed(ctx)
+        val d = Fixture.today.plusDays(30)            // beyond the forecast
+        val p = RunWindows.plans(ctx, d, 1).first()
+        assertTrue(p.noData)
+        val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+        val v = RwUi.chart(act, p, RwStore.load(ctx), today = false)
+        assertTrue(v is TextView)
+        assertEquals("Forecast not loaded yet", (v as TextView).text.toString())
+    }
 
     @Test fun renderAll() {
         val tabs = listOf("HOME", "WEEK", "STREAKS", "SUBT", "POWER", "RACE", "RECOVERY")
@@ -281,6 +318,46 @@ class ScreensTest {
                 ctl.pause().stop().destroy()
             } finally { WxFixture.tweak = null; WxFixture.seed(ctx) }
         }
+        // Rainbow-style sky: a cloudy day, rain then a clear night, a clear summer day (each with the 15-minute detail cached)
+        safely("runwindow_sky") {
+            fun skyShot(name: String) {
+                val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+                val col = android.widget.LinearLayout(act).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(0xFF0F1218.toInt()) }
+                AppScreens(act, 392).runWindowCard(col)
+                val w = (392 * ctx.resources.displayMetrics.density).toInt()
+                col.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                val h = col.measuredHeight.coerceIn(1, 4000)
+                col.layout(0, 0, w, h)
+                save(name, Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawColor(0xFF0F1218.toInt()); col.draw(this) } })
+            }
+            try {
+                val cases = listOf<Pair<String, (Int, Int, WxFixture.P) -> WxFixture.P>>(
+                    "cloudy_day" to { day, _, p -> if (day <= 1) WxFixture.P(p.temp, 95.0, 0.6, 0.0, p.dew, p.wind) else p },
+                    "rain_clear_night" to { day, hour, p ->
+                        if (day > 1) p
+                        else if (hour < 13) WxFixture.P(p.temp, 92.0, 0.5, 0.0, p.dew, p.wind)
+                        else if (hour < 17) WxFixture.P(p.temp, 100.0, 0.3, 2.0, p.dew, p.wind)
+                        else WxFixture.P(p.temp, 8.0, 0.0, 0.0, p.dew, p.wind)
+                    },
+                    "summer_clear" to { day, hour, p -> if (day <= 1) WxFixture.P(24.0 + 8 * Math.sin(Math.PI * (hour - 6) / 14.0).coerceAtLeast(0.0), 10.0, 8.0 * Math.sin(Math.PI * (hour - 6) / 14.0).coerceAtLeast(0.0), 0.0, 14.0, 12.0) else p },
+                )
+                for ((name, tw) in cases) safely("runwindow_sky_$name") {
+                    WxFixture.tweak = tw
+                    WxFixture.seed(ctx); WxFixture.seedFine(ctx)
+                    skyShot("runwindow_sky_${name}_card")
+                    val p = RunWindows.plan(ctx, Fixture.today)!!
+                    check(p.fine.isNotEmpty()) { "no 15-minute slots in the plan" }
+                    val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+                    val v = RwUi.chart(act, p, RwStore.load(ctx), today = false) as RwChartView
+                    val w = (392 * ctx.resources.displayMetrics.density).toInt()
+                    v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                    v.layout(0, 0, w, v.measuredHeight)
+                    v.scrubTo(w * 0.55f)
+                    check(v.currentProbe()?.fineStep == true) { "the scrub should step by 15 minutes" }
+                    save("runwindow_sky_${name}_scrub", Bitmap.createBitmap(w, v.measuredHeight, Bitmap.Config.ARGB_8888).also { Canvas(it).apply { drawColor(0xFF1D222D.toInt()); v.draw(this) } })
+                }
+            } finally { WxFixture.tweak = null; Fixture.seed(ctx); WxFixture.seed(ctx) }
+        }
         // Run windows v3: the Today card for a big window, a tight window and a two-run day with the bike swap; the day plan with
         // chart + hour list; the chart with the scrub card showing (inside the window, then outside it)
         safely("runwindow_v3") {
@@ -310,7 +387,7 @@ class ScreensTest {
                 safely("runwindow_v3_scrub") {
                     val p = RunWindows.plan(ctx, Fixture.today)!!
                     val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
-                    val v = RwUi.chart(act, p, RwStore.load(ctx), today = false)
+                    val v = RwUi.chart(act, p, RwStore.load(ctx), today = false) as RwChartView
                     val w = (392 * ctx.resources.displayMetrics.density).toInt()
                     v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
                     v.layout(0, 0, w, v.measuredHeight)

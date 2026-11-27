@@ -30,13 +30,17 @@ object RunWindows {
         val fetched: Map<String, Long>,
         /** Learned source weights from self-scoring (empty = equal). */
         val weights: Map<String, Double> = emptyMap(),
+        /** Open-Meteo 15-minute slots for today and tomorrow (empty when that forecast isn't there). */
+        val m15: List<Weather.Hour> = emptyList(),
     ) {
         val all: List<Weather.Combined> by lazy { Weather.combine(src, now, aqi, weights) }
         val rb: List<Weather.Combined> by lazy { if (rbHours.isEmpty()) emptyList() else Weather.combine(mapOf("rainbow" to rbHours), now, aqi) }
+        /** The 15-minute slots as full samples: window edges and the scrub steps for today and tomorrow. */
+        val fine: List<Weather.Combined> by lazy { runCatching { Weather.fineCombined(m15, all, now) }.getOrDefault(emptyList()) }
         val lastFetch: Long get() = fetched.values.maxOrNull() ?: 0L
     }
 
-    private val IDS = listOf("om", "nws", "rainbow", "nowcast", "aqi")
+    private val IDS = listOf("om", "om15", "nws", "rainbow", "nowcast", "aqi")
     @Volatile private var memo: Pair<String, WxData>? = null
     @Volatile private var busy = false
     @Volatile private var lastAttempt = 0L
@@ -49,6 +53,12 @@ object RunWindows {
         val weights = Scoring.weights(ctx)
         val key = caches.entries.joinToString("|") { "${it.key}:${it.value?.second}" } + "|w" + weights.toSortedMap().toString()
         memo?.let { if (it.first == key) return it.second }
+        val d = runCatching { build(caches, weights) }.getOrNull() ?: return null
+        memo = key to d
+        return d
+    }
+
+    private fun build(caches: Map<String, Pair<String, Long>?>, weights: Map<String, Double>): WxData? {
         val src = LinkedHashMap<String, List<Weather.Hour>>()
         var suns: List<Weather.Sun> = emptyList()
         val fetched = HashMap<String, Long>()
@@ -60,10 +70,12 @@ object RunWindows {
         caches["rainbow"]?.let { (body, t) -> Weather.parseRainbow(body).takeIf { it.isNotEmpty() }?.let { rbHours = it; src["rainbow"] = it; fetched["Rainbow"] = t } }
         val now = caches["nowcast"]?.let { (body, t) -> fetched["Rainbow nowcast"] = t; Weather.parseNowcast(body) }.orEmpty()
         val aqi = caches["aqi"]?.let { (body, t) -> fetched["Air quality"] = t; Weather.parseAqi(body) }.orEmpty()
+        // the 15-minute answer only counts while it is about as fresh as the hourly one it refines
+        val omT = caches["om"]?.second ?: 0L
+        val m15 = if (src.isEmpty()) emptyList<Weather.Hour>()
+        else caches["om15"]?.takeIf { omT - it.second < 3 * 3600_000L }?.let { (body, _) -> Weather.parseMinutely15(body) }.orEmpty()
         if (src.isEmpty()) return null
-        val d = WxData(src, rbHours, now, aqi, suns, fetched, weights)
-        memo = key to d
-        return d
+        return WxData(src, rbHours, now, aqi, suns, fetched, weights, m15)
     }
 
     /** "as of 14:05" when the newest data is older than 3 hours; null when fresh. */
@@ -81,14 +93,17 @@ object RunWindows {
         val s = RwStore.load(ctx)
         if (s.lat == null || s.lon == null) return emptyList()
         val d = data(ctx) ?: return emptyList()
-        val week = weekRuns(ctx)
+        val week = runCatching { weekRuns(ctx) }.getOrDefault(emptyList())
         val zone = ZoneId.systemDefault()
         val nowSec = System.currentTimeMillis() / 1000
         val today = LocalDate.now()
         val list = (0 until days).map { i ->
             val date = from.plusDays(i.toLong())
             val run = Weather.runOf(week, date.toString())
-            Weather.plan(date, d.all, d.rb, d.suns, run, s, if (useNow && date == today) nowSec else null, zone, second = if (run.planned && !run.done) Weather.secondOf(week, date.toString()) else null)
+            val now = if (useNow && date == today) nowSec else null
+            runCatching {
+                Weather.plan(date, d.all, d.rb, d.suns, run, s, now, zone, second = if (run.planned && !run.done) Weather.secondOf(week, date.toString()) else null, fine = d.fine)
+            }.getOrElse { Weather.plan(date, emptyList(), emptyList(), d.suns, run, s, null, zone) }   // a plan that can't be built reads "no forecast", never a crash
         }
         return list
     }
@@ -99,19 +114,7 @@ object RunWindows {
         return snap.week + snap.ahead.filter { a -> snap.week.none { it.date == a.date && it.name == a.name && it.eventId == a.eventId } }
     }
 
-    /**
-     * The "Swap in intervals.icu" offer for [date] (today or tomorrow), or null. Judged over the 7 days from today
-     * so it sees the same plans as the Week list.
-     */
-    fun swapFor(ctx: Context, date: LocalDate): Weather.SwapPlan? {
-        if (Prefs.credentials(ctx) == null) return null
-        val today = LocalDate.now()
-        val plans = plans(ctx, today, 7)
-        if (plans.isEmpty()) return null
-        return Weather.swapSuggestions(plans, weekRuns(ctx), today)[date]
-    }
-
-    /** One day's plan (with swap hints computed over the 7 days from today when it falls in that range). */
+    /** One day's plan (computed over the 7 days from today when it falls in that range, so it matches the Week list). */
     fun plan(ctx: Context, date: LocalDate): Weather.DayPlan? {
         val today = LocalDate.now()
         val offset = java.time.temporal.ChronoUnit.DAYS.between(today, date).toInt()
@@ -149,7 +152,7 @@ object RunWindows {
     /**
      * Compares today's and tomorrow's windows with the ones last seen. Alerts only when the window itself changes (see
      * [RwText.windowChange]), never while you are inside an open window, plus one "You missed today's window" when the
-     * last window has closed with the run not done, and the optional "45 min left".
+     * last window has closed with the run not done, and the 1h30 heads-up.
      */
     private fun checkWindows(ctx: Context, notify: Boolean) {
         val zone = ZoneId.systemDefault()
@@ -178,11 +181,32 @@ object RunWindows {
                 Notifier.windowMissed(ctx, note, today, "$today|${closed.second}")
             }
         }
-        if (NotifySettings.isOn(ctx, NotifySettings.cat("rw_left"))) {
-            RwText.leftIn(spans, nowSec)?.let { w ->
-                Notifier.windowLeft(ctx, "Run ${p0.run.name}: the window closes at ${Weather.hhmm(w.second, zone)}.", today, "$today|${w.second}")
-            }
-        }
+        runCatching { headsUp(ctx, plans) }
+    }
+
+    /**
+     * The heads-up: [RwText.HEADS_UP_SEC] (1h30) or less left in the window you are in, today's run planned and not done:
+     * one notice per window. Judged from the cached forecast, so it also works when a refresh failed.
+     */
+    fun headsUp(ctx: Context, plans: List<Weather.DayPlan> = plans(ctx, LocalDate.now(), 1, useNow = true)) {
+        if (!NotifySettings.isOn(ctx, NotifySettings.cat("rw_left"))) return
+        if (Weather.quiet(LocalTime.now().hour)) return
+        val p0 = plans.firstOrNull()?.takeIf { it.date == LocalDate.now() } ?: return
+        if (p0.noData) return
+        val nowSec = System.currentTimeMillis() / 1000
+        val w = RwText.headsUp(RwText.spans(p0.windows), nowSec, p0.run.planned, p0.run.done) ?: return
+        val zone = ZoneId.systemDefault()
+        Notifier.windowLeft(ctx, RwText.headsUpNote(w, nowSec, p0.run.name, zone), p0.date, w)
+    }
+
+    /** When to look again for the heads-up: 1h30 before the next window closes today (epoch seconds), null when there is nothing to wait for. */
+    fun nextHeadsUpAt(ctx: Context): Long? {
+        if (!hasLocation(ctx) || !NotifySettings.isOn(ctx, NotifySettings.cat("rw_left"))) return null
+        val p = plans(ctx, LocalDate.now(), 1, useNow = false).firstOrNull() ?: return null
+        if (p.noData || !p.run.planned || p.run.done) return null
+        val at = RwText.nextHeadsUpAt(RwText.spans(p.windows), System.currentTimeMillis() / 1000) ?: return null
+        val hour = java.time.Instant.ofEpochSecond(at).atZone(ZoneId.systemDefault()).hour
+        return at.takeUnless { Weather.quiet(hour) }
     }
 
     /** Refreshes when the cache is older than [maxAgeMin], outside quiet hours (22:00–05:00). */

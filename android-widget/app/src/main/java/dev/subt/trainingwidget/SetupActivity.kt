@@ -354,7 +354,7 @@ class SetupActivity : Activity() {
         (box.getChildAt(box.childCount - 1) as android.widget.LinearLayout).getChildAt(0).visibility = View.INVISIBLE
         for (k in listOf("deviations", "eftp", "taper", "streak", "update")) { val c = N.cat(k); row(c.label, c.help, N.isOn(this, c), { N.setOn(this, c, it) }, null, null) }
         header("Run windows")
-        for (k in listOf("rw_tomorrow", "rw_today", "rw_shift")) {
+        for (k in listOf("rw_tomorrow", "rw_today", "rw_shift", "rw_missed", "rw_left")) {
             val c = N.cat(k)
             row(c.label, c.help, N.isOn(this, c), { N.setOn(this, c, it) }, if (c.defaultTime != null) N.time(this, c) else null, if (c.defaultTime != null) ({ v: Int -> N.setTime(this, c, v) }) else null)
         }

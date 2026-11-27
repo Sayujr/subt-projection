@@ -115,6 +115,36 @@ object WeatherApi {
         } finally { conn.disconnect() }
     }
 
+    private const val M15_FULL = "temperature_2m,apparent_temperature,precipitation,cloud_cover,uv_index,wind_speed_10m,wind_gusts_10m,dew_point_2m"
+    /** What Open-Meteo's 15-minute set is known to carry (cloud cover and UV are not in it, so those are interpolated from the hourly forecast). */
+    private const val M15_SAFE = "temperature_2m,apparent_temperature,precipitation,wind_speed_10m,wind_gusts_10m,dew_point_2m"
+    private const val M15_MODELS = "ncep_hrrr_conus,ncep_nbm_conus"
+    private const val K_M15_MODE = "rw_m15_mode"
+
+    /** The Open-Meteo 15-minute URL: [vars] for [models] (null = Open-Meteo's own best match), today and tomorrow. */
+    fun minutely15Url(lat: Double, lon: Double, vars: String, models: String?) =
+        "https://api.open-meteo.com/v1/forecast?latitude=${f4(lat)}&longitude=${f4(lon)}&minutely_15=$vars" +
+            (if (models != null) "&models=$models" else "") + "&timezone=auto&forecast_days=2&wind_speed_unit=kmh"
+
+    /**
+     * Fetches `minutely_15` with the US high-resolution models, falling back to fewer variables and then to the best match when
+     * Open-Meteo refuses a variable (HTTP 400) or has no data for the place. Remembers which attempt worked. True when a usable
+     * answer was cached; network errors propagate to the caller.
+     */
+    private fun fetchFine(ctx: Context, lat: Double, lon: Double): Boolean {
+        val attempts = listOf(M15_FULL to M15_MODELS, M15_SAFE to M15_MODELS, M15_SAFE to null)
+        val first = (RwStore.getStr(ctx, K_M15_MODE)?.toIntOrNull() ?: 0).coerceIn(0, attempts.lastIndex)
+        for (i in (first..attempts.lastIndex) + (0 until first)) {
+            val (vars, models) = attempts[i]
+            val r = http(minutely15Url(lat, lon, vars, models))
+            if (r.code != 200 || Weather.parseMinutely15(r.body).isEmpty()) continue
+            RwStore.putCache(ctx, "om15", r.body)
+            RwStore.putStr(ctx, K_M15_MODE, i.toString())
+            return true
+        }
+        return false
+    }
+
     /**
      * Rainbow's clouds tile for "now" at the position: asks for the latest snapshot id, fetches the zoom-7 tile holding
      * the position, decodes the WebP and reads the pixels around it (see [CloudTile] for the cloudy-or-not rule).
@@ -187,6 +217,8 @@ object WeatherApi {
             if (om == null || om.models.isEmpty()) throw IOException("no data")
             RwStore.putCache(ctx, "om", r.body)
         }
+        // 15-minute detail for today and tomorrow: optional. Any failure drops it and everything carries on with the hourly forecast.
+        try { if (!fetchFine(ctx, lat, lon)) RwStore.drop(ctx, "om15") } catch (e: Exception) { RwStore.drop(ctx, "om15") }
         step("Air quality") {
             val url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${f4(lat)}&longitude=${f4(lon)}&hourly=us_aqi&timezone=auto&forecast_days=5"
             val r = http(url)

@@ -7,6 +7,7 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -44,13 +45,22 @@ object RwUi {
     private const val BLUE = 0xFF8FD3FF.toInt()
     private const val BAD = 0xFFFF9A9A.toInt()
 
-    /** The graphic chart for [p] (scrubbable). Today's chart gets the live nowcast for 10-minute steps. */
-    fun chart(a: Activity, p: Weather.DayPlan, s: RwSettings, today: Boolean): RwChartView {
+    /** The sky chart's key (the ⓘ on the Today card and the day plan). */
+    const val CHART_KEY = "Clouds: more and thicker = cloudier (0–100%). Blue streaks = rain. White line = temperature. Dots = UV (green within your limit). Stars = clear night."
+
+    /**
+     * The graphic chart for [p] (scrubbable). Today's chart gets the live nowcast for 10-minute steps. Without a forecast for the
+     * day, or if the chart can't be built, a plain "Forecast not loaded yet" line stands in (never a crash).
+     */
+    fun chart(a: Activity, p: Weather.DayPlan, s: RwSettings, today: Boolean): View {
         val zone = ZoneId.systemDefault()
-        val steps = if (today) runCatching { RunWindows.data(a)?.now }.getOrNull().orEmpty() else emptyList()
-        val v = RwChartView(a)
-        v.set(RwChart.spec(p, s, zone, if (today) System.currentTimeMillis() / 1000 else null, steps))
-        return v
+        val v = runCatching {
+            if (p.noData || p.hours.isEmpty()) return@runCatching null
+            val steps = if (today) runCatching { RunWindows.data(a)?.now }.getOrNull().orEmpty() else emptyList()
+            RwChartView(a).also { it.set(RwChart.spec(p, s, zone, if (today) System.currentTimeMillis() / 1000 else null, steps)) }
+        }.getOrNull()
+        if (v != null) return v
+        return TextView(a).apply { text = "Forecast not loaded yet"; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f); setPadding(0, (8 * a.resources.displayMetrics.density).roundToInt(), 0, 0) }
     }
 
     /** ① and ② lines on a two-run day (② in light blue, or red when it has no window). */

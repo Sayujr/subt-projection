@@ -109,6 +109,28 @@ object WxFixture {
             .put("daily", JSONObject().put("time", dates).put("sunrise", rise).put("sunset", set)).toString()
     }
 
+    /** Open-Meteo `minutely_15` for today and tomorrow from the same profile as the hourly forecast (two models, like the app asks for). */
+    fun m15Json(): String {
+        val times = JSONArray()
+        for (day in 0 until 2) for (hour in 0 until 24) for (q in 0 until 4) times.put(LocalDate.now(zone).plusDays(day.toLong()).atStartOfDay().plusHours(hour.toLong()).plusMinutes(q * 15L).toString())
+        val m = JSONObject().put("time", times)
+        for ((model, dt) in listOf("ncep_hrrr_conus" to 0.4, "ncep_nbm_conus" to -0.4)) {
+            fun col(name: String, f: (P, Int) -> Double) {
+                val a = JSONArray()
+                for (day in 0 until 2) for (hour in 0 until 24) for (q in 0 until 4) a.put(f(profile(day, hour), q))
+                m.put("${name}_$model", a)
+            }
+            col("temperature_2m") { p, q -> p.temp + dt + q * 0.1 }
+            col("apparent_temperature") { p, _ -> p.temp - 1 + dt }
+            col("dew_point_2m") { p, _ -> p.dew }
+            col("precipitation") { p, _ -> p.rain / 4.0 }
+            col("wind_speed_10m") { p, _ -> p.wind }
+            col("wind_gusts_10m") { p, _ -> p.wind * 1.6 }
+        }
+        val off = zone.rules.getOffset(Instant.now()).totalSeconds
+        return JSONObject().put("utc_offset_seconds", off).put("minutely_15", m).toString()
+    }
+
     fun nwsGridJson(): String {
         val vals = JSONArray()
         for (day in 0 until 7) for (hour in 0 until 24 step 3) {
@@ -135,6 +157,11 @@ object WxFixture {
         for (day in 0 until 5) for (hour in 0 until 24) { times.put(localStr(day, hour)); v.put(if (day == 1 && hour in 12..16) 120.0 else 40.0) }
         val off = zone.rules.getOffset(Instant.now()).totalSeconds
         return JSONObject().put("utc_offset_seconds", off).put("hourly", JSONObject().put("time", times).put("us_aqi", v)).toString()
+    }
+
+    /** The 15-minute detail on top of [seed] (window edges on :15 / :45 and 15-minute scrub steps for today and tomorrow). */
+    fun seedFine(ctx: Context) {
+        RwStore.putCache(ctx, "om15", m15Json())
     }
 
     /** A location plus every source cached (as if just fetched), so the Today card, day plan and Week list render offline. */
