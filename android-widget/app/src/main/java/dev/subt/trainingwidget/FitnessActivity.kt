@@ -161,7 +161,10 @@ class FitnessActivity : Activity() {
         st.needed?.let { n ->
             row(c, "Needed for +0.75 Fitness", "$n" + if (st.formLimited) " (Form-limited)" else "")
             val gap = n - st.done - st.planned
-            row(c, "Plan vs needed", if (gap > 0) "about $gap short" else "covered", if (gap > 0) 0xFFFFC53D.toInt() else GOOD)
+            // On track over the month: a lighter week is a normal dip, not a warning
+            val calm = call.status == FitnessPlan.Status.ON_TRACK || call.taper != null
+            row(c, "This week's plan", if (gap > 0) (if (calm) "lighter week, about $gap below a +0.75 week" else "about $gap short of a +0.75 week") else "enough for +0.75",
+                if (gap <= 0) GOOD else if (calm) DIM else 0xFFFFC53D.toInt())
             val parts = listOf(st.done.toDouble(), st.planned.toDouble(), max(gap, 0).toDouble())
             if (parts.sum() > 0) c.addView(BandViews.stripView(this, parts, listOf(GOOD, LINK, 0xFF3A4150.toInt()), resources.displayMetrics.widthPixels - dp(52)))
         }

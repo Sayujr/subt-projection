@@ -1329,8 +1329,10 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
      * The Today card's prompt: "Missed X? Options to fit it in" (yellow), "No good time to run ..." (orange, with "Show options" and
      * "I'll still run it"), or a tight-window nudge. Re-judged on every draw, so it goes away when a good window appears.
      */
-    private fun swapBanner(c: LinearLayout) {
+    private fun swapBanner(c: LinearLayout, only: LocalDate? = null) {
         val cand = runCatching { SwapFlow.banner(a) }.getOrNull() ?: return
+        // When the card leads with tomorrow, today's "missed" prompt moves to the Today line instead
+        if (only != null && cand.date != only) return
         val name = cand.workout.name
         val orange = 0xFFFF9F43.toInt()
         val atRisk = cand.trigger == Swaps.Trigger.AT_RISK
@@ -1454,7 +1456,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         if (lead == RunWindows.Lead.TOMORROW && t != null && !t.noData) {
             // Evening, today's run done, or nothing left today: tomorrow leads, today shrinks to one line
             rwLabel(c, t, "TOMORROW")
-            swapBanner(c)
+            swapBanner(c, today.plusDays(1))
             windowBlock(c, t, s, zone, today = false)
             val pw = p.window
             val todayLine = when {
