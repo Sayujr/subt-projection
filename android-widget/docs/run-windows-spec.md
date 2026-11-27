@@ -168,3 +168,47 @@ Rules for every run type:
 - After an 18:30 start, hours count as night: used only as a fallback, with 🌙 and a lights reminder. The latest finish is still 20:00.
 - **Mornings:** keep the current rule (from sunrise minus 30 min) in winter, spring and autumn.
 - **Summer exception:** in summer, also allow early pre-sunrise starts as normal windows, to avoid UV. Earliest start follows the summer custom/auto hours (e.g. from 05:00).
+
+## v3: whole-window redesign (approved; mockups in docs/mockups/g.*, two.*, win.*)
+
+**Windows**
+- Each hour is graded good, OK or not runnable for that day's run type.
+- Not runnable means any of: rain over 0.5 mm/h, UV over the limit, ice or bad air, too hot for SubT/TT, or dark outside the "dark OK" hours.
+- A window is a contiguous stretch of good and OK hours that is at least the run length + 30 min. Show every window, at full length.
+- **Easy and long runs:** no "best part".
+- **SubT and TT/CPT:** mark a best stretch inside the window (lowest dew point, coolest, light wind for TT).
+- **Headline:**
+  - big window: "Run any time A–B";
+  - narrow window: amber "Tight: A–B ⚠", with the options link;
+  - no window: the existing at-risk banner.
+- **Winter:** windows start from 07:00 unless only earlier works. Starts up to 18:30 count as "dark OK"; later starts are a last resort only.
+
+**Two runs in a day (main + double)**
+- Run ② must be after 16:00.
+- If the main window already reaches past 16:00 with room for ②, use it. Otherwise find the best runnable window after 16:00.
+- If none exists, suggest an indoor bike ride with equivalent load. The rider can tap "Add to intervals.icu", which creates a Ride event at 17:00 with the description in workout-steps format and a power range based on FTP. The planned run is kept.
+
+**Notifications**
+- **Evening before / morning:** "Tomorrow you can run A–B" or "Today: A–B · best for SubT C–D". Narrow days say "Tight today: only A–B". Two-run days name both windows.
+- **While a window is open:** nothing.
+- **When a window closes and the run isn't done:** one "You missed today's window (A–B). Next option: … or tomorrow …" notice.
+- **Window change:** notify only when the window itself changes (shrinks or grows by 30 min or more, splits, closes, or a new one opens).
+- **Optional "45 min left in today's window":** off by default.
+
+**Chart (graphic)**
+- Sky-icon row every 2 h.
+- Day/night sky gradient, with 🌅 and 🌇 marks at sunrise and sunset.
+- A cloud blanket from the top, and rain streaks whose density follows mm/h.
+- A white temperature line with readings.
+- The window as a green band on the chart plus a pill underneath with its times; a narrow window is amber. The best stretch is a darker part of the pill, labelled "best".
+- A row of UV dots, coloured by the user's limit.
+- Dew point and wind rows on SubT/TT/CPT days only.
+- **Scrub (touch and drag):** a vertical line snaps to each hour (every 10 min within nowcast range). A card follows the finger and shows: time, sky label, cloud %, UV, temperature/feels-like, rain mm/h and chance %, dew point, wind and gusts, and in/out of the window with the reason.
+
+**Hour-by-hour view**
+- A list with a green window bar on the left.
+- Best rows tinted.
+- Columns: cloud, UV, feels-like, dew point, rain, wind.
+- Sunrise and sunset separator rows; dark hours faded.
+
+**Temperature line in the summary:** e.g. "Day feels 2–6 °C · you're in the warmest 35%". 🧤 appears once there, not on every hour.

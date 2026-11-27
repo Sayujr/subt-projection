@@ -1,0 +1,106 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#12151c;color:#f2f4f8;font:14px/1.35 Roboto,system-ui,sans-serif;width:1380px;padding:18px;display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+.ph{width:430px}.tag{font-size:11px;letter-spacing:.08em;color:#6b7386;margin:0 4px 8px}
+.card{background:#1d222d;border-radius:18px;padding:16px;overflow:hidden}
+.lbl{font-size:11px;letter-spacing:.08em;color:#9aa3b2;display:flex;justify-content:space-between}
+.big{font-size:24px;font-weight:600;margin-top:4px}.sub{color:#9aa3b2;font-size:13px;margin-top:3px}
+.best{color:#3dd68c;font-size:13px;margin-top:3px}.link{font-size:12px;color:#4ea1ff;margin-top:6px}
+svg text{font-family:Roboto,system-ui,sans-serif}
+</style></head><body>
+<script>
+const f=h=>`${String(Math.floor(h)).padStart(2,'0')}:${h%1?String(Math.round(h%1*60)).padStart(2,'0'):'00'}`;
+function sky(c,r,night){if(r>.5)return'🌧️';if(r>.25)return'🌦️';if(night)return c>=60?'☁️':'🌙';return c>=80?'☁️':c>=50?'🌥️':c>=25?'⛅':'☀️'}
+function uvCol(u,l){return u<=l?'#3dd68c':u<=l+1?'#ffc53d':u<=6?'#f7933f':'#ff6b6b'}
+// h: [cloud, rain, uv, temp, dew, wind]
+function chart(id,o){
+ const {start,end,rise,set,hours,wins,best,uvLim,extra,scrub}=o;
+ const W=398,x0=8,x1=W-8,X=h=>x0+(h-start)/(end-start)*(x1-x0);
+ const iconsY=18,top=34,base=118,ch=base-top;let y=base;
+ let s='';const temps=hours.map(h=>h[3]),tmin=Math.min(...temps)-2,tmax=Math.max(...temps)+2,TY=t=>base-8-(t-tmin)/(tmax-tmin)*(ch-22);
+ s+=`<defs><linearGradient id="day${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b5a86"/><stop offset="1" stop-color="#22324a"/></linearGradient>
+ <linearGradient id="nt${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#151b2e"/><stop offset="1" stop-color="#10131c"/></linearGradient>
+ <linearGradient id="cl${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8edf5" stop-opacity=".55"/><stop offset="1" stop-color="#e8edf5" stop-opacity=".08"/></linearGradient>
+ <clipPath id="cp${id}"><rect x="${x0}" y="${top}" width="${x1-x0}" height="${ch}" rx="10"/></clipPath></defs>`;
+ s+=`<g clip-path="url(#cp${id})"><rect x="${x0}" y="${top}" width="${x1-x0}" height="${ch}" fill="url(#nt${id})"/>`;
+ // dawn/dusk soft edges
+ s+=`<rect x="${X(rise-.5)}" y="${top}" width="${X(set+.5)-X(rise-.5)}" height="${ch}" fill="url(#day${id})" opacity=".55"/><rect x="${X(rise)}" y="${top}" width="${X(set)-X(rise)}" height="${ch}" fill="url(#day${id})"/>`;
+ // cloud blanket from top (thicker = cloudier)
+ let p=`M${X(start)},${top}`;hours.forEach((h,i)=>p+=` L${X(start+i+.5)},${top+h[0]/100*ch*.55}`);p+=` L${X(end)},${top} Z`;s+=`<path d="${p}" fill="url(#cl${id})"/>`;
+ // rain streaks
+ hours.forEach((h,i)=>{if(h[1]>.25){for(let k=0;k<Math.min(6,Math.ceil(h[1]*1.5));k++){const xx=X(start+i)+4+k*((X(1)-X(0)-8)/6);s+=`<line x1="${xx}" y1="${top+30}" x2="${xx-4}" y2="${base-4}" stroke="#7fb8ff" stroke-width="1.6" opacity=".75"/>`}}});
+ // window band
+ wins.forEach(([a,b,t])=>{const c=t?'#ffc53d':'#3dd68c';s+=`<rect x="${X(a)}" y="${top}" width="${X(b)-X(a)}" height="${ch}" fill="${c}" opacity=".16"/><line x1="${X(a)}" x2="${X(a)}" y1="${top}" y2="${base}" stroke="${c}" stroke-width="2"/><line x1="${X(b)}" x2="${X(b)}" y1="${top}" y2="${base}" stroke="${c}" stroke-width="2"/>`});
+ (o.runs||[]).forEach(([a,b,lab,c])=>{s+=`<rect x="${X(a)}" y="${top}" width="${X(b)-X(a)}" height="${ch}" fill="none" stroke="${c}" stroke-width="2" rx="4"/><text x="${(X(a)+X(b))/2}" y="${top+14}" text-anchor="middle" font-size="12" font-weight="700" fill="${c}">${lab}</text>`});
+ if(best)s+=`<rect x="${X(best[0])}" y="${top}" width="${X(best[1])-X(best[0])}" height="${ch}" fill="#3dd68c" opacity=".22"/>`;
+ // temperature line + labels
+ let tp='';hours.forEach((h,i)=>tp+=(i?' L':'M')+X(start+i+.5)+','+TY(h[3]));s+=`<path d="${tp}" fill="none" stroke="#ffffff" stroke-width="2" opacity=".9"/>`;
+ hours.forEach((h,i)=>{if((start+i)%3==0)s+=`<circle cx="${X(start+i+.5)}" cy="${TY(h[3])}" r="2.5" fill="#fff"/><text x="${X(start+i+.5)}" y="${TY(h[3])-6}" text-anchor="middle" font-size="10.5" font-weight="600" fill="#fff">${h[3]}°</text>`});
+ s+=`</g>`;
+ // window labels above icons? put window pills under axis
+ // sky icons row
+ hours.forEach((h,i)=>{const hh=start+i;if(hh%2==1){const night=hh<rise||hh>set;s+=`<text x="${X(hh+.5)}" y="${iconsY+6}" text-anchor="middle" font-size="16">${sky(h[0],h[1],night)}</text>`}});
+ // axis
+ y=base+14;for(let hh=start;hh<=end;hh++)if(hh%3==0)s+=`<text x="${Math.min(W-14,Math.max(14,X(hh)))}" y="${y}" text-anchor="middle" font-size="10" fill="#9aa3b2">${hh}:00</text>`;
+ s+=`<text x="${X(rise)}" y="${base+28}" text-anchor="middle" font-size="10" fill="#ffc53d">🌅 ${f(rise)}</text><text x="${X(set)}" y="${base+28}" text-anchor="middle" font-size="10" fill="#f7933f">🌇 ${f(set)}</text>`;
+ y=base+50;
+ // window pill row
+ wins.forEach(([a,b,t])=>{const c=t?'#ffc53d':'#3dd68c';s+=`<rect x="${X(a)}" y="${y-10}" width="${X(b)-X(a)}" height="16" rx="8" fill="${c}"/>`;
+  if(best&&!t)s+=`<rect x="${X(best[0])}" y="${y-10}" width="${X(best[1])-X(best[0])}" height="16" rx="8" fill="#1e9e63"/><text x="${(X(best[0])+X(best[1]))/2}" y="${y+18}" text-anchor="middle" font-size="9.5" fill="#3dd68c">best</text>`;
+  const wide=X(b)-X(a)>80, tx=wide?(X(a)+X(b))/2:Math.max(40,Math.min(W-40,(X(a)+X(b))/2));
+  s+= wide?`<text x="${tx}" y="${y+2}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#0b0e13">${f(a)}–${f(b)}</text>`:`<text x="${tx}" y="${y-14}" text-anchor="middle" font-size="10.5" font-weight="700" fill="${c}">${f(a)}–${f(b)}</text>`});
+ // UV dots row
+ y+=best?32:24;s+=`<text x="${x0}" y="${y+4}" font-size="9.5" fill="#6b7386">UV</text>`;
+ hours.forEach((h,i)=>{const hh=start+i;if(hh%2==0&&X(hh+.5)>x0+22){const u=h[2];s+=`<circle cx="${X(hh+.5)}" cy="${y}" r="9" fill="${uvCol(u,uvLim)}" opacity="${u<.5?.35:1}"/><text x="${X(hh+.5)}" y="${y+3.5}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#10141b">${u<1?u.toFixed(1).replace('0.','.'):Math.round(u)}</text>`}});
+ if(extra){y+=24;s+=`<text x="${x0}" y="${y+4}" font-size="9.5" fill="#6b7386">Dew</text>`;
+  hours.forEach((h,i)=>{const hh=start+i;if(hh%2==0&&X(hh+.5)>x0+22){const d=h[4],c=d>=16?'#ff6b6b':d>=12?'#ffc53d':'#8fd3ff';s+=`<text x="${X(hh+.5)}" y="${y+4}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${c}">💧${d}°</text>`}});
+  y+=22;s+=`<text x="${x0}" y="${y+4}" font-size="9.5" fill="#6b7386">Wind</text>`;
+  hours.forEach((h,i)=>{const hh=start+i;if(hh%2==0&&X(hh+.5)>x0+22){const w=h[5];s+=`<text x="${X(hh+.5)}" y="${y+4}" text-anchor="middle" font-size="10.5" fill="${w>25?'#ffc53d':'#c9d0dc'}">➤${w}</text>`}});}
+ // scrub
+ if(scrub){const sx=X(scrub+.5),h=hours[scrub-start];s+=`<line x1="${sx}" x2="${sx}" y1="${top-4}" y2="${y+10}" stroke="#fff" stroke-width="1.5"/><circle cx="${sx}" cy="${TY(h[3])}" r="5" fill="#fff" stroke="#4ea1ff" stroke-width="2"/>`;}
+ const H=y+16;document.getElementById(id).innerHTML=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${s}</svg>`;
+ if(scrub){const h=hours[scrub-start],left=Math.max(4,Math.min(W-214,X(scrub+.5)-105));const night=scrub<rise||scrub>set;
+  document.getElementById(id).insertAdjacentHTML('beforeend',`<div style="position:absolute;left:${left}px;top:${top-6}px;width:206px;background:#0f131bf2;border:1px solid #3a4150;border-radius:12px;padding:8px 10px;font-size:12px;line-height:1.45;box-shadow:0 6px 18px #0008">
+  <div style="font-weight:700;font-size:13px">${f(scrub)} · ${sky(h[0],h[1],night)} ${h[0]>=80?'Cloudy':h[0]>=50?'Mostly cloudy':'Partly cloudy'}</div>
+  <div>☁️ ${h[0]}% · <span style="color:${uvCol(h[2],uvLim)}">UV ${h[2]}</span> · 🌡 ${h[3]}° (feels ${h[3]-3}°)</div>
+  <div>💧 dew ${h[4]}° · ${h[1]>.25?'🌧 '+h[1]+' mm':'dry'} · 💨 ${h[5]} km/h</div>
+  <div style="color:#3dd68c;margin-top:2px">✓ inside your window${o.best&&scrub>=o.best[0]&&scrub<o.best[1]?' · best for SubT':''}</div></div>`);
+  document.getElementById(id).style.position='relative'}
+}
+</script>
+
+
+<div class="ph"><div class="tag">A · TWO RUNS · ONE BIG WINDOW COVERS BOTH</div><div class="card">
+<div class="lbl"><span>RUN WINDOW · TODAY · 2 RUNS</span><span>ⓘ</span></div>
+<div class="big">Run any time 07:00–18:30</div>
+<div class="sub">① 60m Easy · go any time, e.g. morning</div>
+<div class="sub">② 35′ double · <b style="color:#8fd3ff">after 16:00 → 16:00–18:30 ✓</b> still in the window</div>
+<div id="a" style="margin-top:8px"></div><div class="link">Hour by hour ›</div></div></div>
+
+<div class="ph"><div class="tag">B · TWO RUNS · MORNING WINDOW, SEPARATE LATE WINDOW</div><div class="card">
+<div class="lbl"><span>RUN WINDOWS · TODAY · 2 RUNS</span><span>ⓘ</span></div>
+<div class="big">07:00–12:00 <span style="color:#6b7386;font-size:18px">and</span> 17:00–18:30</div>
+<div class="sub">① 60m Easy · morning window (rain 12:00–16:30)</div>
+<div class="sub">② 35′ double · <b style="color:#8fd3ff">17:00–18:30</b> · dark OK, dry, ☁️ 90%</div>
+<div id="b" style="margin-top:8px"></div><div class="link">Hour by hour ›</div></div></div>
+
+<div class="ph"><div class="tag">C · TWO RUNS · NOTHING RUNNABLE AFTER 16:00</div><div class="card">
+<div class="lbl"><span>RUN WINDOW · TODAY · 2 RUNS</span><span>ⓘ</span></div>
+<div class="big">07:00–13:00</div>
+<div class="sub">① 60m Easy · morning window</div>
+<div class="sub">② 35′ double · <b style="color:#ff9a9a">no run window after 16:00</b> (heavy rain until 22:00)</div>
+<div id="c" style="margin-top:8px"></div>
+<div style="margin-top:10px;background:#262c3a;border-radius:12px;padding:10px 12px">
+<div style="font-weight:600">🚴 Swap ② for an indoor bike</div>
+<div class="sub" style="margin-top:2px">45′ easy ride · 55–65% FTP · ≈ same load as the 35′ run (≈ 24)</div>
+<div style="display:flex;gap:8px;margin-top:8px"><div style="flex:1;text-align:center;border:1px solid #3a4150;border-radius:10px;padding:7px;color:#f2f4f8">Add to intervals.icu</div><div style="flex:1;text-align:center;border:1px solid #3a4150;border-radius:10px;padding:7px;color:#9aa3b2">Keep the run</div></div>
+<div class="sub" style="font-size:11.5px;margin-top:6px">Adds the ride on today at 17:00; the planned run stays (not deleted) and shows as not done.</div></div>
+<div class="link">Hour by hour ›</div></div></div>
+
+<script>
+const A=[[90,0,0,6,2,12],[85,0,.2,7,2,12],[80,0,.5,8,3,12],[85,0,.8,9,3,11],[80,0,1,10,3,11],[75,0,1.2,11,4,10],[70,0,1.3,11,4,10],[75,0,1,11,4,10],[80,0,.6,10,4,10],[85,0,.3,9,4,10],[90,0,0,8,4,11],[90,0,0,8,4,11],[95,0,0,7,4,12],[95,0,0,7,4,12],[100,.3,0,6,4,13]];
+chart('a',{start:6,end:21,rise:6.98,set:16.62,hours:A,wins:[[7,18.5]],uvLim:2,runs:[[7.5,9,'①','#ffffff'],[16,16.6,'②','#8fd3ff']]});
+const B=[[90,0,0,6,2,12],[85,0,.2,7,2,12],[85,0,.5,8,3,12],[90,0,.8,9,3,11],[90,0,1,10,3,11],[95,0,.8,10,4,12],[100,2,.4,9,5,18],[100,4,.2,9,6,22],[100,3,.1,9,6,22],[100,1.5,0,8,6,20],[100,.6,0,8,5,18],[95,0,0,8,5,15],[90,0,0,7,4,14],[90,0,0,7,4,13],[95,.2,0,6,4,13]];
+chart('b',{start:6,end:21,rise:6.98,set:16.62,hours:B,wins:[[7,12],[17,18.5]],uvLim:2,runs:[[7.5,9,'①','#ffffff'],[17.2,17.8,'②','#8fd3ff']]});
+const C=[[90,0,0,6,2,12],[85,0,.2,7,2,12],[85,0,.5,8,3,12],[90,0,.8,9,3,11],[90,0,1,10,3,11],[95,0,.8,10,4,12],[95,0,.5,10,4,13],[100,1,.3,9,5,18],[100,3,.1,9,6,22],[100,4,0,8,6,24],[100,4,0,8,6,24],[100,3,0,7,6,22],[100,3,0,7,6,20],[100,2,0,7,6,20],[100,2,0,6,6,19]];
+chart('c',{start:6,end:21,rise:6.98,set:16.62,hours:C,wins:[[7,13]],uvLim:2,runs:[[7.5,9,'①','#ffffff']]});
+</script></body></html>

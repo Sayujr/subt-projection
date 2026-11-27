@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#12151c;color:#f2f4f8;font:14px/1.3 Roboto,system-ui,sans-serif;width:900px;padding:18px;display:flex;gap:18px;align-items:flex-start}
+.ph{width:430px}.tag{font-size:11px;letter-spacing:.08em;color:#6b7386;margin:0 4px 8px}
+.card{background:#1d222d;border-radius:16px;padding:14px 14px 10px}
+.lbl{font-size:11px;letter-spacing:.08em;color:#9aa3b2;display:flex;justify-content:space-between}
+.hd,.r{display:grid;grid-template-columns:46px 26px 44px 38px 62px 58px 1fr;align-items:center;gap:4px}
+.hd{font-size:10.5px;color:#6b7386;margin:10px 0 4px;padding:0 6px}
+.r{padding:7px 6px;border-radius:8px;font-size:13.5px}
+.r .t{color:#c9d0dc}.r .dim{color:#6b7386}
+.night{opacity:.5}
+.win{background:#3dd68c1f;box-shadow:inset 3px 0 0 #3dd68c}
+.bk{box-shadow:inset 3px 0 0 #9aa3b2}
+.sep{font-size:11px;color:#ffc53d;padding:3px 6px}.sep.s{color:#f7933f}
+.uvg{color:#3dd68c}.uvy{color:#ffc53d}.uvr{color:#ff7a7a}
+.rain{color:#4ea1ff}
+.wl{font-size:10.5px;color:#3dd68c;padding:2px 6px 0}
+.src{margin-top:10px;font-size:12.5px;color:#4ea1ff}
+</style></head><body>
+<div class="ph"><div class="tag">HOURLY VIEW · WINTER EASY DAY (opened from "Hour by hour ›")</div><div class="card">
+<div class="lbl"><span>HOUR BY HOUR · FRI 27</span><span>ⓘ</span></div>
+<div class="hd"><span>Time</span><span></span><span>Cloud</span><span>UV</span><span>Feels</span><span>Rain</span><span>Wind</span></div>
+<div id="a"></div>
+<div class="src">What each source thinks ›</div>
+</div></div>
+<div class="ph"><div class="tag">HOURLY VIEW · WINTER SUBT, RAIN (dry slot highlighted)</div><div class="card">
+<div class="lbl"><span>HOUR BY HOUR · THU 26</span><span>ⓘ</span></div>
+<div class="hd"><span>Time</span><span></span><span>Cloud</span><span>UV</span><span>Feels</span><span>Rain</span><span>Wind</span></div>
+<div id="b"></div>
+<div class="src">What each source thinks ›</div>
+</div></div>
+<script>
+function uvc(u){return u<=2?'uvg':u<=3?'uvy':'uvr'}
+function sky(c,r){return r>0.25?'💧':c>=60?'☁️':c>=30?'⛅':'☀️'}
+function list(id,rows,rise,set,win,bk){
+ let s='';rows.forEach(([h,c,u,fl,r,rp,w])=>{
+  if(h===Math.floor(rise)+ (rise%1?1:0) && s.indexOf('sunrise')<0) s+=`<div class="sep">☀ sunrise ${String(Math.floor(rise)).padStart(2,'0')}:${String(Math.round(rise%1*60)).padStart(2,'0')}</div>`;
+  if(h===Math.floor(set)+1) s+=`<div class="sep s">☾ sunset ${Math.floor(set)}:${String(Math.round(set%1*60)).padStart(2,'0')}</div>`;
+  const night=h<rise-0.5||h>set+0.5, inw=h>=Math.floor(win[0])&&h<win[1], inb=bk&&h>=bk[0]&&h<bk[1];
+  if(inw&&h===Math.floor(win[0]))s+=`<div class="wl">▼ your window ${win[2]}</div>`;
+  s+=`<div class="r ${night?'night':''} ${inw?'win':inb?'bk':''}"><span class="t">${String(h).padStart(2,'0')}:00</span><span>${sky(c,r)}</span><span>${c}%</span><span class="${uvc(u)}">${u}</span><span>${fl}</span><span class="${r>0.25?'rain':'dim'}">${r>0?r+' mm':'–'}</span><span class="dim">${w} km/h</span></div>`;
+  if(inb&&h===bk[1]-1)s+=`<div class="wl" style="color:#9aa3b2">▲ backup ${bk[2]}</div>`;
+ });document.getElementById(id).innerHTML=s}
+list('a',[[6,100,0,'8 / 2',0.3,0,31],[7,96,0,'8 / 3',0,0,28],[8,90,0.3,'8 / 4',0,0,26],[9,88,0.6,'9 / 5',0,0,24],[10,95,1,'9 / 5',0,0,23],[11,95,1,'9 / 5',0,0,23],[12,45,1.6,'10 / 6',0,0,22],[13,62,1.2,'10 / 6',0,0,21],[14,84,0.7,'10 / 6',0,0,20],[15,92,0.3,'9 / 5',0,0,20],[16,97,0,'8 / 4',0,0,19],[17,100,0,'8 / 3',0,0,18],[18,100,0,'7 / 3',0,0,18]],6.98,16.62,[10,11.5,'10:00–11:30'],[13,15,'13:00–14:30']);
+list('b',[[6,100,0,'7 / 3',0.1,0,22],[7,100,0,'7 / 4',0,0,20],[8,100,0.1,'8 / 4',0.2,0,21],[9,100,0.2,'8 / 4',2,0,24],[10,100,0.4,'8 / 4',4,0,26],[11,100,0.5,'9 / 5',5,0,27],[12,100,0.6,'9 / 5',6,0,28],[13,100,0.4,'9 / 5',4,0,27],[14,100,0.2,'9 / 5',3,0,26],[15,100,0,'8 / 4',2,0,25],[16,100,0,'8 / 4',1.5,0,24],[17,100,0,'8 / 3',1,0,24],[18,100,0,'7 / 3',0.4,0,23]],6.98,16.62,[7,8.67,'07:00–08:40'],null);
+</script></body></html>
