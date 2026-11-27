@@ -394,7 +394,8 @@ class WorkoutActivity : Activity() {
         val dateTxt = runCatching { LocalDate.parse(det.date).format(DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())) }.getOrDefault(det.date)
         header(det.name, "$dateTxt · ${det.type}")
 
-        val z = if (det.heart.any { it != null }) runCatching { Zones.compute(raw, Prefs.lt1(this).toDouble(), Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp) }.getOrNull() else null
+        val zAny = if (det.heart.any { it != null } || det.watts.any { it != null }) runCatching { Zones.compute(raw, Prefs.lt1(this).toDouble(), Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp) }.getOrNull() else null
+        val z = if (det.heart.any { it != null }) zAny else null
         coachCard(det, z, raw)
 
         // Summary
@@ -510,6 +511,15 @@ class WorkoutActivity : Activity() {
                 label(c, "Heart rate bands")
                 c.addView(BandViews.build(this, z.bandSec, z.bandM, contentW(), decimals = 2))
             }
+        }
+
+        // Power bands for this run (runs with a power stream)
+        if (!ride && zAny != null && zAny.hasPower) {
+            val c = card()
+            BandViews.heading(this, c, "POWER BANDS", "Time in % of CP: Easy under 75%, Steady 75–88%, SubT 88–98%, Threshold 98–105%, Above CP over 105%. " +
+                "3-second average power; walking and stops are left out.")
+            det.ftp?.let { text(c, "CP ${it.roundToInt()} W (your CP that day)", 12.5f, DIM, top = 2) }
+            c.addView(BandViews.buildPower(this, zAny.pwSec, zAny.pwM, contentW(), decimals = 2))
         }
 
         // Power / pace / HR over time

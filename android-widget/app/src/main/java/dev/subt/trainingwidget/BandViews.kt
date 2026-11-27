@@ -22,6 +22,12 @@ object BandViews {
     const val GREY = 0xFF6B7386.toInt()
     const val ORANGE = 0xFFFF9F5A.toInt()
     const val RED = 0xFFFF7A7A.toInt()
+    /** Threshold: between the SubT orange and the red of above CP. */
+    const val ORANGE_RED = 0xFFFF6A3D.toInt()
+    /** Power bands: easy, steady, SubT, threshold, above CP. */
+    val POWER_COLS = listOf(GREEN, GREY, ORANGE, ORANGE_RED, RED)
+    /** Heart-rate calendar / bar parts: easy, in between, SubT band, too hard. */
+    val HR_COLS = listOf(GREEN, GREY, ORANGE, RED)
     private const val TEXT = 0xFFF2F4F8.toInt()
     private const val DIM = 0xFF9AA3B2.toInt()
     private const val FAINT = 0xFF6B7386.toInt()
@@ -80,12 +86,23 @@ object BandViews {
     }
 
     /** Small heading with a tappable "ⓘ" that shows or hides a short note underneath. */
-    fun heading(ctx: Context, parent: LinearLayout, title: String, note: String?, color: Int = DIM, size: Float = 11f, topDp: Int = 0, spacing: Float = 0.08f) {
+    fun heading(ctx: Context, parent: LinearLayout, title: String, note: String?, color: Int = DIM, size: Float = 11f, topDp: Int = 0, spacing: Float = 0.08f,
+                action: String? = null, onAction: (() -> Unit)? = null) {
         val d = ctx.resources.displayMetrics.density
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, (topDp * d).roundToInt(), 0, 0) }
         row.addView(TextView(ctx).apply { text = title; setTextSize(TypedValue.COMPLEX_UNIT_SP, size); setTextColor(color); letterSpacing = spacing })
         parent.addView(row)
-        if (note == null) return
+        fun addLink() {
+        if (action != null && onAction != null) {
+            // pushes the link to the right edge of the heading row
+            row.addView(View(ctx), LinearLayout.LayoutParams(0, 1, 1f))
+            row.addView(TextView(ctx).apply {
+                text = action; setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f); setTextColor(0xFF4EA1FF.toInt()); setPadding((10 * d).roundToInt(), (4 * d).roundToInt(), 0, (4 * d).roundToInt())
+                setOnClickListener { onAction() }
+            })
+        }
+        }
+        if (note == null) { addLink(); return }
         val tv = TextView(ctx).apply {
             text = note; setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f); setTextColor(DIM); setPadding(0, (4 * d).roundToInt(), 0, (2 * d).roundToInt())
             visibility = View.GONE
@@ -95,6 +112,7 @@ object BandViews {
             contentDescription = "Explain $title"
             setOnClickListener { tv.visibility = if (tv.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
         })
+        addLink()
         parent.addView(tv)
     }
 
@@ -106,6 +124,19 @@ object BandViews {
             layoutParams = if (widthDp > 0) LinearLayout.LayoutParams((widthDp * ctx.resources.displayMetrics.density).roundToInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
             else LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
+
+    /** Power bands: stacked five-part bar, then one row per band (time, share, distance) with the share in the band colour. */
+    fun buildPower(ctx: Context, sec: List<Double>, m: List<Double>, widthPx: Int, decimals: Int = 1): LinearLayout {
+        val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(stripView(ctx, List(5) { sec.getOrElse(it) { 0.0 } }, POWER_COLS, widthPx))
+        val d = ctx.resources.displayMetrics.density
+        for ((i, r) in Zones.powerRows(sec, m).withIndex()) {
+            val row = statRow(ctx, "${r.group} ${r.label}", r.sec, r.pct, r.m, r.emphasised, decimals, POWER_COLS[i])
+            row.setPadding(0, if (i == 0) (8 * d).roundToInt() else (3 * d).roundToInt(), 0, (3 * d).roundToInt())
+            box.addView(row)
+        }
+        return box
+    }
 
     /** Stacked bar, then rows grouped under small headings, then the overlap note. */
     fun build(ctx: Context, sec: List<Double>, m: List<Double>, widthPx: Int, decimals: Int = 1): LinearLayout {

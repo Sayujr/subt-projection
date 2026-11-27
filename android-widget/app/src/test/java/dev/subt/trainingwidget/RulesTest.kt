@@ -2595,4 +2595,127 @@ class RulesTest {
         assertTrue(FitnessPlan.reading(fsSnap(3.0)).startsWith("0 of the last 4 weeks below"))
         assertFalse(FitnessPlan.reading(fsSnap(3.0)).contains("long runs"))
     }
+
+    // ---- Power bands (% of CP)
+    private fun pwRaw(watts: List<Double>, vel: List<Double>, icuFtp: Double?, name: String = "Tuesday jog"): org.json.JSONObject {
+        fun st(type: String, d: List<Number>) = org.json.JSONObject().put("type", type).put("data", org.json.JSONArray(d))
+        val a = org.json.JSONObject().put("id", "p1").put("name", name).put("start_date_local", "2026-11-25T07:00:00").put("moving_time", watts.size).put("distance", 5000.0)
+        if (icuFtp != null) a.put("icu_ftp", icuFtp)
+        return org.json.JSONObject().put("a", a)
+            .put("s", org.json.JSONArray().put(st("time", watts.indices.toList())).put(st("watts", watts)).put(st("velocity_smooth", vel)))
+    }
+
+    @Test fun powerBandBoundaries() {
+        // CP 400 W: edges at 300, 352, 392 and 420 W
+        val cases = listOf(299.0 to 0, 300.0 to 1, 351.0 to 1, 352.0 to 2, 391.0 to 2, 392.0 to 3, 420.0 to 3, 421.0 to 4, 0.0 to 0, 600.0 to 4)
+        for ((w, band) in cases) assertEquals("$w W", band, Zones.pwBucket(w, 400.0))
+        // the same through compute: a constant stream lands wholly in one band, 20 s and 60 m
+        for ((w, band) in cases.filter { it.first > 0 }) {
+            val r = Zones.compute(pwRaw(List(20) { w }, List(20) { 3.0 }, 400.0), 153.0, null)
+            assertTrue(r.pwDone && r.hasPower)
+            for (k in 0 until 5) {
+                assertEquals("$w W band $k", if (k == band) 20.0 else 0.0, r.pwSec[k], 1e-9)
+                assertEquals("$w W band $k m", if (k == band) 60.0 else 0.0, r.pwM[k], 1e-9)
+            }
+        }
+    }
+
+    @Test fun powerBandsSkipStoppedSamples() {
+        // 10 s walking (0.8 m/s, under 1.667) then 10 s running; the walking seconds don't count
+        val watts = List(20) { 300.0 }
+        val vel = List(10) { 0.8 } + List(10) { 3.0 }
+        val r = Zones.compute(pwRaw(watts, vel, 400.0), 153.0, null)
+        assertEquals(10.0, r.pwSec.sum(), 1e-9)
+        assertEquals(30.0, r.pwM.sum(), 1e-9)
+        assertEquals(10.0, r.pwSec[Zones.PW_STEADY], 1e-9)
+        // exactly 1.667 m/s still counts
+        assertEquals(5.0, Zones.compute(pwRaw(List(5) { 300.0 }, List(5) { 1.667 }, 400.0), 153.0, null).pwSec.sum(), 1e-9)
+    }
+
+    @Test fun powerBandsUseThreeSecondMean() {
+        // a single 600 W spike inside 300 W: raw it would be 1 s Above CP; the 3-s mean (400 W) makes it 3 s of Threshold-or-below
+        val watts = List(10) { 300.0 } + listOf(600.0) + List(10) { 300.0 }
+        val r = Zones.compute(pwRaw(watts, List(watts.size) { 3.0 }, 400.0), 153.0, null)
+        assertEquals(0.0, r.pwSec[Zones.PW_ABOVE], 1e-9)
+        assertEquals(3.0, r.pwSec[Zones.PW_THRESHOLD], 1e-9)
+        assertEquals(watts.size.toDouble(), r.pwSec.sum(), 1e-9)
+    }
+
+    @Test fun powerBandsCpFallback() {
+        val watts = List(10) { 350.0 }; val vel = List(10) { 3.0 }
+        // no icu_ftp: the fallback CP (400) is used, 350 W = 87.5 % = Steady
+        assertEquals(10.0, Zones.compute(pwRaw(watts, vel, null), 153.0, 400.0).pwSec[Zones.PW_STEADY], 1e-9)
+        // the activity's own CP wins: CP 350 makes the same watts 100 % = Threshold
+        assertEquals(10.0, Zones.compute(pwRaw(watts, vel, 350.0), 153.0, 400.0).pwSec[Zones.PW_THRESHOLD], 1e-9)
+        // no CP anywhere: nothing is classified, but the run is marked as done (so it isn't fetched again for nothing)
+        val none = Zones.compute(pwRaw(watts, vel, null), 153.0, null)
+        assertFalse(none.hasPower); assertTrue(none.pwDone)
+        // no watts stream at all
+        val noW = Zones.compute(rawOf("Easy", List(10) { it }, List(10) { 120.0 }, List(10) { 3.0 }), 153.0, 400.0)
+        assertFalse(noW.hasPower); assertTrue(noW.pwDone)
+    }
+
+    @Test fun powerRowsAndTotals() {
+        val rows = Zones.powerRows(listOf(10.0, 20.0, 30.0, 40.0, 0.0), listOf(30.0, 60.0, 90.0, 120.0, 0.0))
+        assertEquals(listOf("<75%", "75–88%", "88–98%", "98–105%", ">105%"), rows.map { it.label })
+        assertEquals(100.0, rows.sumOf { it.pct }, 1e-9)
+        assertEquals(30.0, rows[2].pct, 1e-9)
+        assertTrue(Zones.powerRows(List(5) { 0.0 }, List(5) { 0.0 }).all { it.pct == 0.0 })
+        val a = Zones.Run("a", "2026-11-23", "Easy", 3000, 9000.0, false, false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            pwSec = listOf(1.0, 2.0, 3.0, 4.0, 5.0), pwM = listOf(5.0, 4.0, 3.0, 2.0, 1.0), pwDone = true)
+        val b = a.copy(id = "b", date = "2026-11-24")
+        val t = Zones.total(listOf(a, b), LocalDate.parse("2026-11-23"), LocalDate.parse("2026-11-29"))
+        assertEquals(listOf(2.0, 4.0, 6.0, 8.0, 10.0), t.pwSec); assertEquals(listOf(10.0, 8.0, 6.0, 4.0, 2.0), t.pwM)
+        assertEquals(listOf(a, b), Zones.fromJson(Zones.toJson(listOf(a, b))))
+    }
+
+    @Test fun calendarDailyAndWeeklyAggregation() {
+        val hr = listOf(10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0)   // parts: 30 / 30 / 90 / 130
+        fun run(id: String, date: String, pw: List<Double>) = Zones.Run(id, date, "Run $id", 3000, 9000.0, false, false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            bandSec = hr, bandM = hr, pwSec = pw, pwM = pw, pwDone = true)
+        val runs = listOf(
+            run("a", "2026-11-23", listOf(1.0, 2.0, 3.0, 4.0, 5.0)),   // Monday
+            run("b", "2026-11-23", listOf(1.0, 1.0, 1.0, 1.0, 1.0)),   // second run the same day
+            run("c", "2026-11-29", listOf(0.0, 0.0, 10.0, 0.0, 0.0)),  // Sunday of the same week
+            run("d", "2026-11-30", listOf(7.0, 0.0, 0.0, 0.0, 0.0)),   // next week
+            run("e", "2026-11-25", List(5) { 0.0 }),                   // no power: not in the power calendar
+        )
+        val h = Zones.daily(runs, false)
+        assertEquals(listOf(60.0, 60.0, 180.0, 260.0), h["2026-11-23"])
+        assertEquals(setOf("2026-11-23", "2026-11-25", "2026-11-29", "2026-11-30"), h.keys)
+        val p = Zones.daily(runs, true)
+        assertEquals(listOf(2.0, 3.0, 4.0, 5.0, 6.0), p["2026-11-23"])
+        assertFalse(p.containsKey("2026-11-25"))
+        // weekly totals: Mon 23 to Sun 29
+        val mon = LocalDate.parse("2026-11-23")
+        assertEquals(listOf(2.0, 3.0, 14.0, 5.0, 6.0), Zones.sumDays(p, mon, mon.plusDays(6), true))
+        assertEquals(listOf(7.0, 0.0, 0.0, 0.0, 0.0), Zones.sumDays(p, mon.plusDays(7), mon.plusDays(13), true))
+        assertEquals(4, Zones.sumDays(h, mon, mon.plusDays(6), false).size)
+        assertEquals(List(5) { 0.0 }, Zones.sumDays(p, mon.minusDays(7), mon.minusDays(1), true))
+        // heart-rate calendar parts and power parts
+        assertEquals(listOf(30.0, 30.0, 90.0, 130.0), Zones.calParts(hr, false))
+        assertEquals(listOf(1.0, 2.0, 3.0, 4.0, 5.0), Zones.calParts(listOf(1.0, 2.0, 3.0, 4.0, 5.0), true))
+    }
+
+    @Test fun zonesCacheMigrationKeepsOldData() {
+        val sp = ctx.getSharedPreferences("training_widget", Context.MODE_PRIVATE)
+        // a v7 cache (no power bands) must still show: no blank screen after the update
+        val old = Zones.Run("o", "2026-11-23", "Easy", 3000, 9000.0, false, false, 0.0, 0.0, 0.0, 100.0, 300.0, 0.0, 0.0,
+            bandSec = List(7) { 5.0 }, mixSec = List(5) { 2.0 })
+        val v7 = Zones.toJson(listOf(old)).replace(Regex(",\"pwSec\":\\[[^\\]]*\\]|,\"pwM\":\\[[^\\]]*\\]|,\"pwDone\":(true|false)"), "")
+        assertFalse(v7.contains("pw"))
+        sp.edit().remove("zones_v8").putString("zones_v7", v7).commit()
+        val got = Prefs.zones(ctx).single()
+        assertEquals("o", got.id); assertEquals(List(7) { 5.0 }, got.bandSec)
+        assertFalse(got.hasPower); assertFalse(got.pwDone)
+        // it has a training mix but no power bands yet, so it is fetched again; a fully computed one is not
+        assertFalse(got.complete)
+        assertTrue(got.copy(pwDone = true).complete)
+        assertFalse(got.copy(pwDone = true, mixSec = List(5) { 0.0 }).complete)
+        // saving writes v8 and leaves v7 alone; v8 wins from then on
+        Prefs.saveZones(ctx, listOf(got.copy(pwSec = List(5) { 1.0 }, pwDone = true), old.copy(id = "n")))
+        assertTrue(sp.getString("zones_v8", null) != null)
+        assertEquals(2, Prefs.zones(ctx).size)
+        assertTrue(Prefs.zones(ctx).first { it.id == "o" }.hasPower)
+    }
 }

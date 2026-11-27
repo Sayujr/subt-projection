@@ -57,6 +57,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".ZonesCalendarActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".SetupActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">

@@ -13,6 +13,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.testing.WorkManagerTestInitHelper
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -423,5 +425,95 @@ class ScreensTest {
         widget("runwindows_4x2_tall", 350, 220) { RwWidgets.build(ctx, 350, 220) }
 
         File(outDir, "errors.txt").writeText(errors.toString().ifEmpty { "No rendering errors.\n" })
+    }
+
+    // ---- Power bands and the zones calendar (real assertions, plus screenshots)
+    private fun texts(v: View, out: MutableList<String> = mutableListOf()): MutableList<String> {
+        if (v is TextView) out += v.text.toString()
+        if (v is ViewGroup) for (i in 0 until v.childCount) texts(v.getChildAt(i), out)
+        return out
+    }
+
+    private fun byTag(v: View, tag: String): View? = find(v) { it.tag == tag }
+
+    private fun clickText(root: View, t: String) {
+        (find(root) { (it as? TextView)?.text?.toString() == t } ?: error("no '$t' on screen")).performClick()
+        settle()
+    }
+
+    @Test fun powerBandsOnWorkoutAndWeek() {
+        WorkoutDetail.save(ctx, "i999", Fixture.workoutRaw())
+        val wc = Robolectric.buildActivity(WorkoutActivity::class.java, Intent(ctx, WorkoutActivity::class.java).putExtra(WorkoutActivity.EXTRA_ID, "i999")).setup()
+        settle()
+        val wt = texts(wc.get().window.decorView)
+        assertTrue("power bands card: $wt", wt.contains("POWER BANDS"))
+        for (row in listOf("Easy <75%", "Steady 75–88%", "SubT 88–98%", "Threshold 98–105%", "Above CP >105%")) assertTrue(row, wt.contains(row))
+        assertTrue(wt.contains("HEART RATE BANDS"))
+        capture("workout_power_bands", wc.get().window.decorView)
+        wc.pause().stop().destroy()
+
+        val mc = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "WEEK")).setup()
+        settle()
+        val mt = texts(mc.get().window.decorView)
+        assertTrue("week power section: ${mt.take(60)}", mt.contains("POWER BANDS · ALL RUNS"))
+        assertTrue(mt.contains("HEART RATE BANDS · ALL RUNS"))
+        assertEquals(2, mt.count { it == "Calendar ›" })
+        assertTrue(mt.contains("Threshold 98–105%"))
+        // the Calendar link next to the power bands opens the calendar in power mode
+        val links = mutableListOf<View>()
+        fun collect(v: View) { if ((v as? TextView)?.text?.toString() == "Calendar ›") links += v; if (v is ViewGroup) for (i in 0 until v.childCount) collect(v.getChildAt(i)) }
+        collect(mc.get().window.decorView)
+        links[1].performClick()
+        val started = shadowOf(mc.get()).nextStartedActivity
+        assertEquals(ZonesCalendarActivity::class.java.name, started.component!!.className)
+        assertTrue(started.getBooleanExtra(ZonesCalendarActivity.EXTRA_POWER, false))
+        mc.pause().stop().destroy()
+    }
+
+    @Test fun zonesCalendarMonthHeartRateAndPower() {
+        val today = Fixture.today
+        val monthTitle = java.time.YearMonth.from(today).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.getDefault()))
+        val hc = Robolectric.buildActivity(ZonesCalendarActivity::class.java, Intent(ctx, ZonesCalendarActivity::class.java)).setup()
+        settle()
+        val root = hc.get().window.decorView
+        val ht = texts(root)
+        assertTrue(ht.contains("Zones calendar")); assertTrue(ht.contains(monthTitle))
+        for (dow in listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Week")) assertTrue(dow, ht.contains(dow))
+        assertTrue(ht.contains("Heart rate")); assertTrue(ht.contains("Power"))
+        assertTrue("HR legend: $ht", ht.any { it.contains("Too hard") })
+        val cell = byTag(root, "day:$today") ?: error("no cell for today")
+        assertTrue("today has a bar and minutes", cell.contentDescription?.contains("min") == true)
+        val monday = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+        assertTrue("weekly total", byTag(root, "week:$monday")?.contentDescription?.contains("min") == true)
+        capture("zones_calendar_hr", root)
+        // tap a day: the sheet lists the band rows and the run; tapping the run opens the workout
+        cell.performClick(); settle()
+        val dlg = org.robolectric.shadows.ShadowDialog.getLatestDialog() ?: error("no day sheet")
+        assertTrue(dlg.isShowing)
+        val dt = texts(dlg.window!!.decorView)
+        assertTrue("sheet: $dt", dt.contains("Heart rate bands") && dt.contains("RUNS") && dt.contains("6'x4 repeats"))
+        byTag(dlg.window!!.decorView, "run:i999")!!.performClick()
+        val started = shadowOf(hc.get()).nextStartedActivity
+        assertEquals(WorkoutActivity::class.java.name, started.component!!.className)
+        assertEquals("i999", started.getStringExtra(WorkoutActivity.EXTRA_ID))
+        // Power chip: legend and day sheet switch to the power bands
+        clickText(root, "Power")
+        assertTrue(texts(root).any { it.contains("Above CP") })
+        capture("zones_calendar_power", root)
+        byTag(root, "day:$today")!!.performClick(); settle()
+        val pt = texts(org.robolectric.shadows.ShadowDialog.getLatestDialog()!!.window!!.decorView)
+        assertTrue("power sheet: $pt", pt.contains("Power bands") && pt.contains("Threshold 98–105%"))
+        // month navigation
+        (find(root) { it.contentDescription == "Previous month" } ?: error("no previous")).performClick(); settle()
+        val prev = java.time.YearMonth.from(today).minusMonths(1).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.getDefault()))
+        assertTrue(texts(root).contains(prev))
+        (find(root) { it.contentDescription == "Next month" } ?: error("no next")).performClick(); settle()
+        assertTrue(texts(root).contains(monthTitle))
+        hc.pause().stop().destroy()
+        // opened straight into power mode
+        val pc = Robolectric.buildActivity(ZonesCalendarActivity::class.java, Intent(ctx, ZonesCalendarActivity::class.java).putExtra(ZonesCalendarActivity.EXTRA_POWER, true)).setup()
+        settle()
+        assertTrue(texts(pc.get().window.decorView).any { it.contains("Above CP") })
+        pc.pause().stop().destroy()
     }
 }

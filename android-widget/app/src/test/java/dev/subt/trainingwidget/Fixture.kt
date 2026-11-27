@@ -174,22 +174,26 @@ object Fixture {
                 1100 * f, 4100 * f, 1800.0, 600.0, 1700.0, 0.0, 0.0,
                 listOf(100.0, 500.0, 600.0, 1500 * f, 1000 * f, 300.0, 60.0), listOf(300.0, 1400.0, 1900.0, 5000 * f, 3800 * f, 1000.0, 200.0),
                 (1800 - 1100 * f) * 0.6, (1800 - 1100 * f) * 0.6 * 3.6, (1800 - 1100 * f) * 0.4, (1800 - 1100 * f) * 0.4 * 3.8,
-                mixSec = listOf(1100 * f, 700 - 700 * f + 300, 0.0, 1200.0, 600.0), mixM = listOf(4100 * f, 2600.0, 0.0, 3500.0, 1700.0))
+                mixSec = listOf(1100 * f, 700 - 700 * f + 300, 0.0, 1200.0, 600.0), mixM = listOf(4100 * f, 2600.0, 0.0, 3500.0, 1700.0),
+                pwSec = listOf(900.0, 300.0, 1500 * f, 1000.0, 300.0), pwM = listOf(2700.0, 900.0, 5000 * f, 3500.0, 1100.0), pwDone = true)
             zr += Zones.Run("z${k}b", m.plusDays(1).toString(), "Easy run", 3000, 9000.0, false, false,
                 0.0, 0.0, 0.0, 2300 * f, 6800 * f, 0.0, 0.0,
                 listOf(900 * f, 1400 * f, 600.0, 60.0, 0.0, 0.0, 0.0), listOf(2700 * f, 4100 * f, 1900.0, 200.0, 0.0, 0.0, 0.0),
-                mixSec = listOf(0.0, 0.0, 0.0, 700.0, 2300 * f), mixM = listOf(0.0, 0.0, 0.0, 2000.0, 6800 * f))
+                mixSec = listOf(0.0, 0.0, 0.0, 700.0, 2300 * f), mixM = listOf(0.0, 0.0, 0.0, 2000.0, 6800 * f),
+                pwSec = listOf(2300 * f, 600.0, 100.0, 0.0, 0.0), pwM = listOf(6800 * f, 1800.0, 300.0, 0.0, 0.0), pwDone = true)
             zr += Zones.Run("z${k}c", m.plusDays(6).toString(), "Long run", 6600, 21000.0, false, true,
                 0.0, 0.0, 0.0, 700.0, 2000.0, 3400 * f, 10600 * f,
                 listOf(200.0, 500.0, 3400 * f, 700.0, 200.0, 0.0, 0.0), listOf(600.0, 1500.0, 10600 * f, 2200.0, 600.0, 0.0, 0.0),
-                mixSec = listOf(0.0, 0.0, 3400 * f, 2500.0, 700.0), mixM = listOf(0.0, 0.0, 10600 * f, 7800.0, 2000.0))
+                mixSec = listOf(0.0, 0.0, 3400 * f, 2500.0, 700.0), mixM = listOf(0.0, 0.0, 10600 * f, 7800.0, 2000.0),
+                pwSec = listOf(2800.0, 3400 * f, 400.0, 0.0, 0.0), pwM = listOf(8400.0, 10600 * f, 1300.0, 0.0, 0.0), pwDone = true)
         }
         zr += Zones.Run("i999", today.toString(), "6'x4 repeats", 3420, 9800.0, true, false,
             1260.0, 4600.0, 1440.0, 300.0, 800.0, 0.0, 0.0,
             listOf(100.0, 200.0, 400.0, 700.0, 900.0, 600.0, 200.0), listOf(300.0, 500.0, 1300.0, 2500.0, 3300.0, 2000.0, 700.0),
             100.0, 360.0, 80.0, 304.0,
             listOf(600.0, 800.0, 1440.0, 580.0), listOf(1600.0, 2100.0, 4400.0, 1700.0),
-            mixSec = listOf(1300.0, 140.0, 0.0, 1480.0, 500.0), mixM = listOf(4700.0, 500.0, 0.0, 3600.0, 1000.0))
+            mixSec = listOf(1300.0, 140.0, 0.0, 1480.0, 500.0), mixM = listOf(4700.0, 500.0, 0.0, 3600.0, 1000.0),
+            pwSec = listOf(900.0, 300.0, 1100.0, 900.0, 220.0), pwM = listOf(2400.0, 900.0, 3500.0, 2800.0, 700.0), pwDone = true)
         Prefs.saveZones(ctx, zr)
         // A coach note for the fixture workout's day: recap filled in, one question answered and one waiting
         val det = WorkoutDetail.fromRaw(workoutRaw(), null)

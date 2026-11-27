@@ -368,8 +368,8 @@ class MainActivity : Activity() {
         if (key in zonesLoading || key in zonesLoaded) return
         if (System.currentTimeMillis() - failedAt.getOrDefault(key, 0L) < 5 * 60_000L) return
         zonesLoading += key
-        // Runs cached before the training-mix update have no mix yet: fetch those again quietly, keep showing the rest
-        val have = Prefs.zones(this).filter { it.mixSec.sum() > 0 }.map { it.id }.toSet()
+        // Runs cached before the training-mix / power-band updates lack them: fetch those again quietly, keep showing the rest
+        val have = Prefs.zones(this).filter { it.complete }.map { it.id }.toSet()
         val lt1 = Prefs.lt1(this).toDouble()
         val ftp = Prefs.cpOverride(this) ?: Prefs.snapshot(this)?.runFtp
         Thread {
@@ -691,7 +691,8 @@ class MainActivity : Activity() {
                 card.addView(BandViews.statRow(this, "In or over target", tot.subtInSec + tot.subtOverSec, (tot.subtInSec + tot.subtOverSec) / wk * 100, tot.subtInM + tot.subtOverM, emphasised = true))
                 card.addView(BandViews.statRow(this, "Under target", tot.subtUnderSec, tot.subtUnderSec / wk * 100, tot.subtUnderM))
             }
-            BandViews.heading(this, card, "HEART RATE BANDS · ALL RUNS", "Every run counts here, including races and tests. Rows overlap on purpose; the coloured strip shows the four parts that add up to 100%.", 0xFF6B7386.toInt(), 12f, topDp = 16)
+            BandViews.heading(this, card, "HEART RATE BANDS · ALL RUNS", "Every run counts here, including races and tests. Rows overlap on purpose; the coloured strip shows the four parts that add up to 100%.", 0xFF6B7386.toInt(), 12f, topDp = 16,
+                action = "Calendar ›", onAction = { ZonesCalendarActivity.open(this, power = false) })
             card.addView(BandViews.build(this, tot.bandSec, tot.bandM, dp(wDp - 56)))
             row("Long-run aerobic · HR ${Zones.EASY_HR.toInt()}–$lt1", if (tot.longSec > 0) "${tm(tot.longSec)} · ${km(tot.longM)}" else "–", ZC_LONG)
             val longBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = if (longBandsOpen) View.VISIBLE else View.GONE }
@@ -704,6 +705,13 @@ class MainActivity : Activity() {
             }
             card.addView(toggle)
             card.addView(longBox)
+            BandViews.heading(this, card, "POWER BANDS · ALL RUNS",
+                "Time in % of your CP (the CP of each run's day): Easy under 75%, Steady 75–88%, SubT 88–98%, Threshold 98–105%, Above CP over 105%. " +
+                    "Power is a 3-second average; walking and stops (slower than 10:00 /km) are left out. Every run with power counts, including races and tests. " +
+                    "The bar and the rows add up to 100%.", 0xFF6B7386.toInt(), 12f, topDp = 16,
+                action = "Calendar ›", onAction = { ZonesCalendarActivity.open(this, power = true) })
+            if (tot.pwSec.sum() > 0) card.addView(BandViews.buildPower(this, tot.pwSec, tot.pwM, dp(wDp - 56)))
+            else card.addView(label(if (key in zonesLoading) "Loading…" else "No running power in this period.", 13f, 0xFF9AA3B2.toInt(), 6))
         }
         card.addView(label("LAST 12 WEEKS", 12f, 0xFF6B7386.toInt(), 14).apply { letterSpacing = 0.06f })
         val weeks = Zones.weekly(all, 12, LocalDate.now())

@@ -11,7 +11,8 @@ import java.time.temporal.TemporalAdjusters
  *  - SubT: time and distance inside the planned POWER range on work steps (SubT workouts only),
  *  - Easy: time and distance with HR under 135 (every run),
  *  - Long-run aerobic: HR from 135 up to LT1 (long runs only),
- *  - Bands: seven exclusive HR buckets per run (see [EDGES]), for every run.
+ *  - Bands: seven exclusive HR buckets per run (see [EDGES]), for every run,
+ *  - Power bands: five exclusive buckets in % of CP per run (see [pwBucket]).
  * A sample counts for the time to the next sample, at most 5 s, so pauses never count.
  */
 object Zones {
@@ -29,6 +30,71 @@ object Zones {
     private val ZEROS = List(7) { 0.0 }
     private val ZEROS4 = List(4) { 0.0 }
     private val ZEROS5 = List(5) { 0.0 }
+
+    /**
+     * Power bands, in % of CP (the activity's own icu_ftp, else the Prefs fallback): Easy under 75, Steady 75 to under 88,
+     * SubT 88 to under 98, Threshold 98 to 105 (105 itself still counts as Threshold), Above CP over 105.
+     * Power is the 3-s centred mean of the 1-s watts stream (missing samples left out of the mean);
+     * samples slower than [STOP_V] (walking, stopped) are skipped, as are samples without power.
+     */
+    const val PW_EASY = 0
+    const val PW_STEADY = 1
+    const val PW_SUBT = 2
+    const val PW_THRESHOLD = 3
+    const val PW_ABOVE = 4
+    /** Percent-of-CP edges between the five power bands. */
+    val PW_EDGES = doubleArrayOf(75.0, 88.0, 98.0)
+    const val PW_ABOVE_PCT = 105.0
+    /** Slower than 10:00 per km counts as stopped. */
+    const val STOP_V = 1.667
+    val PW_NAMES = listOf("Easy", "Steady", "SubT", "Threshold", "Above CP")
+    val PW_RANGES = listOf("<75%", "75–88%", "88–98%", "98–105%", ">105%")
+
+    /** Band of [watts] against [cp]; the percent is compared on a x100 scale so whole-watt edges are exact. */
+    fun pwBucket(watts: Double, cp: Double): Int {
+        val pct = watts * 100.0 / cp
+        return when {
+            pct < PW_EDGES[0] -> PW_EASY
+            pct < PW_EDGES[1] -> PW_STEADY
+            pct < PW_EDGES[2] -> PW_SUBT
+            pct <= PW_ABOVE_PCT -> PW_THRESHOLD
+            else -> PW_ABOVE
+        }
+    }
+
+    /** Display rows for the five power bands; pct is the share of all five (0 when empty). */
+    fun powerRows(sec: List<Double>, m: List<Double>): List<BandRow> {
+        val sum = (0 until 5).sumOf { sec.getOrElse(it) { 0.0 } }
+        return (0 until 5).map { i ->
+            val t = sec.getOrElse(i) { 0.0 }
+            BandRow(PW_NAMES[i], PW_RANGES[i], t, m.getOrElse(i) { 0.0 }, if (sum > 0) t / sum * 100.0 else 0.0, i == PW_SUBT)
+        }
+    }
+
+    /** The parts of a calendar bar: four for heart rate (easy, in between, SubT band, too hard), five for power. */
+    fun calParts(sec: List<Double>, power: Boolean): List<Double> =
+        if (power) List(5) { sec.getOrElse(it) { 0.0 } }
+        else listOf(sec.getOrElse(0) { 0.0 } + sec.getOrElse(1) { 0.0 }, sec.getOrElse(2) { 0.0 },
+            sec.getOrElse(3) { 0.0 } + sec.getOrElse(4) { 0.0 }, sec.getOrElse(5) { 0.0 } + sec.getOrElse(6) { 0.0 })
+
+    /** Per date (yyyy-MM-dd): the calendar parts summed over that day's runs; days without band time are left out. */
+    fun daily(runs: List<Run>, power: Boolean): Map<String, List<Double>> {
+        val out = LinkedHashMap<String, List<Double>>()
+        for ((date, l) in runs.groupBy { it.date }) {
+            val sec = if (power) List(5) { k -> l.sumOf { it.pwSec.getOrElse(k) { 0.0 } } } else List(7) { k -> l.sumOf { it.bandSec.getOrElse(k) { 0.0 } } }
+            val parts = calParts(sec, power)
+            if (parts.sum() > 0) out[date] = parts
+        }
+        return out
+    }
+
+    /** [daily] parts summed over [from]..[to] (both included); zeros when nothing falls in the range. */
+    fun sumDays(daily: Map<String, List<Double>>, from: LocalDate, to: LocalDate, power: Boolean): List<Double> {
+        val n = if (power) 5 else 4
+        val f = from.toString(); val t = to.toString()
+        val sel = daily.filter { it.key in f..t }.values
+        return List(n) { k -> sel.sumOf { it.getOrElse(k) { 0.0 } } }
+    }
 
     /** Training-mix bands, bottom to top in the weekly chart; every second of a run lands in exactly one. */
     const val MIX_SUBT = 0
@@ -107,7 +173,15 @@ object Zones {
         val catSec: List<Double> = ZEROS4, val catM: List<Double> = ZEROS4,
         /** Training mix: seconds and metres in the five bands ([MIX_SUBT] .. [MIX_EASY]). */
         val mixSec: List<Double> = ZEROS5, val mixM: List<Double> = ZEROS5,
-    )
+        /** Power bands ([PW_EASY] .. [PW_ABOVE]): seconds and metres. All zero for a run without power or CP. */
+        val pwSec: List<Double> = ZEROS5, val pwM: List<Double> = ZEROS5,
+        /** True once the power bands were worked out (zeros then mean "no power"); old cache entries are false and get fetched again. */
+        val pwDone: Boolean = false,
+    ) {
+        val hasPower get() = pwSec.sum() > 0
+        /** Everything the current screens need is in this entry (training mix and power bands). */
+        val complete get() = mixSec.sum() > 0 && pwDone
+    }
 
     data class Total(
         val subtInSec: Double, val subtInM: Double, val subtWorkSec: Double,
@@ -117,6 +191,7 @@ object Zones {
         val subtUnderSec: Double = 0.0, val subtUnderM: Double = 0.0, val subtOverSec: Double = 0.0, val subtOverM: Double = 0.0,
         val catSec: List<Double> = ZEROS4, val catM: List<Double> = ZEROS4,
         val mixSec: List<Double> = ZEROS5, val mixM: List<Double> = ZEROS5,
+        val pwSec: List<Double> = ZEROS5, val pwM: List<Double> = ZEROS5,
     )
 
     private val LONG_NAME = Regex("long|progress|steady", RegexOption.IGNORE_CASE)
@@ -235,7 +310,22 @@ object Zones {
             }
             mixSec[band] += d; mixM[band] += dist(i, d)
         }
-        return Run(id, date, name, seconds, a.numOrNull("distance") ?: 0.0, subt, long, inSec, inM, workSec, easySec, easyM, longSec, longM, bandSec.toList(), bandM.toList(), underSec, underM, overSec, overM, catSec.toList(), catM.toList(), mixSec.toList(), mixM.toList())
+        // ---- Power bands (% of that day's CP)
+        val pwSec = DoubleArray(5); val pwM = DoubleArray(5)
+        if (ftp != null && ftp > 0) {
+            for (i in 0 until n) {
+                if (watts.getOrNull(i) == null) continue
+                val v = vel.getOrNull(i)
+                if (v != null && v < STOP_V) continue
+                var sum = 0.0; var cnt = 0
+                for (j in maxOf(0, i - 1)..minOf(n - 1, i + 1)) watts.getOrNull(j)?.let { sum += it; cnt++ }
+                val b = pwBucket(sum / cnt, ftp)
+                val d = dt(i)
+                pwSec[b] += d; pwM[b] += dist(i, d)
+            }
+        }
+        return Run(id, date, name, seconds, a.numOrNull("distance") ?: 0.0, subt, long, inSec, inM, workSec, easySec, easyM, longSec, longM, bandSec.toList(), bandM.toList(), underSec, underM, overSec, overM, catSec.toList(), catM.toList(), mixSec.toList(), mixM.toList(),
+            pwSec.toList(), pwM.toList(), true)
     }
 
     fun toJson(list: List<Run>): String {
@@ -247,7 +337,8 @@ object Zones {
             .put("bandSec", JSONArray(r.bandSec)).put("bandM", JSONArray(r.bandM))
             .put("subtUnderSec", r.subtUnderSec).put("subtUnderM", r.subtUnderM).put("subtOverSec", r.subtOverSec).put("subtOverM", r.subtOverM)
             .put("catSec", JSONArray(r.catSec)).put("catM", JSONArray(r.catM))
-            .put("mixSec", JSONArray(r.mixSec)).put("mixM", JSONArray(r.mixM)))
+            .put("mixSec", JSONArray(r.mixSec)).put("mixM", JSONArray(r.mixM))
+            .put("pwSec", JSONArray(r.pwSec)).put("pwM", JSONArray(r.pwM)).put("pwDone", r.pwDone))
         return arr.toString()
     }
 
@@ -269,7 +360,8 @@ object Zones {
                 arr7(o.optJSONArray("bandSec")), arr7(o.optJSONArray("bandM")),
                 o.optDouble("subtUnderSec", 0.0), o.optDouble("subtUnderM", 0.0), o.optDouble("subtOverSec", 0.0), o.optDouble("subtOverM", 0.0),
                 arr4(o.optJSONArray("catSec")), arr4(o.optJSONArray("catM")),
-                arr5(o.optJSONArray("mixSec")), arr5(o.optJSONArray("mixM")))
+                arr5(o.optJSONArray("mixSec")), arr5(o.optJSONArray("mixM")),
+                arr5(o.optJSONArray("pwSec")), arr5(o.optJSONArray("pwM")), o.optBoolean("pwDone", false))
         }
     }.getOrDefault(emptyList())
 
@@ -283,7 +375,8 @@ object Zones {
             sumBands(l.filter { it.long }) { it.bandSec }, sumBands(l.filter { it.long }) { it.bandM },
             l.sumOf { it.subtUnderSec }, l.sumOf { it.subtUnderM }, l.sumOf { it.subtOverSec }, l.sumOf { it.subtOverM },
             List(4) { k -> l.sumOf { it.catSec[k] } }, List(4) { k -> l.sumOf { it.catM[k] } },
-            List(5) { k -> l.sumOf { it.mixSec[k] } }, List(5) { k -> l.sumOf { it.mixM[k] } })
+            List(5) { k -> l.sumOf { it.mixSec[k] } }, List(5) { k -> l.sumOf { it.mixM[k] } },
+            List(5) { k -> l.sumOf { it.pwSec[k] } }, List(5) { k -> l.sumOf { it.pwM[k] } })
     }
 
     /** The last [weeks] Mon–Sun weeks, oldest first, the last one being the week of [today]. */
