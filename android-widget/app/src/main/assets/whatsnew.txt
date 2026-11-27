@@ -1,3 +1,4 @@
+- Today's call follows your plan: Build ("easy day, build the volume" / "good day for the long run") when recovery is good on an easy or long day, Recover on a rest day, Push only on quality days; Hold and Back off wording fit the plan too
 - Run windows: Rainbow-style sky (soft clouds, dawn/dusk glow, stars on clear nights), 15-minute detail for today and tomorrow, and a heads-up when 1h30 is left in today's window
 - Power bands (time in % of CP: easy, steady, SubT, threshold, above CP) on each run and the Week screen, plus a zones calendar (heart rate or power, day by day with weekly totals)
 - Run windows v3: shows your whole runnable window (not one slot), tight windows in amber, best stretch for workouts, a graphic sky chart you can scrub for each hour's details, a richer hour-by-hour list, two-run days (② after 16:00, or an indoor ride of equal load), and calmer notifications (only when the window changes or closes)
