@@ -1217,7 +1217,9 @@ object Weather {
             window = usable.firstOrNull() ?: wins.maxByOrNull { it.end - it.start }
             passed = nowSec != null && usable.isEmpty()
             risky = false
-            bestW = bestStretch(wins, run, dh, s, date.monthValue, fh)
+            // Best stretch only among windows still usable today (never point to a best time that has gone)
+            bestW = bestStretch(if (nowSec != null && usable.isNotEmpty()) usable else wins, run, dh, s, date.monthValue, fh)
+                ?.takeIf { nowSec == null || usable.isEmpty() || it.end > nowSec }
         }
         if (second != null && run.planned && !run.done && second.planned && !second.done) {
             secondW = placeSecond(wins, second, dh, date, s, nowSec, zone)

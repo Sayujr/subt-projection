@@ -147,7 +147,8 @@ object RwHourList {
             val pillRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
             pill(pillRow, r.sky + " " + r.label, Color.WHITE, bg = 0x59000000, sp = 11.5f)
             sky.addView(pillRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
-            row.addView(sky, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.4f))
+            // WRAP_CONTENT: a MATCH_PARENT child inside a wrap-height row collapses and clipped the condition pill
+            row.addView(sky, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.4f))
 
             // chips
             val chips = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), 0, 0, 0) }
