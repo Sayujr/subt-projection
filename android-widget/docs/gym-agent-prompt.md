@@ -76,8 +76,9 @@ There are 20 compound days, about every 9–10 days, on Tue/Thu/Sat only.
 - **Isometric day load:** keep the planned load already on that event. For a new isometric event, use the median load of my existing Gym#1 events.
 - **Compound day load:** double that isometric load.
 - **Names:**
-  - `Gym · Isometric (Potrock/Fox)`
-  - `Gym · Compound · Squat 5×3–5 @ 135 lb` (with the actual planned weight)
+  - `Gym · Isometric`
+  - `Gym · Compound · Squat` (or `· Deadlift`, `· Press`, `· Bench`)
+  - Keep names this simple: no weights, sets or gym name in the name. Those go in the description.
 
 ## 5. Isometric session: priority order with alternatives
 
