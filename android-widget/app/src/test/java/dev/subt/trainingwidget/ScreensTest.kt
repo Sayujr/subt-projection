@@ -212,6 +212,22 @@ class ScreensTest {
             capture("fitness", ctl.get().window.decorView)
             ctl.pause().stop().destroy()
         }
+        // Fitness page with a long plan and no race: dashed projection to the plan end, rolling band
+        safely("fitness_long_plan") {
+            val base = Fixture.snapshot()
+            val last = base.days.last()
+            val long = base.copy(
+                races = emptyList(),
+                proj = (1..84).map { i -> Day(Fixture.today.plusDays(i.toLong()).toString(), last.ctl + 0.1 * i, last.atl + 4 * Math.sin(i / 3.0)) },
+                planEnd = Fixture.today.plusDays(84).toString(),
+            )
+            Prefs.saveSnapshot(ctx, long, 400)
+            val ctl = Robolectric.buildActivity(FitnessActivity::class.java, Intent(ctx, FitnessActivity::class.java)).setup()
+            settle()
+            capture("fitness_long_plan", ctl.get().window.decorView)
+            ctl.pause().stop().destroy()
+            Prefs.saveSnapshot(ctx, base, 400)
+        }
         // Run windows: the day plan for today and tomorrow (the Today card and the Week list show up in app_home / app_week)
         for ((label, offset) in listOf("today" to 0L, "tomorrow" to 1L, "wet_day" to 2L)) safely("runwindow_$label") {
             val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, Fixture.today.plusDays(offset).toString())

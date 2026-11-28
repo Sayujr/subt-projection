@@ -2599,6 +2599,73 @@ class RulesTest {
         assertTrue(FitnessPlan.call(withProj)!!.sentence.endsWith("Projected form: Sunday +2, next week −4."))
     }
 
+    private fun fsPlan(perDay: Double, days: Int, now: Double = 55.0) =
+        (1..days).map { i -> Day(fsToday.plusDays(i.toLong()).toString(), now + perDay * i, now + perDay * i) }
+
+    @Test fun planHorizonWithoutRace() {
+        val sunday = fsToday.plusDays(6)
+        // no race: fetch at least 16 weeks; a race further out stretches it to the race
+        assertEquals(fsToday.plusDays(112), PlanHorizon.fetchTo(fsToday, null))
+        assertEquals(fsToday.plusDays(200), PlanHorizon.fetchTo(fsToday, fsToday.plusDays(200)))
+        val fetchTo = PlanHorizon.fetchTo(fsToday, null)
+        val dates = listOf(fsToday.plusDays(3), fsToday.plusDays(70), fsToday.plusDays(100), fsToday.plusDays(150)).map { it.toString() + "T07:00:00" }
+        val end = PlanHorizon.planEnd(fsToday, dates, fetchTo)
+        assertEquals(fsToday.plusDays(100), end)   // beyond the fetch window is ignored
+        val to = PlanHorizon.projectTo(fsToday, sunday, emptyList(), end, fetchTo)
+        assertTrue(to >= fsToday.plusDays(112 - 12))
+        assertEquals(end, to)                      // projection ends on the last planned day
+        // a short plan still projects two weeks so the week maths has data
+        assertEquals(fsToday.plusDays(14), PlanHorizon.projectTo(fsToday, sunday, emptyList(), fsToday.plusDays(5), fetchTo))
+        assertNull(PlanHorizon.planEnd(fsToday, emptyList(), fetchTo))
+    }
+
+    @Test fun planEndSerialisesAndOldJsonStillLoads() {
+        val t = fsToday.toString()
+        val snap = Snapshot(1L, t, listOf(Day(t, 50.0, 45.0)), emptyList(), planEnd = fsToday.plusDays(90).toString())
+        assertEquals(fsToday.plusDays(90).toString(), Snapshot.fromJson(snap.toJson())!!.planEnd)
+        val old = org.json.JSONObject(snap.toJson()).also { it.remove("planEnd") }.toString()
+        assertNull(Snapshot.fromJson(old)!!.planEnd)
+        assertNull(Snapshot.fromJson(Snapshot(1L, t, listOf(Day(t, 50.0, 45.0)), emptyList()).toJson())!!.planEnd)
+    }
+
+    @Test fun fitnessBandWithoutRaceFollowsThePlan() {
+        val plain = FitnessPlan.band(fsSnap(3.0))!!
+        assertNull(plain.race); assertEquals(fsToday.plusWeeks(8), plain.end)
+        val long = FitnessPlan.band(fsSnap(3.0).copy(planEnd = fsToday.plusDays(90).toString()))!!
+        assertNull(long.race); assertNull(long.taperStart)
+        assertEquals(fsToday.plusDays(90), long.end)
+        assertEquals(fsToday.minusWeeks(12), long.start)
+        // rolling band: +2..+4 per 28 days, not capped
+        assertEquals(long.lo[0] + 2.0 * 3, long.lo[84], 1e-9)
+        assertEquals(long.hi[0] + 4.0 * 3, long.hi[84], 1e-9)
+        assertTrue(long.hi.last() > long.hi[84])
+        // capped at 16 weeks ahead
+        val far = FitnessPlan.band(fsSnap(3.0).copy(planEnd = fsToday.plusDays(300).toString()))!!
+        assertEquals(fsToday.plusWeeks(16), far.end)
+    }
+
+    @Test fun verdictCreditsARecoveringPlan() {
+        val behind = fsSnap(-1.0).copy(proj = fsPlan(4.0 / 28, 60), planEnd = fsToday.plusDays(60).toString())
+        val c = FitnessPlan.call(behind)!!
+        assertEquals(FitnessPlan.Status.BEHIND, c.status)
+        assertEquals(0xFFFFC53D.toInt(), c.color)
+        assertTrue(c.sentence, c.sentence.startsWith("Behind over the last month, but your plan gets you back on track (+4 by 30 Mar)."))
+        // the plan ends sooner than 28 days: read at the end of the plan
+        val short = behind.copy(planEnd = fsToday.plusDays(15).toString())
+        assertTrue(FitnessPlan.call(short)!!.sentence, FitnessPlan.call(short)!!.sentence.contains("(+2 by 17 Mar)"))
+        // a plan that stays flat does not rescue it
+        val flat = fsSnap(-1.0).copy(proj = fsPlan(0.0, 60), planEnd = fsToday.plusDays(60).toString())
+        assertEquals(FitnessPlan.Status.BEHIND.color, FitnessPlan.call(flat)!!.color)
+        assertFalse(FitnessPlan.call(flat)!!.sentence.contains("your plan"))
+        // on track but the plan dips
+        val dip = fsSnap(3.0).copy(proj = fsPlan(-3.0 / 28, 60), planEnd = fsToday.plusDays(60).toString())
+        val d = FitnessPlan.call(dip)!!
+        assertEquals(FitnessPlan.Status.ON_TRACK, d.status)
+        assertTrue(d.sentence, d.sentence.endsWith("Plan dips to −3 by 30 Mar."))
+        // thresholds unchanged without a plan
+        assertEquals(FitnessPlan.Status.BEHIND.color, FitnessPlan.call(fsSnap(-1.0))!!.color)
+    }
+
     @Test fun fitnessGreyZoneBoundsAreFormZones() {
         assertTrue(FitnessPlan.inGrey(-10.0)); assertTrue(FitnessPlan.inGrey(4.9))
         assertFalse(FitnessPlan.inGrey(-10.1)); assertFalse(FitnessPlan.inGrey(5.0))

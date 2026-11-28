@@ -326,9 +326,12 @@ object WidgetRenderer {
             return hist to fut
         }
         val hist = all.takeLast(period)
-        val fut = if (fresh) snap.proj.filter { it.date > (hist.lastOrNull()?.date ?: "") }.take(14) else emptyList()
+        val fut = if (fresh) snap.proj.filter { it.date > (hist.lastOrNull()?.date ?: "") }.take(futureDaysFor(period)) else emptyList()
         return hist to fut
     }
+
+    /** How much of the (now up to 16-week) plan a period's chart shows: a third of the period, 2 to 12 weeks. */
+    internal fun futureDaysFor(period: Int): Int = (period / 3).coerceIn(14, 84)
 
     /** Short label for a period: 2w, 6w, 3mo, 1y, or Nd for a custom one. */
     internal fun periodShort(days: Int) = when (days) {

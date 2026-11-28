@@ -12,7 +12,7 @@ import java.util.Locale
 
 /**
  * The long-term Fitness chart: the last 12 weeks (solid), the plan (dashed) and the green target band, out to the race
- * (or 8 weeks). Registers a point per day with [ChartHits] so [Scrub] can read values off it.
+ * (or the end of your plan, up to 16 weeks), with a tick where the plan ends. Registers a point per day with [ChartHits] so [Scrub] can read values off it.
  */
 object FitnessChart {
     private const val GRID = 0x339AA3B2
@@ -62,6 +62,15 @@ object FitnessChart {
             val lbl = Paint(text).apply { color = AMBER; isFakeBoldText = true }
             val name = band.race.name.take(14)
             c.drawText(name, (right - lbl.measureText(name)).coerceAtLeast(left), top + 9f * d, lbl)
+        }
+        // where the plan stops: the dashed line ends here
+        val planEnd = s.planEnd?.let { ld(it) }?.takeIf { it > today && it <= band.end }
+        if (planEnd != null) {
+            c.drawLine(x(planEnd), top, x(planEnd), bottom, Paint().apply { color = 0x889AA3B2.toInt(); strokeWidth = 1.2f * d; pathEffect = DashPathEffect(floatArrayOf(2f * d, 3f * d), 0f) })
+            val pl = "plan ends ${planEnd.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))}"
+            val pw = text.measureText(pl)
+            val px = if (x(planEnd) + 3f * d + pw <= right) x(planEnd) + 3f * d else (x(planEnd) - 3f * d - pw).coerceAtLeast(left)
+            c.drawText(pl, px, bottom - 4f * d, Paint(text).apply { isFakeBoldText = true })
         }
         // today
         if (today >= band.start && today <= band.end)

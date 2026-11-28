@@ -65,20 +65,20 @@ class IcuApi(private val creds: Credentials) {
             .sortedBy { it.optString("start_date_local") }
             .take(6)
 
-        // ---- Calendar: this week, plus planned workouts up to the next race (≤ 12 weeks) for projections
-        val nextRaceDate = raceEvents.firstOrNull()?.optString("start_date_local")?.take(10)
-            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-        // Project far enough to cover every race in the next 12 weeks
+        // ---- Calendar: this week, plus the whole planned calendar (up to the next A race, at least 16 weeks) for projections
         val raceDates = raceEvents.mapNotNull { runCatching { LocalDate.parse(date(it)) }.getOrNull() }
-            .filter { ChronoUnit.DAYS.between(today, it) <= 84 }
-        val projectTo = (raceDates + sunday + today.plusDays(14) + listOfNotNull(nextRaceDate?.takeIf { ChronoUnit.DAYS.between(today, it) <= 84 })).max()
+        val nextARace = raceEvents.filter { it.optString("category") == "RACE_A" }
+            .mapNotNull { runCatching { LocalDate.parse(date(it)) }.getOrNull() }.filter { !it.isBefore(today) }.minOrNull()
+        val fetchTo = PlanHorizon.fetchTo(today, nextARace)
         val events = getArray(
             "/athlete/$ath/events",
-            mapOf("oldest" to monday.toString(), "newest" to projectTo.plusDays(1).toString()),
+            mapOf("oldest" to monday.toString(), "newest" to fetchTo.plusDays(1).toString()),
         ).objects().filter {
             val cat = it.optString("category")
             cat == "WORKOUT" || cat.startsWith("RACE")
         }.sortedBy { it.optString("start_date_local") }
+        val planEnd = PlanHorizon.planEnd(today, events.map { date(it) }, fetchTo)
+        val projectTo = PlanHorizon.projectTo(today, sunday, raceDates, planEnd, fetchTo)
 
         val activities = getArray(
             "/athlete/$ath/activities",
@@ -155,7 +155,7 @@ class IcuApi(private val creds: Credentials) {
             .map { Day(it.key, it.value.first, it.value.second) }
         val weight = wellness.objects().sortedBy { it.optString("id") }.mapNotNull { it.optNum("weight")?.takeIf { w -> w > 25 } }.lastOrNull()
         val curveCp = runCatching { fetchCurveCp(ath) }.getOrNull()
-        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight ?: athleteWeight, runFtp, curveCp, ahead)
+        return Snapshot(System.currentTimeMillis(), todayStr, days, todays, week, lastWeekLoad, races, proj, runs, weight ?: athleteWeight, runFtp, curveCp, ahead, planEnd?.toString())
     }
 
     /** Planned workouts, races and completed activities between [start] and [end] (inclusive), for the app's Week screen. */
@@ -875,4 +875,22 @@ object Net {
         if (offline) throw IOException("offline (test)")
         return url.openConnection() as HttpURLConnection
     }
+}
+
+/** How far the calendar is fetched and projected: the whole plan, not just the next race. */
+object PlanHorizon {
+    const val MIN_DAYS = 112
+
+    /** Fetch planned events up to the next A race, but at least [MIN_DAYS] (16 weeks) from [today]. */
+    fun fetchTo(today: LocalDate, nextARace: LocalDate?): LocalDate =
+        listOfNotNull(today.plusDays(MIN_DAYS.toLong()), nextARace?.takeIf { it.isAfter(today) }).max()
+
+    /** Last day (today or later, within [fetchTo]) that has any planned event, or null when nothing is planned. */
+    fun planEnd(today: LocalDate, eventDates: List<String>, fetchTo: LocalDate): LocalDate? =
+        eventDates.mapNotNull { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() }
+            .filter { !it.isBefore(today) && !it.isAfter(fetchTo) }.maxOrNull()
+
+    /** Project to the end of the plan, but at least to Sunday, two weeks out, and the last race within [fetchTo]. */
+    fun projectTo(today: LocalDate, sunday: LocalDate, raceDates: List<LocalDate>, planEnd: LocalDate?, fetchTo: LocalDate): LocalDate =
+        (listOf(sunday, today.plusDays(14)) + raceDates.filter { !it.isBefore(today) && !it.isAfter(fetchTo) } + listOfNotNull(planEnd)).max()
 }

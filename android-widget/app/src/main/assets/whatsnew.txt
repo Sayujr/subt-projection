@@ -1,3 +1,4 @@
+- Fitness: the projection now follows your whole intervals.icu plan (up to 16 weeks), shows where the plan ends, always draws the target band, and the verdict credits your plan when it puts you back on track
 - Today's call follows your plan: Build ("easy day, build the volume" / "good day for the long run") when recovery is good on an easy or long day, Recover on a rest day, Push only on quality days; Hold and Back off wording fit the plan too
 - Run windows: Rainbow-style sky (soft clouds, dawn/dusk glow, stars on clear nights), 15-minute detail for today and tomorrow, and a heads-up when 1h30 is left in today's window
 - Power bands (time in % of CP: easy, steady, SubT, threshold, above CP) on each run and the Week screen, plus a zones calendar (heart rate or power, day by day with weekly totals)

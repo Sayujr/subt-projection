@@ -41,6 +41,8 @@ object FitnessPlan {
     const val TAPER_END_HI = 0.97
     const val HISTORY_WEEKS = 12
     const val DEFAULT_WEEKS = 8
+    /** The long-term chart never looks further ahead than this when there is no race. */
+    const val MAX_WEEKS = 16
     const val MAX_SUGGESTIONS = 3
     /** intervals.icu's Fitness time constant in days. */
     const val CTL_DAYS = 42.0
@@ -169,7 +171,24 @@ object FitnessPlan {
         val rate: Double, val rate7: Double,
         val ratio: Double, val form: Double, val taper: Race?,
         val formSunday: Double?, val formNext: Double?,
+        /** Colour of the verdict: the status colour, amber when the plan is credited for a behind month. */
+        val color: Int = status.color,
+        /** Planned Fitness change from today (28 days out, or the end of the plan if sooner) and the day it is read at. */
+        val planDelta: Double? = null, val planDate: LocalDate? = null,
     )
+
+    /** Fitness change the plan projects from today to today + 28 days (or [Snapshot.planEnd] if sooner), read off [Snapshot.proj]. */
+    fun planOutlook(s: Snapshot): Pair<Double, LocalDate>? {
+        if (s.days.isEmpty() || s.proj.isEmpty()) return null
+        val today = todayOf(s)
+        var limit = today.plusDays(WINDOW_DAYS.toLong())
+        s.planEnd?.let { e -> runCatching { LocalDate.parse(e) }.getOrNull()?.let { if (it < limit) limit = it } }
+        val p = s.proj.mapNotNull { day -> dayOf(day)?.takeIf { it > today && it <= limit }?.let { it to day } }.maxByOrNull { it.first } ?: return null
+        if (p.first < today.plusDays(7)) return null
+        return (p.second.ctl - s.days.last().ctl) to p.first
+    }
+
+    private fun shortDate(d: LocalDate): String = d.format(java.time.format.DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))
 
     private fun signedD(v: Double): String = (if (v >= 0) "+" else "−") + f1(Math.abs(v))
 
@@ -188,13 +207,24 @@ object FitnessPlan {
             (st.formNext?.let { ", next week ${signed(it)}" } ?: "") + "." else ""
         val left = taper?.let { daysTo(it, today) }
         val head = "${status.label}: "
-        val sentence = when (status) {
+        val outlook = if (taper == null) planOutlook(s) else null
+        val recovering = outlook != null && outlook.first >= MONTH_LO &&
+            (status == Status.BEHIND || status == Status.SLIGHTLY_BEHIND)
+        val dips = outlook != null && outlook.first <= -MONTH_LO && status == Status.ON_TRACK
+        val sentence = if (recovering && outlook != null) {
+            "${status.label} over the last month, but your plan gets you back on track (${signed(outlook.first)} by ${shortDate(outlook.second)}). " +
+                "Fitness ${signed(rate)} this month (${signedD(rate7)} this week), $form.$proj"
+        } else when (status) {
             Status.TAPER_OK -> head + "fitness ${signed(rate7)} this week, as expected with ${left} days to ${taper?.name?.take(24)}, $form.$proj"
             Status.TAPER_BUILDING -> head + "${left} days from ${taper?.name?.take(24)}, a taper should hold or ease fitness (${signed(rate7)} this week), $form.$proj"
             Status.TAPER_DROPPING -> head + "fitness ${signed(rate7)} this week is faster than a taper needs, $form.$proj"
             else -> head + "fitness ${signed(rate)} this month (${signedD(rate7)} this week), $form.$proj"
         }
-        return Call(status, sentence, rate, rate7, ratio, d.form, taper, st?.formSunday, st?.formNext)
+        val full = if (dips && outlook != null) sentence + " Plan dips to ${signed(outlook.first)} by ${shortDate(outlook.second)}." else sentence
+        return Call(
+            status, full, rate, rate7, ratio, d.form, taper, st?.formSunday, st?.formNext,
+            color = if (recovering) WARN else status.color, planDelta = outlook?.first, planDate = outlook?.second,
+        )
     }
 
     // ---------------------------------------------------------------- 2. short term
@@ -256,7 +286,10 @@ object FitnessPlan {
         val today = todayOf(s)
         val race = targetRace(s, today)
         val raceDate = race?.let { runCatching { LocalDate.parse(it.date) }.getOrNull() }
-        val end = raceDate ?: today.plusWeeks(DEFAULT_WEEKS.toLong())
+        val planEnd = s.planEnd?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        // No race: cover the whole plan (at least a month out, at most 16 weeks), else 8 weeks
+        val end = raceDate ?: planEnd?.takeIf { it.isAfter(today.plusDays(28)) }?.let { minOf(it, today.plusWeeks(MAX_WEEKS.toLong())) }
+            ?: today.plusWeeks(DEFAULT_WEEKS.toLong())
         var start = today.minusWeeks(HISTORY_WEEKS.toLong())
         val first = dayOf(s.days.first())
         if (first != null && first.isAfter(start)) start = first
@@ -272,8 +305,9 @@ object FitnessPlan {
         for (i in 0..n) {
             val d = start.plusDays(i.toLong())
             val t = i / 28.0
-            var l = minOf(startCtl + MONTH_LO * t, cap)
-            var h = minOf(startCtl + MONTH_HI * t, cap)
+            // With a race the band stops at the race-day target; without one it keeps rising at the plain rate
+            var l = (startCtl + MONTH_LO * t).let { if (race != null) minOf(it, cap) else it }
+            var h = (startCtl + MONTH_HI * t).let { if (race != null) minOf(it, cap) else it }
             if (taperStart != null && raceDate != null && d.isAfter(taperStart)) {
                 val span = maxOf(1L, ChronoUnit.DAYS.between(taperStart, raceDate)).toDouble()
                 val p = (ChronoUnit.DAYS.between(taperStart, d) / span).coerceIn(0.0, 1.0)
@@ -514,7 +548,7 @@ object FitnessPlan {
         val c = call(s) ?: return null
         val st = shortTerm(s)
         val d = s.days.last()
-        val lvl = when (c.status.color) { GOOD -> Coach.Level.GOOD; WARN -> Coach.Level.WATCH; else -> Coach.Level.ACT }
+        val lvl = when (c.color) { GOOD -> Coach.Level.GOOD; WARN -> Coach.Level.WATCH; else -> Coach.Level.ACT }
         val lines = ArrayList<Coach.Line>()
         lines += Coach.Line(lvl, "${c.status.label}: ${c.sentence}")
         if (st != null) {

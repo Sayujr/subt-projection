@@ -108,6 +108,8 @@ data class Snapshot(
     val curveCp: Double? = null,
     /** Planned sessions after this week, up to a week from today (for run-window swap suggestions). */
     val ahead: List<Workout> = emptyList(),
+    /** Date (yyyy-MM-dd) of the last planned event in intervals.icu, or null when unknown (older cached data). */
+    val planEnd: String? = null,
 ) {
     fun toJson(): String = JSONObject().apply {
         put("fetchedAt", fetchedAt)
@@ -124,6 +126,7 @@ data class Snapshot(
         put("week", workoutsJson(week))
         put("ahead", workoutsJson(ahead))
         put("lastWeekLoad", lastWeekLoad)
+        putOpt("planEnd", planEnd)
         putOpt("weight", weight)
         putOpt("runFtp", runFtp)
         putOpt("curveCp", curveCp)
@@ -195,6 +198,7 @@ data class Snapshot(
                 week = parseWorkouts(o.optJSONArray("week")),
                 ahead = parseWorkouts(o.optJSONArray("ahead")),
                 lastWeekLoad = o.optInt("lastWeekLoad"),
+                planEnd = o.optString("planEnd").takeIf { it.isNotBlank() },
                 proj = if (pj == null) emptyList() else (0 until pj.length()).map {
                     val x = pj.getJSONObject(it)
                     Day(x.getString("d"), x.getDouble("c"), x.getDouble("a"))

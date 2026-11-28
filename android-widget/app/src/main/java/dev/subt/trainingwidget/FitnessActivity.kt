@@ -145,7 +145,7 @@ class FitnessActivity : Activity() {
             "Fitness (CTL) should rise about 2 to 4 points a month. Over the last 28 days: +2 to +4 on track, +4 to +6 building fast, above +6 too fast, " +
                 "0 to +2 slightly behind, below 0 behind. Form should stay in the grey zone (−10 to +5): fresher than that with Fitness behind means room to add load, more tired means trim whatever Fitness is doing. " +
                 "In a taper (A race 14 days, B 10, C 5) Fitness is meant to ease, so the call is whether it eases as planned.")
-        text(c, call.status.label, 26f, call.status.color, bold = true, top = 2).apply { letterSpacing = 0.02f }
+        text(c, call.status.label, 26f, call.color, bold = true, top = 2).apply { letterSpacing = 0.02f }
         text(c, call.sentence, 14.5f, DIM, top = 2)
     }
 
@@ -178,7 +178,9 @@ class FitnessActivity : Activity() {
         val c = card()
         val band = FitnessPlan.band(s)
         val race = band?.race
-        BandViews.heading(this, c, if (race != null) "LONG TERM · TOWARDS ${race.name.take(20).uppercase(Locale.getDefault())}" else "LONG TERM · NEXT ${FitnessPlan.DEFAULT_WEEKS} WEEKS",
+        BandViews.heading(this, c, if (race != null) "LONG TERM · TO ${race.name.take(20).uppercase(Locale.getDefault())}"
+            else if (band != null && s.planEnd != null) "LONG TERM · NEXT ${(ChronoUnit.DAYS.between(FitnessPlan.todayOf(s), band.end) + 6) / 7} WEEKS (your plan)"
+            else "LONG TERM · NEXT ${FitnessPlan.DEFAULT_WEEKS} WEEKS",
             "Blue is your Fitness for the last ${FitnessPlan.HISTORY_WEEKS} weeks, dashed is where your planned sessions take it. The green band starts ${FitnessPlan.HISTORY_WEEKS} weeks ago and rises " +
                 "+${FitnessPlan.MONTH_LO.roundToInt()} to +${FitnessPlan.MONTH_HI.roundToInt()} per 4 weeks, capped at the race-day target (today's Fitness + ${FitnessPlan.MONTH_TARGET.roundToInt()} per 4 weeks until the taper starts), then eases through the taper. " +
                 "A week counts as below the band when Fitness gained less than +${FitnessPlan.WEEK_LO}. Touch and drag the chart to read values.")
