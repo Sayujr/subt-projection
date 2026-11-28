@@ -13,6 +13,8 @@ object RwStore {
     private fun sp(ctx: Context) = ctx.getSharedPreferences("training_widget", Context.MODE_PRIVATE)
 
     const val K_UV = "rw_uv"
+    const val K_UV_FREE = "rw_uv_free"
+    const val K_UV_CLOUD = "rw_uv_cloud"
     const val K_HOT_W = "rw_hot_w"
     const val K_HOT_S = "rw_hot_s"
     const val K_COLD = "rw_cold"
@@ -29,6 +31,8 @@ object RwStore {
         val d = RwSettings()
         return RwSettings(
             uvLimit = p.getFloat(K_UV, d.uvLimit.toFloat()).toDouble(),
+            uvFree = p.getFloat(K_UV_FREE, d.uvFree.toFloat()).toDouble(),
+            uvCloud = p.getFloat(K_UV_CLOUD, d.uvCloud.toFloat()).toDouble(),
             hotWinter = p.getFloat(K_HOT_W, d.hotWinter.toFloat()).toDouble(),
             hotSummer = p.getFloat(K_HOT_S, d.hotSummer.toFloat()).toDouble(),
             cold = p.getFloat(K_COLD, d.cold.toFloat()).toDouble(),

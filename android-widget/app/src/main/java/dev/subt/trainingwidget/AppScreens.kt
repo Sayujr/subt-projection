@@ -1374,7 +1374,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         row.addView(TextView(a).apply { text = t; setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f); setTextColor(DIM); letterSpacing = 0.08f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val body = TextView(a).apply {
             text = RwUi.CHART_KEY + " Green is the time you can run, amber means tight. The pill under it has the times; under that, UV by hour" +
-                (if (p.run.type == Weather.RunType.SUBT || p.run.type == Weather.RunType.TT) ", dew point and wind. 'Best' is the stretch inside the window that suits this workout." else ".") + " Touch and drag across the chart to read each hour (every 10 minutes in the next 4 h of rain radar, then every 15 minutes today and tomorrow)."
+                (if (p.run.type == Weather.RunType.SUBT || p.run.type == Weather.RunType.TT) ", dew point and wind. " else ". ") + "'Best' is the stretch inside the window that suits this workout: it grows while it stays cloudy and low-UV, up to 2 h longer than the run." + " Touch and drag across the chart to read each hour (every 10 minutes in the next 4 h of rain radar, then every 15 minutes today and tomorrow)."
             setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f); setLineSpacing(dpf(2f).toFloat(), 1f)
             setPadding(0, dp(4), 0, 0); visibility = if ("rwinfo" in openInfo) View.VISIBLE else View.GONE
         }
@@ -1407,6 +1407,7 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
             text(c, (if (passed) "Was ${RwText.windowsList(p.windows, zone)} · " else "") + sub, 13.5f, DIM, top = 3)
         }
         RwText.bestLine(p.best, p.run, p.hours, zone)?.let { text(c, it, 13.5f, GOOD, top = 3) }
+        p.summary.note?.let { text(c, it, 12.5f, DIM, top = 2) }
         if (head.none && !passed && p.split == null) text(c, p.summary.pick, 13f, DIM, top = 2)
         if (today) Watch.reason(a)?.let { text(c, "Watching closely: $it", 12.5f, GOOD, top = 2) }
         val chart = RwUi.chart(a, p, s, today)
@@ -1482,6 +1483,8 @@ class AppScreens(private val a: Activity, private val wDp: Int, private val onCh
         if (t != null && !t.noData) {
             text(c, "Tomorrow  " + RwText.headline(t, zone).text, 13f, DIM, top = 8)
         }
+        // "Right now" taps: what it's like outside, to check the forecasts (today only)
+        c.addView(RwUi.outsideRow(a) { onChange() })
         c.setOnClickListener { RunWindowActivity.open(a, today) }
     }
 

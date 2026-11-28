@@ -34,6 +34,13 @@ object RwText {
         }
     }
 
+    /** The day, unmistakably: "Today", "Tomorrow · Sat 28", "Mon 30 Nov". */
+    fun dayTitle(day: java.time.LocalDate, today: java.time.LocalDate, loc: Locale = Locale.getDefault()): String = when (day) {
+        today -> "Today"
+        today.plusDays(1) -> "Tomorrow · " + day.format(java.time.format.DateTimeFormatter.ofPattern("EEE d", loc))
+        else -> day.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", loc))
+    }
+
     fun num1(v: Double): String = if (Math.abs(v - v.roundToInt()) < 0.05) v.roundToInt().toString() else String.format(Locale.US, "%.1f", v)
 
     // ---------------------------------------------------------------- windows
@@ -83,10 +90,21 @@ object RwText {
         else -> "windy"
     }
 
-    /** "Best for SubT 08:00–10:00 · dew 2°, 7 °C, light wind"; null without a best stretch. */
+    private fun dewType(run: Weather.PlannedRun) = run.type == Weather.RunType.SUBT || run.type == Weather.RunType.TT
+
+    /**
+     * SubT / TT: "Best for SubT 08:00–10:00 · dew 2°, 7 °C, light wind". Easy / long: "Best 08:00–11:30 · ☁️ 90%, UV 0.4".
+     * Null without a best stretch.
+     */
     fun bestLine(best: Weather.Window?, run: Weather.PlannedRun, dh: List<Weather.Combined>, zone: ZoneId): String? {
         if (best == null) return null
         val hs = hoursIn(dh, best.start, best.end)
+        if (!dewType(run)) {
+            val cloud = hs.mapNotNull { it.cloud }.takeIf { it.isNotEmpty() }?.average()
+            val uv = hs.maxOfOrNull { it.uv } ?: best.maxUv
+            val bits = listOfNotNull(cloud?.let { "☁️ ${it.roundToInt()}%" }, "UV ${num1(uv)}")
+            return "Best ${range(best, zone)} · " + bits.joinToString(", ")
+        }
         val dew = hs.mapNotNull { it.dew }.takeIf { it.isNotEmpty() }?.average()
         val temp = hs.mapNotNull { it.temp }.takeIf { it.isNotEmpty() }?.average()
         val wind = hs.mapNotNull { it.wind }.maxOrNull()
@@ -95,6 +113,12 @@ object RwText {
         if (temp != null) bits += "${temp.roundToInt()} °C"
         bits += windSpeedWord(wind)
         return "Best for ${run.type.label} ${range(best, zone)} · " + bits.joinToString(", ")
+    }
+
+    /** The short tag for titles and widgets: "best for SubT 08:00–10:00" or "best 08:00–11:30"; null without a best stretch. */
+    fun bestTag(best: Weather.Window?, run: Weather.PlannedRun, dh: List<Weather.Combined>, zone: ZoneId): String? {
+        val line = bestLine(best, run, dh, zone)?.substringBefore(" · ") ?: return null
+        return line.replaceFirstChar { it.lowercase() }
     }
 
     /** The summary box's "pick" line. */
@@ -183,7 +207,7 @@ object RwText {
         if (wins.isEmpty()) {
             return Note("$day: no run window fits", listOfNotNull(p.summary.suggestion.takeIf { it.isNotBlank() }) .plus(tail).joinToString("\n"))
         }
-        val bestPart = bestLine(p.best, p.run, p.hours, zone)?.removePrefix("Best for ")?.let { " · best for " + it.substringBefore(" · ") }.orEmpty()
+        val bestPart = bestTag(p.best, p.run, p.hours, zone)?.let { " · $it" }.orEmpty()
         if (wins.all { it.narrow }) {
             val next = if (wins.size > 1) "Next: ${windowsList(wins.drop(1).take(2), zone)} · options ›" else "Can't make it? Options ›"
             return Note("Tight ${day.lowercase(Locale.US)}: only ${range(wins.first(), zone)}", (listOf(next) + tail).joinToString("\n"))

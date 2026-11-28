@@ -16,7 +16,12 @@ import kotlin.math.roundToInt
 
 /** Your run-window rules (Settings → Run windows). Temperatures in °C, times in minutes after midnight. */
 data class RwSettings(
+    /** Max UV even under cloud: above this an hour is never runnable. */
     val uvLimit: Double = 2.0,
+    /** UV at or below this is fine under any sky. */
+    val uvFree: Double = 0.6,
+    /** Between [uvFree] and [uvLimit] an hour needs at least this much cloud (%). */
+    val uvCloud: Double = 75.0,
     val hotWinter: Double = 15.0,
     val hotSummer: Double = 20.0,
     val cold: Double = 5.0,
@@ -354,7 +359,24 @@ object Weather {
         val total: Int = 0,
         /** (source id, what it says) for the sources that disagree with the median. */
         val dissent: List<Pair<String, String>> = emptyList(),
+        /** Rainbow's own call (cloudy ≥ 60 %, wet > 0.25 mm/h) and what most of the other sources say; null when unknown or split evenly. */
+        val rbCloudy: Boolean? = null,
+        val othersCloudy: Boolean? = null,
+        val rbWet: Boolean? = null,
+        val othersWet: Boolean? = null,
     )
+
+    /** The UV rule: UV ≤ [RwSettings.uvFree] under any sky; up to [RwSettings.uvLimit] only with at least [RwSettings.uvCloud] % cloud; never above. */
+    fun uvOk(uv: Double, cloud: Double?, s: RwSettings): Boolean = when {
+        uv <= s.uvFree + 1e-9 -> true
+        uv > s.uvLimit + 1e-9 -> false
+        else -> (cloud ?: 0.0) >= s.uvCloud - 1e-9
+    }
+
+    /** Rainbow counts double by default. */
+    const val RAINBOW_WEIGHT = 2.0
+    /** The source with the best learned accuracy gets this extra factor. */
+    const val BEST_SOURCE_BOOST = 1.25
 
     fun median(v: List<Double>): Double? {
         if (v.isEmpty()) return null
@@ -413,20 +435,25 @@ object Weather {
         val byT = src.mapValues { (_, l) -> l.associateBy { hourFloor(it.t) } }
         val times = byT.values.flatMap { it.keys }.toSortedSet()
         val now = nowcastHours(nowcast)
+        // Cloud and rain: Rainbow ×2, times its learned accuracy weight; the single most accurate source gets a further boost
+        val topId = weights.maxByOrNull { it.value }?.takeIf { top -> weights.size > 1 && weights.all { it.key == top.key || it.value < top.value - 1e-9 } }?.key
+        fun srcWeight(id: String): Double =
+            (if (id == "rainbow") RAINBOW_WEIGHT else 1.0) * (weights[id] ?: 1.0) * (if (id == topId) BEST_SOURCE_BOOST else 1.0)
         val out = ArrayList<Combined>()
         for (t in times) {
             val hs = byT.mapNotNull { (id, m) -> m[t]?.let { id to it } }
             if (hs.isEmpty()) continue
             fun med(f: (Hour) -> Double?) = median(hs.mapNotNull { f(it.second) })
             val temp = med { it.temp }
-            fun medW(f: (Hour) -> Double?) = wMedian(hs.mapNotNull { (id, h) -> f(h)?.let { it to (weights[id] ?: 1.0) } })
+            fun medW(f: (Hour) -> Double?) = wMedian(hs.mapNotNull { (id, h) -> f(h)?.let { it to srcWeight(id) } })
             val cloudMed = medW { it.cloud }
             if (temp == null && cloudMed == null) continue
             val nc = now[t]
             val rainMed = medW { it.rainMm }
             val rain = nc?.first ?: rainMed ?: 0.0
             val pct = hs.mapNotNull { it.second.rainPct }.maxOrNull() ?: 0.0
-            val uv = hs.mapNotNull { it.second.uv }.maxOrNull() ?: 0.0
+            // UV: Rainbow's own value when it has the hour, else the median of the others
+            val uv = hs.firstOrNull { it.first == "rainbow" }?.second?.uv ?: median(hs.filter { it.first != "rainbow" }.mapNotNull { it.second.uv }) ?: 0.0
             val frozen = hs.any { isFrozen(it.second.precipType) } || nc?.second == true
 
             // Agreement with the median
@@ -444,11 +471,20 @@ object Weather {
             val useCloud = cRatio <= wRatio
             val agree = if (useCloud) cAgree else wAgree
             val total = if (useCloud) cVotes.size else wVotes.size
+            // Rainbow against the majority of the others
+            fun majority(yes: Int, no: Int): Boolean? = when { yes > no -> true; no > yes -> false; else -> null }
+            val rbH = hs.firstOrNull { it.first == "rainbow" }?.second
+            val otherH = hs.filter { it.first != "rainbow" }.map { it.second }
+            val rbCloudy = rbH?.cloud?.let { it >= 60.0 }
+            val othersCloudy = otherH.mapNotNull { it.cloud }.let { v -> majority(v.count { it >= 60.0 }, v.count { it < 60.0 }) }
+            val rbWet = rbH?.rainMm?.let { it > 0.25 }
+            val othersWet = otherH.mapNotNull { it.rainMm }.let { v -> majority(v.count { it > 0.25 }, v.count { it <= 0.25 }) }
 
             out += Combined(
                 t = t, temp = temp, feels = med { it.feels }, dew = med { it.dew }, cloud = cloudMed,
                 uv = uv, rainMm = rain, rainPct = pct, wind = med { it.wind }, gust = med { it.gust },
                 aqi = aqi[t], frozen = frozen, agree = agree, total = total, dissent = dissent,
+                rbCloudy = rbCloudy, othersCloudy = othersCloudy, rbWet = rbWet, othersWet = othersWet,
             )
         }
         // Ice: at or below 0 °C within 12 h after rain
@@ -570,7 +606,7 @@ object Weather {
         if (h.frozen || h.icy) out += "🧊"
         if (c.wet) out += "💧"
         if ((h.aqi ?: 0.0) > 100.0) out += "😷"
-        if (h.uv > s.uvLimit) out += "☀"
+        if (!uvOk(h.uv, h.cloud, s)) out += "☀"
         if (type == RunType.TT && (h.gust ?: 0.0) > 30.0) out += "💨"
         if (c.cloudy) out += "☁"
         return out
@@ -699,13 +735,12 @@ object Weather {
         val eff = effTemp(h.temp, h.feels) ?: 10.0
         val dew = h.dew ?: 8.0
         val cloud = h.cloud ?: 50.0
-        val lim = s.uvLimit
         val uv = h.uv
+        val uvFine = uvOk(uv, h.cloud, s)
         var p = 0.0
         p += when (type) {
-            RunType.TT -> if (uv > lim) (uv - lim) * 1.0 + 0.5 else uv * 0.1
-            RunType.SUBT, RunType.EASY -> if (uv > lim) (uv - lim) * 4.0 + 2.0 else uv * 0.5
-            RunType.LONG -> if (uv > lim - 1.0) (uv - (lim - 1.0)) * 5.0 + 2.0 else uv * 0.5
+            RunType.TT -> if (!uvFine) (uv - s.uvFree) * 1.0 + 0.5 else uv * 0.1
+            else -> if (!uvFine) (uv - s.uvFree) * 4.0 + 2.0 else uv * 0.5
         }
         when (type) {
             RunType.TT -> {
@@ -868,8 +903,10 @@ object Weather {
         if (h.frozen || h.icy) return "ice or snow"
         if ((h.aqi ?: 0.0) > 150.0) return "air quality ${(h.aqi ?: 0.0).roundToInt()}"
         if (h.rainMm > 0.5) return "rain ${fmt1(h.rainMm)} mm/h"
-        val lim = if (type == RunType.LONG) s.uvLimit - 1.0 else s.uvLimit
-        if (h.uv > lim + 1e-9) return "UV ${fmt1(h.uv)} over your limit of ${fmt1(lim)}"
+        if (!uvOk(h.uv, h.cloud, s)) {
+            return if (h.uv > s.uvLimit + 1e-9) "UV ${fmt1(h.uv)} over your limit of ${fmt1(s.uvLimit)}"
+            else "UV ${fmt1(h.uv)} needs ${s.uvCloud.roundToInt()}%+ cloud"
+        }
         if (type == RunType.SUBT || type == RunType.TT) {
             val eff = effTemp(h.temp, h.feels)
             if (eff != null && eff >= hotLimit(s, month)) return "too hot (${eff.roundToInt()} °C)"
@@ -966,24 +1003,67 @@ object Weather {
         return WinSet(wins, why, night)
     }
 
-    /** SubT and TT/CPT only: the stretch inside a window (run length + 30 min, rounded up to 30) with the best dew point, temperature and wind. */
-    fun bestStretch(wins: List<Window>, run: PlannedRun, hours: List<Combined>, s: RwSettings, month: Int): Window? {
-        if (run.type != RunType.SUBT && run.type != RunType.TT) return null
+    /** Cloud at least this (%) for a slot to count as optimal for the best stretch. */
+    const val BEST_CLOUD = 80.0
+    /** UV at or below this (with that cloud) is optimal. */
+    const val BEST_UV = 1.0
+    /** Rain at or below this (mm/h) is optimal. */
+    const val BEST_RAIN = 0.1
+    /** The best stretch never grows past the run length plus this. */
+    const val BEST_EXTRA_SEC = 2 * 3600L
+
+    /**
+     * All run types: the stretch inside a window that suits the workout best. Seed = the slot of run + 30 min (rounded up to 30)
+     * with the lowest penalty (SubT / TT: dew point, coolest air, light wind; easy / long: cloud, UV, rain, plus cold for long runs),
+     * then grown in both directions in 15 (or 30) minute steps while every added slot is optimal: cloud ≥ 80 %, UV ≤ 1.0, no rain
+     * (≤ 0.1 mm/h) and, for SubT / TT, a dew point within 2 °C of the seed's. It stays inside its window and never grows past the run
+     * length + 2 h. Windows that are tight, or no longer than the seed + 30 min, have no best stretch.
+     */
+    fun bestStretch(
+        wins: List<Window>, run: PlannedRun, hours: List<Combined>, s: RwSettings, month: Int,
+        fine: List<Combined> = emptyList(),
+    ): Window? {
         val byT = hours.associateBy { it.t }
         val pens = hours.associate { it.t to penalty(it, run.type, s, month) }
         val len = ceilTo((run.minutes + 30) * 60L, 1800L)
         var best: Window? = null
+        var bestIn: Window? = null
         for (w in wins) {
             if (w.narrow || w.end - w.start < len + 1800L) continue
             var st = w.start
             while (st + len <= w.end) {
                 val c = build(st, st + len, byT, pens, w.night)
                 val cur = best
-                if (c != null && (cur == null || c.score < cur.score - 1e-9)) best = c
+                if (c != null && (cur == null || c.score < cur.score - 1e-9)) { best = c; bestIn = w }
                 st += 1800
             }
         }
-        return best
+        val seed = best ?: return null
+        val win = bestIn ?: return seed
+        val dewType = run.type == RunType.SUBT || run.type == RunType.TT
+        val fineBy = fine.associateBy { it.t }
+        val step = if (fine.isNotEmpty()) 900L else 1800L
+        fun at(t: Long): Combined? = fineBy[t] ?: byT[hourFloor(t)]
+        val seedDew = hours.filter { it.t < seed.end && it.t + 3600 > seed.start }.mapNotNull { it.dew }.takeIf { it.isNotEmpty() }?.average()
+        fun optimal(t: Long): Boolean {
+            val c = at(t) ?: return false
+            if (notRunnableReason(c, run.type, s, month) != null) return false
+            if ((c.cloud ?: 0.0) < BEST_CLOUD || c.uv > BEST_UV + 1e-9 || c.rainMm > BEST_RAIN + 1e-9) return false
+            if (dewType && seedDew != null) { val d = c.dew; if (d != null && d > seedDew + 2.0 + 1e-9) return false }
+            return true
+        }
+        val cap = max(len, run.minutes * 60L + BEST_EXTRA_SEC)
+        var lo = seed.start
+        var hi = seed.end
+        var grew = true
+        while (grew) {
+            grew = false
+            if (hi + step <= win.end && hi + step - lo <= cap && optimal(hi)) { hi += step; grew = true }
+            if (lo - step >= win.start && hi - (lo - step) <= cap && optimal(lo - step)) { lo -= step; grew = true }
+        }
+        if (lo == seed.start && hi == seed.end) return seed
+        val grown = build(lo, hi, byT, pens, win.night) ?: return seed
+        return if (fine.isNotEmpty()) refined(grown, fine, lo, hi) else grown
     }
 
     /** Run ② (a double) needs to start at 16:00 or later: the best part of a window after 16:00 that still has room for it. */
@@ -1054,8 +1134,10 @@ object Weather {
         val short: String,
         /** "Day feels 2–6 °C · you're in the warmest 35%". */
         val temp: String? = null,
+        /** "Rainbow: cloudy · others: clearing — trusting Rainbow" when Rainbow disagrees with the other sources inside the windows. */
+        val note: String? = null,
     ) {
-        fun lines(): List<String> = listOfNotNull(shape, temp, pick, rainbow, agree, listOfNotNull(suggestion, swap).joinToString(" "), warnings.takeIf { it.isNotEmpty() }?.joinToString("\n")).filter { it.isNotBlank() }
+        fun lines(): List<String> = listOfNotNull(shape, temp, pick, rainbow, agree, note, listOfNotNull(suggestion, swap).joinToString(" "), warnings.takeIf { it.isNotEmpty() }?.joinToString("\n")).filter { it.isNotBlank() }
     }
 
     data class DayPlan(
@@ -1135,7 +1217,7 @@ object Weather {
             window = usable.firstOrNull() ?: wins.maxByOrNull { it.end - it.start }
             passed = nowSec != null && usable.isEmpty()
             risky = false
-            bestW = bestStretch(wins, run, dh, s, date.monthValue)
+            bestW = bestStretch(wins, run, dh, s, date.monthValue, fh)
         }
         if (second != null && run.planned && !run.done && second.planned && !second.done) {
             secondW = placeSecond(wins, second, dh, date, s, nowSec, zone)
@@ -1173,6 +1255,24 @@ object Weather {
         cloud < 30 -> "clear"
         cloud < 60 -> "partly cloudy"
         else -> "cloudy"
+    }
+
+    /**
+     * One line when Rainbow's cloud call (cloudy from 60 %) or wet call (over 0.25 mm/h) is the opposite of what most of the other
+     * sources say, for hours inside [wins]. The combined forecast leans on Rainbow, so this says so. Rain wins a tie. Null when they agree.
+     */
+    fun rainbowNote(dh: List<Combined>, wins: List<Window>): String? {
+        if (wins.isEmpty()) return null
+        val inside = dh.filter { h -> wins.any { h.t < it.end && h.t + 3600 > it.start } }
+        val cloud = inside.filter { it.rbCloudy != null && it.othersCloudy != null && it.rbCloudy != it.othersCloudy }
+        val wet = inside.filter { it.rbWet != null && it.othersWet != null && it.rbWet != it.othersWet }
+        if (cloud.isEmpty() && wet.isEmpty()) return null
+        if (wet.isNotEmpty() && wet.size >= cloud.size) {
+            val rbRain = wet.count { it.rbWet == true } * 2 >= wet.size
+            return if (rbRain) "Rainbow: rain · others: dry — trusting Rainbow" else "Rainbow: dry · others: rain — trusting Rainbow"
+        }
+        val rbCloudy = cloud.count { it.rbCloudy == true } * 2 >= cloud.size
+        return if (rbCloudy) "Rainbow: cloudy · others: clearing — trusting Rainbow" else "Rainbow: clearing · others: cloudy — trusting Rainbow"
     }
 
     private fun dissentText(dissent: List<Pair<String, String>>): String? {
@@ -1248,7 +1348,7 @@ object Weather {
             tempWord(mid, s, month) + ", " + skyWord(best.avgCloud) +
                 " · ${(best.minTemp ?: 0.0).roundToInt()}–${(best.maxTemp ?: 0.0).roundToInt()}°" + if (best.wet) " · rain" else " · dry"
         }
-        return Summary(shape, pick, rainbow, agree, suggestion, null, best?.warnings.orEmpty() + extra, short, temp)
+        return Summary(shape, pick, rainbow, agree, suggestion, null, best?.warnings.orEmpty() + extra, short, temp, rainbowNote(dh, wins))
     }
 
     // ================================================================ split runs
@@ -1263,6 +1363,10 @@ object Weather {
 
     /** A window that needs no compromise: dry, safe and within the UV limit. */
     fun acceptable(w: Window, s: RwSettings) = !w.dangerous && !w.wet && !w.frozen && w.maxUv <= s.uvLimit
+
+    /** Every hour the window touches meets the UV rule (UV ≤ 0.6, or up to 2 under 75 %+ cloud). */
+    private fun uvClear(w: Window, byT: Map<Long, Combined>, s: RwSettings): Boolean =
+        byT.values.none { it.t < w.end && it.t + 3600 > w.start && !uvOk(it.uv, it.cloud, s) }
 
     /**
      * When no single window of the run's length (plus buffer) is acceptable (wet over 0.5 mm/h, dangerous or UV over
@@ -1285,7 +1389,8 @@ object Weather {
             }
             return out
         }
-        if (gen(run.minutes + s.bufferMin).any { acceptable(it, s) }) return null
+        fun good(w: Window) = acceptable(w, s) && uvClear(w, byT, s)
+        if (gen(run.minutes + s.bufferMin).any { good(it) }) return null
         fun r5(v: Double) = (Math.round(v / 5.0) * 5).toInt()
         val m = run.minutes
         val splits = listOf(0.5, 0.6, 0.4).map { f -> r5(m * f).coerceIn(SPLIT_MIN, m - SPLIT_MIN) }.distinct()
@@ -1293,8 +1398,8 @@ object Weather {
         var bestScore = Double.MAX_VALUE
         for (a in splits) {
             val b = m - a
-            val wa = gen(a + SPLIT_BUFFER).filter { acceptable(it, s) }
-            val wb = gen(b + SPLIT_BUFFER).filter { acceptable(it, s) }
+            val wa = gen(a + SPLIT_BUFFER).filter { good(it) }
+            val wb = gen(b + SPLIT_BUFFER).filter { good(it) }
             for (x in wa) for (y in wb) {
                 val xFirst = x.end + 3600 <= y.start
                 val yFirst = y.end + 3600 <= x.start

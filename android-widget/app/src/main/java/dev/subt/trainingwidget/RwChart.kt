@@ -64,6 +64,8 @@ object RwChart {
         val typeLabel: String,
         /** 15-minute slots by slot start (today and tomorrow, when that forecast is there). */
         val fine: Map<Long, Weather.Combined> = emptyMap(),
+        val uvFree: Double = 0.6,
+        val uvCloud: Double = 75.0,
     ) {
         fun fh(t: Long): Float = (t - day0) / 3600f
     }
@@ -88,11 +90,11 @@ object RwChart {
             p.secondWindow?.let { sw -> runs += Run(fh(sw.start), fh(min(sw.end, sw.start + p.second.minutes * 60L)), "②", BLUE) }
         }
         val rb = if (!p.same) p.rainbow?.let { Seg(fh(it.start), fh(it.end), false) } else null
-        val lim = if (p.run.type == Weather.RunType.LONG) s.uvLimit - 1.0 else s.uvLimit
+        val lim = s.uvLimit
         return Spec(
             p, zone, day0, start, end, hours, rise, set, wins, best, runs, rb,
             extra = p.run.type == Weather.RunType.SUBT || p.run.type == Weather.RunType.TT, uvLim = lim, nowSec = nowSec, steps = steps,
-            typeLabel = p.run.type.label, fine = p.fine.associateBy { it.t },
+            typeLabel = p.run.type.label, fine = p.fine.associateBy { it.t }, uvFree = s.uvFree, uvCloud = s.uvCloud,
         )
     }
 
@@ -134,12 +136,15 @@ object RwChart {
     private fun textPaint(color: Int, size: Float, bold: Boolean = false, align: Paint.Align = Paint.Align.CENTER) =
         Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; textSize = size; textAlign = align; if (bold) typeface = Typeface.DEFAULT_BOLD }
 
-    fun uvColor(u: Double, lim: Double): Int = when {
-        u <= lim -> GOOD
-        u <= lim + 1 -> AMBER
-        u <= 6 -> ORANGE
-        else -> RED
+    /** Green: UV ≤ [free], or up to [max] under at least [cloudMin] % cloud. Yellow: in between without that cloud. Red: above [max]. */
+    fun uvColor(u: Double, cloud: Double?, free: Double, max: Double, cloudMin: Double): Int = when {
+        u <= free + 1e-9 -> GOOD
+        u > max + 1e-9 -> RED
+        (cloud ?: 0.0) >= cloudMin - 1e-9 -> GOOD
+        else -> AMBER
     }
+
+    fun uvColor(u: Double, cloud: Double?, s: RwSettings): Int = uvColor(u, cloud, s.uvFree, s.uvLimit, s.uvCloud)
 
     private fun uvText(u: Double): String = if (u < 1) String.format(java.util.Locale.US, "%.1f", u).removePrefix("0") else u.roundToInt().toString()
 
@@ -282,7 +287,6 @@ object RwChart {
         val start = g.start.toInt()
         val x0 = g.x0; val x1 = g.x1; val w = g.w
         val top = TOP; val base = BASE; val ch = base - top
-        val lim = spec.uvLim
         fun X(h: Float) = g.x(h)
         val tr = tempRange(spec)
 
@@ -386,7 +390,7 @@ object RwChart {
             val hh = start + i
             if (h != null && hh % 2 == 0 && X(hh + 0.5f) > x0 + 22f) {
                 val u = h.uv
-                val dotP = fill(uvColor(u, lim)).apply { alpha = if (u < 0.5) (255 * 0.35f).toInt() else 255 }
+                val dotP = fill(uvColor(u, h.cloud, spec.uvFree, spec.uvLim, spec.uvCloud)).apply { alpha = if (u < 0.5) (255 * 0.35f).toInt() else 255 }
                 c.drawCircle(X(hh + 0.5f), y, 9f, dotP)
                 c.drawText(uvText(u), X(hh + 0.5f), y + 3.5f, textPaint(0xFF10141B.toInt(), 9.5f, bold = true))
             }
@@ -513,7 +517,7 @@ object RwChart {
         var cx = x
         fun part(t: String, color: Int) { tp.color = color; c.drawText(t, cx, y, tp); cx += tp.measureText(t) }
         part("☁️ ${h?.cloud?.roundToInt() ?: "–"}% · ", 0xFFF2F4F8.toInt())
-        part("UV ${h?.let { RwText.num1(it.uv) } ?: "–"}", if (h != null) uvColor(h.uv, spec.uvLim) else DIM)
+        part("UV ${h?.let { RwText.num1(it.uv) } ?: "–"}", if (h != null) uvColor(h.uv, h.cloud, spec.uvFree, spec.uvLim, spec.uvCloud) else DIM)
         part(" · 🌡 ${h?.temp?.roundToInt() ?: "–"}° (feels ${(h?.feels ?: h?.temp)?.roundToInt() ?: "–"}°)", 0xFFF2F4F8.toInt())
         tp.color = 0xFFF2F4F8.toInt()
         y += lineH

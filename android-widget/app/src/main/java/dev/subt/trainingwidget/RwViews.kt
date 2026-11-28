@@ -39,7 +39,7 @@ object RwViews {
         (h.aqi ?: 0.0) > 100.0 -> "😷" to false
         h.rainMm > 0.25 -> "💧" to (h.rainMm > 0.5)
         type == Weather.RunType.TT && (h.gust ?: 0.0) > 30.0 -> "💨" to false
-        h.uv > s.uvLimit -> "☀" to false
+        !Weather.uvOk(h.uv, h.cloud, s) -> "☀" to false
         cls.band == Weather.Band.HOT -> "🔥" to false
         cls.band == Weather.Band.COLD -> (if (cls.eff < 0.0) "❄" else "🧤") to false
         cls.cloudy -> "☁" to false

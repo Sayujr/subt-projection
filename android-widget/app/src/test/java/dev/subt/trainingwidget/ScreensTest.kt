@@ -520,6 +520,65 @@ class ScreensTest {
         File(outDir, "errors.txt").writeText(errors.toString().ifEmpty { "No rendering errors.\n" })
     }
 
+    private fun rwTexts(v: View, out: MutableList<String> = mutableListOf()): MutableList<String> {
+        if (v is TextView) out += v.text.toString()
+        if (v is ViewGroup) for (i in 0 until v.childCount) rwTexts(v.getChildAt(i), out)
+        return out
+    }
+
+    @Test fun todayCardHasRightNowButtons() {
+        WxFixture.seed(ctx)
+        val p = RunWindows.plans(ctx, Fixture.today, 1).first()
+        val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+        val col = android.widget.LinearLayout(act).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        AppScreens(act, 392).runWindowCard(col)
+        val t = rwTexts(col)
+        // after 20:00 (or with today's run done) the card leads with tomorrow and today's buttons are not there
+        val leadsToday = java.time.LocalTime.now().hour < 20 && !p.run.done && !p.noData
+        for (b in listOf("☁ Cloudy", "☀ Sunny", "💧 Raining")) assertEquals("$b on the Today card: $t", leadsToday, t.contains(b))
+        assertEquals(leadsToday, t.contains("Right now:"))
+    }
+
+    @Test fun dayPlanHasABigDayTitleAndHourHeading() {
+        WxFixture.seed(ctx)
+        val loc = java.util.Locale.getDefault()
+        val fmt = { pattern: String, day: java.time.LocalDate -> day.format(java.time.format.DateTimeFormatter.ofPattern(pattern, loc)) }
+        val cases = listOf(
+            0L to "Today",
+            1L to "Tomorrow · " + fmt("EEE d", Fixture.today.plusDays(1)),
+            3L to fmt("EEE d MMM", Fixture.today.plusDays(3)),
+        )
+        for ((offset, title) in cases) {
+            val i = Intent(ctx, RunWindowActivity::class.java).putExtra(RunWindowActivity.EXTRA_DATE, Fixture.today.plusDays(offset).toString())
+            val ctl = Robolectric.buildActivity(RunWindowActivity::class.java, i).setup()
+            settle()
+            val t = rwTexts(ctl.get().window.decorView)
+            assertTrue("'$title' is the page title: $t", t.contains(title))
+            assertTrue("the hour-by-hour heading carries the day: $t", t.any { it.startsWith("HOUR BY HOUR · " + title.uppercase(loc)) })
+            ctl.pause().stop().destroy()
+        }
+    }
+
+    @Test fun hourListRendersAsATimeline() {
+        WxFixture.seed(ctx)
+        val p = RunWindows.plan(ctx, Fixture.today)!!
+        val act = Robolectric.buildActivity(MainActivity::class.java, Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "HOME")).setup().get()
+        val zone = java.time.ZoneId.systemDefault()
+        val noon = Weather.atMinutes(Fixture.today, 12 * 60 + 10, zone)
+        val v = RwHourList.build(act, p, RwStore.load(ctx), zone, noon)
+        val w = (392 * ctx.resources.displayMetrics.density).toInt()
+        v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        assertTrue("it has height", v.measuredHeight > 0)
+        val t = rwTexts(v)
+        assertTrue("sunrise pill: $t", t.any { it.contains("Sunrise") })
+        assertTrue("sunset pill: $t", t.any { it.contains("Sunset") })
+        assertTrue("now marker: $t", t.any { it.startsWith("● Now 12:10") })
+        assertTrue("an hour row with its time", t.contains("12:00"))
+        val words = listOf("Cloudy", "Mostly cloudy", "Partly cloudy", "Clear", "Rain", "Drizzle")
+        assertTrue("condition pills: $t", t.any { x -> words.any { x.endsWith(it) } })
+        assertTrue("UV chips: $t", t.any { it.startsWith("● UV ") })
+    }
+
     // ---- Power bands and the zones calendar (real assertions, plus screenshots)
     private fun texts(v: View, out: MutableList<String> = mutableListOf()): MutableList<String> {
         if (v is TextView) out += v.text.toString()

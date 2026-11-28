@@ -103,11 +103,11 @@ class RunWindowActivity : Activity() {
         return c
     }
 
-    private fun header(title: String, sub: String) {
+    private fun header(title: String, sub: String, size: Float = 19f) {
         val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(10)) }
         r.addView(TextView(this).apply { text = "‹"; textSize = 28f; setTextColor(TEXT); setPadding(dp(4), 0, dp(14), 0); setOnClickListener { finish() } })
         val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        t.addView(TextView(this).apply { text = title; textSize = 19f; setTextColor(TEXT); typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL); maxLines = 2 })
+        t.addView(TextView(this).apply { text = title; textSize = size; setTextColor(TEXT); typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL); maxLines = 2 })
         if (sub.isNotEmpty()) t.addView(TextView(this).apply { text = sub; textSize = 13f; setTextColor(DIM) })
         r.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(r)
@@ -217,7 +217,7 @@ class RunWindowActivity : Activity() {
         col.removeAllViews()
         val dayName = date.format(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.getDefault()))
         val s = RwStore.load(this)
-        header("Run window", dayName)
+        header(RwText.dayTitle(date, LocalDate.now()), "Run window · $dayName", size = 30f)
         dayChips()
         if (s.lat == null || s.lon == null) {
             val c = card()
@@ -258,7 +258,7 @@ class RunWindowActivity : Activity() {
             RwUi.twoRunLines(this, c, plan, zone)
             RwText.bestLine(plan.best, plan.run, plan.hours, zone)?.let { text(c, it, 14f, GOOD, top = 6) }
             val sm = plan.summary
-            val lines = listOfNotNull(sm.shape, sm.temp, sm.pick.takeIf { plan.windows.isEmpty() }, sm.rainbow, sm.agree,
+            val lines = listOfNotNull(sm.shape, sm.temp, sm.pick.takeIf { plan.windows.isEmpty() }, sm.rainbow, sm.agree, sm.note,
                 listOfNotNull(sm.suggestion, sm.swap).joinToString(" "), sm.warnings.takeIf { it.isNotEmpty() }?.joinToString("\n")).filter { it.isNotBlank() }
             for ((i, l) in lines.withIndex()) text(c, l, 14f, if (l.startsWith("⛔") || l.startsWith("⚠")) WARN else TEXT, top = if (i == 0) 10 else 8)
             if (plan.bikeSwap != null) RwUi.bikeBox(this, c, plan) { render() }
@@ -314,8 +314,8 @@ class RunWindowActivity : Activity() {
         run {
             val c = card()
             hourCard = c
-            label(c, "Hour by hour · " + date.format(DateTimeFormatter.ofPattern("EEE d", Locale.getDefault())))
-            c.addView(RwHourList.build(this, plan, s, zone))
+            label(c, "Hour by hour · " + RwText.dayTitle(date, LocalDate.now()))
+            c.addView(RwHourList.build(this, plan, s, zone, nowSec))
         }
         val w = plan.window
         // 4. Sources
@@ -323,7 +323,7 @@ class RunWindowActivity : Activity() {
             val c = card()
             val data = RunWindows.data(this)
             val fetched = data?.fetched?.entries?.joinToString("  ·  ") { "${it.key} ${Weather.hhmm(it.value / 1000, zone)}" }
-            BandViews.heading(this, c, "WHAT EACH SOURCE THINKS", "Yellow = disagrees with the median on cloud or rain somewhere in the window. Rain is mm per hour · chance. Right = how often that source's cloudy-or-not call matched what happened (last 30 days; needs a few of your outside-now taps or Rainbow checks). NWS gives cloud only. UV shows each source's own value; the plan uses the highest." + (if (fetched.isNullOrEmpty()) "" else "\nFetched: $fetched"))
+            BandViews.heading(this, c, "WHAT EACH SOURCE THINKS", "Yellow = disagrees with the median on cloud or rain somewhere in the window. Rain is mm per hour · chance. Right = how often that source's cloudy-or-not call matched what happened (last 30 days; needs a few of your outside-now taps or Rainbow checks). NWS gives cloud only. UV shows each source's own value; the plan uses Rainbow's when it has the hour, else the median of the others." + (if (fetched.isNullOrEmpty()) "" else "\nFetched: $fetched"))
             if (w == null || data == null) text(c, "No window to compare.", 13f, DIM, top = 4)
             else {
                 val wt = listOf(1.2f, 0.7f, 0.9f, 0.7f, 1.4f, 0.9f)

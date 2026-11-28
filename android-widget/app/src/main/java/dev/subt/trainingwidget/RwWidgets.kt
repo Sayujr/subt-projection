@@ -52,7 +52,7 @@ object RwWidgets {
         val head = RwText.headline(p, zone, if (p.date == LocalDate.now()) now else null)
         return when {
             p.windows.isNotEmpty() && head.none -> "☁ Windows passed (${RwText.windowsList(p.windows, zone)})"
-            p.windows.isNotEmpty() -> "☁ " + head.text + RwText.bestLine(p.best, p.run, p.hours, zone)?.let { " · " + it.removePrefix("Best for ").substringBefore(" · ").let { b -> "best $b" } }.orEmpty()
+            p.windows.isNotEmpty() -> "☁ " + head.text + RwText.bestTag(p.best, p.run, p.hours, zone)?.let { " · $it" }.orEmpty()
             sp != null -> "☁ " + Weather.splitLabel(sp, zone)
             w == null -> "☁ No window fits today"
             p.passed -> "☁ Best was ${Weather.range(w, zone)}"

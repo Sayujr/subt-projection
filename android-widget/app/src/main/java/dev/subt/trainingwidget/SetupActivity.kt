@@ -738,15 +738,15 @@ class SetupActivity : Activity() {
 
         // ---- rules
         out += head("Your rules")
-        fun stepper(label: String, help: String, get: () -> Double, set: (Double) -> Unit, min: Double, max: Double, step: Double, unit: String): View {
+        fun stepper(label: String, help: String, get: () -> Double, set: (Double) -> Unit, min: Double, max: Double, step: Double, unit: String, decimals: Int = 0): View {
             val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(0, (10 * d).toInt(), 0, 0) }
             val row = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
             val value = TextView(this).apply { setTextColor(0xFFF2F4F8.toInt()); textSize = 16f; gravity = android.view.Gravity.CENTER; minWidth = (72 * d).toInt() }
-            fun refresh() { value.text = String.format(java.util.Locale.US, "%.0f", get()) + unit }
+            fun refresh() { value.text = String.format(java.util.Locale.US, "%.${decimals}f", get()) + unit }
             fun btn(t: String, delta: Double) = TextView(this).apply {
                 text = t; textSize = 18f; setTextColor(0xFF4EA1FF.toInt()); gravity = android.view.Gravity.CENTER
                 setBackgroundResource(R.drawable.chip_off)
-                setOnClickListener { set((get() + delta).coerceIn(min, max)); refresh() }
+                setOnClickListener { set((Math.round((get() + delta) * 100.0) / 100.0).coerceIn(min, max)); refresh() }
             }
             row.addView(TextView(this).apply { text = label; setTextColor(0xFFF2F4F8.toInt()); textSize = 14.5f },
                 android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -759,8 +759,12 @@ class SetupActivity : Activity() {
             return box
         }
         val c = this
-        out += stepper("UV limit", "Windows above this UV are penalised (Long runs use this minus 1; TT may break it, then a cap).",
-            { RwStore.load(c).uvLimit }, { RwStore.putFloat(c, RwStore.K_UV, it) }, 1.0, 11.0, 1.0, "")
+        out += stepper("UV without cloud", "UV up to this is fine under any sky.",
+            { RwStore.load(c).uvFree }, { RwStore.putFloat(c, RwStore.K_UV_FREE, it) }, 0.0, 3.0, 0.1, "", 1)
+        out += stepper("Cloud needed above that", "Between that UV and the max below, an hour only counts as runnable with at least this much cloud.",
+            { RwStore.load(c).uvCloud }, { RwStore.putFloat(c, RwStore.K_UV_CLOUD, it) }, 0.0, 100.0, 5.0, "%")
+        out += stepper("Max UV (even under cloud)", "Above this UV an hour is never runnable, whatever the cloud.",
+            { RwStore.load(c).uvLimit }, { RwStore.putFloat(c, RwStore.K_UV, it) }, 0.5, 11.0, 0.5, "", 1)
         out += stepper("Hot (Nov–Mar)", "From this temperature a winter hour counts as hot.",
             { RwStore.load(c).hotWinter }, { RwStore.putFloat(c, RwStore.K_HOT_W, it) }, 8.0, 30.0, 1.0, " °C")
         out += stepper("Hot (Apr–Oct)", "From this temperature a summer hour counts as hot.",

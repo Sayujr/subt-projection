@@ -46,7 +46,7 @@ object RwUi {
     private const val BAD = 0xFFFF9A9A.toInt()
 
     /** The sky chart's key (the ⓘ on the Today card and the day plan). */
-    const val CHART_KEY = "Clouds: more and thicker = cloudier (0–100%). Blue streaks = rain. White line = temperature. Dots = UV (green within your limit). Stars = clear night."
+    const val CHART_KEY = "Clouds: more and thicker = cloudier (0–100%). Blue streaks = rain. White line = temperature. Dots = UV (green: low, or under enough cloud for your rule; yellow: too sunny for it; red: over your max). Stars = clear night."
 
     /**
      * The graphic chart for [p] (scrubbable). Today's chart gets the live nowcast for 10-minute steps. Without a forecast for the
