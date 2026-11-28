@@ -26,12 +26,15 @@ object RwStore {
     const val K_W_FROM = "rw_w_from"
     const val K_W_TO = "rw_w_to"
 
+    /** Floats come back with noise (0.6 → 0.6000000238); settings have two decimals at most. */
+    private fun r2(v: Double) = Math.round(v * 100.0) / 100.0
+
     fun load(ctx: Context): RwSettings {
         val p = sp(ctx)
         val d = RwSettings()
         return RwSettings(
-            uvLimit = p.getFloat(K_UV, d.uvLimit.toFloat()).toDouble(),
-            uvFree = p.getFloat(K_UV_FREE, d.uvFree.toFloat()).toDouble(),
+            uvLimit = r2(p.getFloat(K_UV, d.uvLimit.toFloat()).toDouble()),
+            uvFree = r2(p.getFloat(K_UV_FREE, d.uvFree.toFloat()).toDouble()),
             uvCloud = p.getFloat(K_UV_CLOUD, d.uvCloud.toFloat()).toDouble(),
             hotWinter = p.getFloat(K_HOT_W, d.hotWinter.toFloat()).toDouble(),
             hotSummer = p.getFloat(K_HOT_S, d.hotSummer.toFloat()).toDouble(),

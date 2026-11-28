@@ -1212,9 +1212,9 @@ class RulesTest {
         val r7 = rows.first { it.hour.t == rwT(d, 7) }
         assertTrue("window but not best", r7.inWindow && !r7.best && r7.bar == 0xFF2FA36B.toInt())
         assertTrue(rows.first { it.hour.t == rwT(d, 3) || it.hour.t == rwT(d, 4) || it.hour.t == rwT(d, 5) }.night)
-        val seps = RwHourList.separators(p, rwT(d, 6), UTC).map { it.first }
+        val seps = RwHourList.separators(p, rwT(d, 7), UTC).map { it.first }
         assertTrue(seps.toString(), seps.contains("🌅 06:59 Sunrise"))
-        assertTrue(RwHourList.separators(p, rwT(d, 16), UTC).any { it.first == "🌇 16:37 Sunset" })
+        assertTrue(RwHourList.separators(p, rwT(d, 17), UTC).any { it.first == "🌇 16:37 Sunset" })
         assertEquals("● Now 08:20", RwHourList.nowMarker(rwT(d, 8), rwT(d, 8, 20), UTC))
         assertNull(RwHourList.nowMarker(rwT(d, 8), rwT(d, 9, 20), UTC)); assertNull(RwHourList.nowMarker(rwT(d, 8), null, UTC))
     }
